@@ -1208,3 +1208,70 @@ properties that benefit from integrated shrinking/state machines. Test selector
 invariants, not identical random choices. Save minimized failures as regression
 fixtures. Agreement with cardano-c detects binding errors but is not independent
 proof of native correctness; use external vectors/oracles where appropriate.
+
+### P04 fourth slice: password derivation and EMIP3 storage
+
+This slice adds `Cometa.Crypto.Pbkdf2.deriveBytes`, explicitly exporting derived
+secret bytes from raw password/salt bytes, iteration count and output byte count,
+and `Cometa.Crypto.Emip3.encrypt` / `decryptBytes` for password-encrypted storage.
+Software key handlers, derivation-path records and transaction/CIP-8 signing
+remain later P04 work. No password normalization or application cost default is
+invented. EMIP3 retains its native fixed 19162-iteration format and empty AAD.
+
+PBKDF2 has a separately audited concrete pure boundary, documented in
+`PBKDF2_PURITY.md`. Its native call graph reaches only caller buffers, stack
+HMAC/SHA512 state and constant tables; no native allocation configuration, RNG,
+logger, callback or mutable error slot. Haskell heap scratch is bracketed and
+wiped before release. The monomorphic boundary forces owned bytes and complete
+error payloads, with NOINLINE and local optimizer safeguards. This exception does
+not generalize the BIP39 helper or authorize pure EMIP3 operations.
+
+EMIP3 remains in IO for random salt/nonce generation and native allocation.
+Public sizes are validated before FFI, including the ChaCha20 counter limit that
+would otherwise reach sodium_misuse. Inputs are borrowed without mutation; native
+header claims that encryption erases caller inputs are not repeated. Returned
+native plaintext is copied only on authentication success and wiped before
+unref on success, partial failure, exceptions and cancellation after safe foreign
+unwind. The native authentication-failure path authenticates before decrypting
+and zeros its output before internal release (vendored libsodium
+`crypto_aead/chacha20poly1305/aead_chacha20poly1305.c`). Native PBKDF failure is
+unreachable for validated internal fixed salt/key arguments; size/allocation
+failures precede plaintext output. Explicit host secret bytes retain ordinary
+application-managed lifetime and may be logged/copied by callers; no erasure or
+controlled secret-handle lifetime is claimed for them.
+
+Native audit exposed uninitialized process-global RNG/runtime state and
+malloc(0)-dependent empty decryption. The pinned dependency fix initializes
+EMIP3 and the other direct randombytes caller, enables the vendored POSIX
+initialization lock on native Unix, validates null/overflow/counter limits, and
+allocates one byte of capacity for authenticated empty plaintext. PBKDF2 now
+rejects zero iterations and uses a nonwrapping uint32 iteration loop. Full uint32
+iterations are accepted by the binding; the upper encoding is tested without
+performing billions of HMACs. The exact native revision is `7811fe94dad90f30478ed4b61d96677f188abaa8`.
+Cabal propagates pthread when directly linking the native static archive on the
+existing Linux/macOS targets; nonthreaded example and source-distribution
+consumer links are verified.
+
+Tests use a pinned native PBKDF known answer and EMIP decrypt vector plus an
+independent Python hashlib / cryptography binary multi-block derivation and
+EMIP3 envelope. Recipes, source paths and licenses are recorded in
+`test/Fixtures/PASSWORD_CRYPTO.md`. Tests cover parameter bounds, NUL bytes,
+empty passwords, prefix properties across SHA512 blocks, all envelope regions,
+wrong passwords, roundtrips, copied plaintext GC survival, observed native wipe
+through a retained test-only alias, partial failure, copy exceptions and
+cancellation. Shared PBKDF evaluation and cancellation/reuse exercise the pure
+boundary. Cancellation is a scheduling smoke test, not evidence that an
+exception arrived at a particular native instruction. CI adds an optimized
+PBKDF2 group with two capabilities and a compiled example that prints only a
+recovered byte count. No compiler/platform matrix beyond existing CI is claimed.
+
+Validation: all 132 tests pass against the updated static native archive with
+warnings as errors, including 16 password-crypto scenarios and 100 new Hedgehog
+prefix cases. Optimized PBKDF2 and BIP39 evaluation/concurrency groups pass
+with two capabilities. Full Valgrind passes all 132 tests in 102.61 seconds with zero
+errors and zero definite, indirect or possible losses, without suppressions.
+The full build, six examples, exactly matching compiled password-guide example,
+Haddock (100% new public module coverage), Cabal check, source-distribution
+consumer build, strict Sphinx HTML/linkcheck, ClangFormat 18, Ormolu 0.8.0.2,
+HLint 3.8 and native inventory checks pass locally. Hosted CI results remain to
+be reviewed; no new compiler/platform execution coverage is claimed.

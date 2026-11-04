@@ -6,8 +6,9 @@ wallet secrets.
 
 ## Imported native vectors
 
-Pinned cardano-c revision: `8dc0c55f4132fcaa2e7961b6cfbfea96a6d93b5d`, matching
-`native/cardano-c.ref`. Values in `Fixtures.Bip32` were transcribed from:
+Fixture source revision: `8dc0c55f4132fcaa2e7961b6cfbfea96a6d93b5d`.
+The current build revision is recorded separately in `native/cardano-c.ref`.
+Values in `Fixtures.Bip32` were transcribed from:
 
 - `lib/tests/crypto/bip32_private_key.cpp`: constant `BIP32_PRIVATE_KEY_HEX`;
   `deriveCorrectHardenedKey` for `[1852',1815',0']`;

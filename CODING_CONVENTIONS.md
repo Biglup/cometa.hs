@@ -96,10 +96,11 @@ unchecked indexing, or incomplete patterns. Genuinely necessary unsafe operation
 belong in an explicitly separated internal/unsafe surface with preconditions and
 safe alternatives. Keep validation, composition, and materialized-value inspection
 pure where practical. Native calls remain in `IO` until a specific purity review;
-`unsafePerformIO` is not a shortcut. The sole reviewed exception is the concrete,
-private BIP39 boundary documented in [the BIP39 purity audit](docs/development/BIP39_PURITY.md).
-It applies only to the pinned deterministic owner-free conversions and their
-marshaling/cleanup/error paths. Re-audit source and native build changes; never
+`unsafePerformIO` is not a shortcut. The reviewed exceptions are the concrete,
+private boundaries documented in [the BIP39 purity audit](docs/development/BIP39_PURITY.md)
+and [the PBKDF2 purity audit](docs/development/PBKDF2_PURITY.md).
+They apply only to the separately audited pinned deterministic owner-free paths
+and their marshaling/cleanup/error handling. Re-audit source and native build changes; never
 generalize the boundary to an arbitrary IO runner.
 
 Use strict accumulators and snapshots where needed to bound retention or keep

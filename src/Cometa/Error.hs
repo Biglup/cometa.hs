@@ -101,6 +101,24 @@ data Error
     UnknownBip39Word
   | -- | The mnemonic checksum does not agree with its entropy.
     InvalidBip39Checksum
+  | -- | PBKDF2 requires a nonempty salt.
+    EmptyPbkdf2Salt
+  | -- | PBKDF2 iteration count is outside 1 through 4294967295 inclusive.
+    InvalidPbkdf2Iterations
+      -- | Requested iteration count.
+      !Integer
+  | -- | PBKDF2 output byte count is outside its documented bounds.
+    InvalidPbkdf2OutputLength
+      -- | Requested output byte count.
+      !Integer
+  | -- | EMIP3 plaintext exceeds its documented size bounds.
+    InvalidEmip3PlaintextLength
+      -- | Actual plaintext byte count.
+      !Int
+  | -- | EMIP3 envelope is outside its documented size bounds.
+    InvalidEmip3EnvelopeLength
+      -- | Actual encoded byte count.
+      !Int
   | -- | Public derivation requires soft indices below 2^31.
     HardenedPublicDerivation
       -- | First hardened encoded index encountered.
