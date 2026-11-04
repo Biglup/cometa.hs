@@ -62,18 +62,13 @@ import qualified Cometa.Crypto.Ed25519.PublicKey as PublicKey
 import Cometa.Crypto.Ed25519.Signature (Signature)
 import qualified Cometa.Crypto.Ed25519.Signature as Signature
 import Cometa.Error (Error (..))
+import Cometa.Internal.Ed25519SigningKey (SigningKey (..))
 import Cometa.Internal.Error (fromNativeFailure)
 import qualified Cometa.Internal.Hex as Hex
 import qualified Cometa.Internal.SigningKey as Internal
 import Control.Monad (join)
 import Data.ByteString (ByteString)
 import Data.Text (Text)
-
--- TYPES ----------------------------------------------------------------------
-
--- | An opaque scoped secret. Escaping a scope does not extend its usable lifetime.
--- Keys of both supported formats use the same operations.
-newtype SigningKey = SigningKey Internal.Key
 
 -- DEFINITIONS ----------------------------------------------------------------
 

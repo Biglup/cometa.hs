@@ -9,6 +9,7 @@
 <div align="center">
 
 ![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)
+[![Documentation](https://readthedocs.org/projects/cometahs/badge/?version=latest)](https://cometahs.readthedocs.io/en/latest/)
 [![Twitter Follow](https://img.shields.io/twitter/follow/BiglupLabs?style=social)](https://x.com/BiglupLabs)
 
 </div>
@@ -16,14 +17,12 @@
 <hr>
 
 Cometa.hs is a Haskell interface to [cardano-c](https://github.com/Biglup/cardano-c).
-It is in initial development and is not yet published on Hackage. The current
-foundation provides Blake2b hashes and native version information; transaction
-building, signing, providers, and the remaining domains are not yet available.
+It is in development and is not yet published on Hackage.
 
 - [Official website](https://cometa.dev/)
 - [Installation and local builds](docs/userguide/installation.md)
-- [User guide](docs/userguide/index.md)
-- [API reference](docs/userguide/api-reference.md)
+- [Documentation](https://cometahs.readthedocs.io/en/latest/)
+- [Haddock API reference](https://cometahs.readthedocs.io/en/latest/api-reference.html) — CI downloads and local builds.
 - [Contributing](docs/userguide/development.md)
 
 ## Hash a message

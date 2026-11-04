@@ -799,6 +799,64 @@ confirm that signing keys expose neither `Show` nor `Eq`. The build, example,
 guide example, public Haddock, strict Sphinx, formatting/lint, and native inventory
 checks pass locally; source-package and hosted CI results are recorded in the PR.
 
+### P04 second slice: BIP32 keys and derivation
+
+This slice adds `Cometa.Crypto.Bip32.PublicKey` and
+`Cometa.Crypto.Bip32.PrivateKey`: immutable 64-byte public keys, scoped 96-byte
+private keys, byte/hex import/export, raw BIP39-entropy root construction,
+ordered soft/hardened derivation, independent clone scopes, and conversion into
+existing scoped extended Ed25519 signing keys. Mnemonic parsing, derivation-path
+records for key handlers, software key handlers, other crypto primitives and
+transaction/CIP-8 signing remain pending; this does not complete P04.
+
+Encoded path indices are `Word32`; the high bit selects hardened derivation.
+`harden` is idempotent OR, matching native semantics. Public paths reject the
+first hardened index before native work. Empty paths satisfy the identity law:
+public value reuse or independent private clone, adapting the native empty-path
+error. Imports validate lengths rather than curve/scalar validity. Root entropy
+accepts only standard BIP39 sizes (16/20/24/28/32), stricter than the native
+arbitrary nonempty input. Passwords are raw bytes without normalization. The KDF
+is Cardano PBKDF2-HMAC-SHA512, 4096 iterations, 96 output bytes then scalar clamp;
+it does not consume a mnemonic sentence or 64-byte BIP39 seed.
+
+Private operations and closure use the reviewed Ed25519 locked-state protocol.
+Application path/input evaluation precedes native use under the source lock;
+callbacks run outside locks. Acquisition output slots start at NULL and cleanup
+handles partial results, masked publication, aliases retained by native code,
+exceptions and cancellation. Ed25519 conversion acquires independently owned
+native secret storage directly into its own scope. Public results survive closure.
+The final native BIP32 deallocator wipes its secret buffer, but allocations are
+ordinary heap storage and the root/derivation stack intermediates are not all
+wiped. No comprehensive erasure is promised for native temporaries or host copies.
+
+The BIP32 public hash includes all 64 bytes, including chain code; credential
+hashing requires the projected 32-byte Ed25519 public key. All 32 BIP32-header
+symbols have explicit mappings/adaptations in `native-api.csv`, including
+serialization, reference-count policy and the stricter entropy-size contract.
+
+Validation: all 102 tests pass with warnings as errors, including 23 new BIP32
+tests and 900 new property cases (4,500 overall). Tests cover fixed native hardened
+and soft derivation vectors, root construction, independent Python PBKDF2/hash
+oracles, soft private/public commutation, path concatenation, input bounds,
+invalid material, projections, scoped clones, derived/signing independence,
+escaped handles, callback failure/exception/cancellation, retained native
+references, concurrent derive/close and GC snapshots. Source revision, exact
+scenarios, attribution and oracle recipe are in `test/Fixtures/BIP32.md`.
+Full Valgrind passed all 102 tests in 52.11 seconds with zero errors, zero lost
+allocations and no suppressions. After refining the public representation into a
+validated Ed25519 key plus chain code and adding its ordering law, the final
+BIP32-only Valgrind run passed all 23 tests in 18.28 seconds with the same clean
+result. The existing 120-second CI limit remains unchanged. Deterministic native
+allocation-failure injection remains unverified.
+
+The complete build, four examples, Haddock (100% public declaration coverage),
+Cabal package check, ClangFormat 18, Ormolu 0.8.0.2, HLint 3.8 and native inventory
+checks pass locally. The BIP32 guide example is also extracted and compiled;
+strict Sphinx HTML/linkcheck and a source-distribution consumer build pass.
+Compiler probes confirm private keys have no `Show`/`Eq`, public constructors are
+hidden and shared Ed25519 signing-key representation module cannot be imported by consumers.
+Hosted CI for this slice remains to be reviewed in its pull request.
+
 ## 19. Haskell engineering standards and reference libraries
 
 Added 2026-11-04 following the request for a professional, idiomatic Haskell

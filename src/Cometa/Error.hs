@@ -34,6 +34,7 @@ where
 
 import Cometa.Error.Code (ErrorCode)
 import Data.Text (Text)
+import Data.Word (Word32)
 
 -- TYPES ----------------------------------------------------------------------
 
@@ -74,6 +75,24 @@ data Error
     InvalidEd25519SignatureLength
       -- | Actual encoded byte length.
       !Int
+  | -- | A BIP32 private-key handle has closed.
+    Bip32PrivateKeyClosed
+  | -- | A BIP32 private key must contain exactly 96 bytes.
+    InvalidBip32PrivateKeyLength
+      -- | Actual byte count.
+      !Int
+  | -- | A BIP32 public key must contain exactly 64 bytes.
+    InvalidBip32PublicKeyLength
+      -- | Actual byte count.
+      !Int
+  | -- | BIP39 entropy must contain 16, 20, 24, 28 or 32 bytes.
+    InvalidBip39EntropyLength
+      -- | Actual byte count.
+      !Int
+  | -- | Public derivation requires soft indices below 2^31.
+    HardenedPublicDerivation
+      -- | First hardened encoded index encountered.
+      !Word32
   | -- | A CBOR integer is outside the supported primitive range, from
     -- @-2^64@ through @2^64 - 1@ inclusive. Tagged bignums are not encoded here.
     InvalidCborInteger

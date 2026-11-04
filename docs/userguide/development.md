@@ -51,9 +51,10 @@ failures separately from a successful HTML build.
 ## Publishing
 
 `.readthedocs.yaml` installs the pinned documentation dependencies and builds the
-guide with warnings treated as errors. A maintainer must import the repository
-into the Read the Docs project `cometahs` and enable the required versions.
-Advertise the hosted link and status badge after its first successful build.
+guide with warnings treated as errors. The
+[`cometahs` Read the Docs project](https://app.readthedocs.org/projects/cometahs/)
+publishes the [user guide](https://cometahs.readthedocs.io/en/latest/) from `main`.
+Check its build status after merging documentation changes.
 
 Generate Haddock in the Haskell build environment, where native headers and
 libraries are available. Publish versioned Haddock with the Hackage package at
