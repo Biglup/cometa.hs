@@ -119,6 +119,10 @@ data Error
     InvalidEmip3EnvelopeLength
       -- | Actual encoded byte count.
       !Int
+  | -- | An unencoded derivation component is outside 0 through 2147483647.
+    InvalidDerivationIndex
+      -- | Exact requested component number.
+      !Integer
   | -- | Public derivation requires soft indices below 2^31.
     HardenedPublicDerivation
       -- | First hardened encoded index encountered.

@@ -83,3 +83,38 @@ Private keys have no `Show` or equality instance. `exportBytes` and `exportHex`
 explicitly create application-managed secret copies. Closing a key cannot erase
 those copies, the entropy or password supplied by the application, or its imported
 key bytes/text. Avoid exporting unless the application needs the secret itself.
+
+## Build wallet paths from validated components
+
+`Cometa.Crypto.DerivationPath` keeps component validation and path construction
+pure. `mkIndex` accepts an `Integer` from 0 through 2147483647 inclusive;
+negative or larger inputs return `InvalidDerivationIndex` with the exact input.
+Supply raw component numbers, without setting a hardening bit.
+
+```haskell
+import qualified Cometa.Crypto.DerivationPath as Path
+
+firstPayment = do
+  zero <- Path.mkIndex 0
+  let account = Path.mkStandardAccountPath zero
+  pure (Path.mkDerivationPath account Path.externalRole zero)
+```
+
+For a root private key, pass `Path.toIndices payment` to `PrivateKey.withDerived`.
+It encodes `1852'/1815'/0'/0/0`: the purpose, coin type and account are hardened;
+the role and key index are soft. `accountIndices` returns just the three hardened
+indices. From that account key, `relativeIndices` returns the soft role and index
+for either private or public derivation. Applying a full root path to an account
+key derives a different descendant; choose the conversion for your starting key.
+
+`DerivationPath` names the standard purpose 1852, multisignature purpose 1854, Cardano
+coin type 1815 and roles for external, internal, staking, DRep, committee cold
+and committee hot keys. `Path.mkStandardAccountPath` selects purpose 1852 and coin type
+1815. For multisignature or custom paths, construct a prefix with
+`Path.mkAccountPath purpose coinType account`. Any valid component can be a
+custom purpose, coin type or role; naming a role does not validate its use by a
+particular wallet or protocol.
+
+The compiled `cometa-derivation-paths` example prints encoded paths without secret
+material. These values have component equality and lexicographic ordering in
+path order. Their `Show` output is diagnostic, not a serialized path format.

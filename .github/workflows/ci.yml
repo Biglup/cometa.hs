@@ -72,6 +72,7 @@ jobs:
           cabal run cometa-bip32
           cabal run cometa-bip39
           cabal run cometa-password-crypto
+          cabal run cometa-derivation-paths
       - name: Exercise optimized pure crypto evaluation and concurrency
         run: |
           cabal test cometa-test --enable-optimization=2 --test-show-details=direct --test-options="-p BIP39 +RTS -N2 -RTS"
@@ -98,12 +99,13 @@ jobs:
           tar -xzf .sdist/cometa-*.tar.gz -C "$consumer_dir"
           cd "$consumer_dir"/cometa-*
           cabal build all --extra-include-dirs="$NATIVE_INCLUDE_DIR" --extra-lib-dirs="$NATIVE_LIBRARY_DIR"
+          cabal test all --test-show-details=direct --extra-include-dirs="$NATIVE_INCLUDE_DIR" --extra-lib-dirs="$NATIVE_LIBRARY_DIR"
       - name: Check native allocations with Valgrind
         if: matrix.os == 'ubuntu-24.04' && matrix.ghc == '9.6.7'
         run: |
           sudo apt-get update
           sudo apt-get install -y valgrind
-          timeout 120s valgrind --fair-sched=yes --leak-check=full --show-leak-kinds=definite,indirect --errors-for-leak-kinds=definite,indirect --error-exitcode=1 "$(cabal list-bin cometa-test)" --num-threads=1 +RTS -N2 -RTS
+          timeout 240s valgrind --fair-sched=yes --leak-check=full --show-leak-kinds=definite,indirect --errors-for-leak-kinds=definite,indirect --error-exitcode=1 "$(cabal list-bin cometa-test)" --num-threads=1 +RTS -N2 -RTS
 
   quality:
     runs-on: ubuntu-24.04

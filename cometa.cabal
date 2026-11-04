@@ -99,6 +99,7 @@ library
     Cometa.Crypto.Bip39
     Cometa.Crypto.Pbkdf2
     Cometa.Crypto.Emip3
+    Cometa.Crypto.DerivationPath
     Cometa.Error
     Cometa.Error.Code
     Cometa.Encoding.Cbor
@@ -172,6 +173,14 @@ executable cometa-password-crypto
     bytestring >=0.11 && <0.13,
     cometa
 
+executable cometa-derivation-paths
+  import: language
+  hs-source-dirs: examples
+  main-is: DerivationPaths.hs
+  build-depends:
+    base >=4.18 && <4.22,
+    cometa
+
 test-suite cometa-test
   import: language
   type: exitcode-stdio-1.0
@@ -180,6 +189,7 @@ test-suite cometa-test
   c-sources:
     cbits/cometa_error_codes_test.c
     test/cbits/transaction_oracle.c
+    test/cbits/derivation_path_oracle.c
   cc-options: -std=c11 -Wall -Wextra
   other-modules:
     ErrorCode
@@ -194,6 +204,7 @@ test-suite cometa-test
     Fixtures.Bip32
     Bip39
     PasswordCrypto
+    DerivationPath
     Fixtures.Bip39
   ghc-options: -threaded
   build-depends:
