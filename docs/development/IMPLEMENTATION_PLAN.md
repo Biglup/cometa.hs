@@ -910,6 +910,98 @@ checks pass locally. The optional `ExceptT` example prints only a public key and
 exits unsuccessfully on error; it uses a public deterministic test phrase.
 Hosted CI remains to be reviewed in the new pull request.
 
+### BIP39 purity spike
+
+Reviewed 2026-11-04 after the P04 mnemonic slice. This is an experiment and a
+recommendation, not a change to the implemented `IO` API. Two isolated prototypes
+were built against the same native pin and public fixtures; neither prototype
+nor an additional cryptographic dependency is part of the package.
+
+| Approach | Evidence | Ongoing cost |
+| --- | --- | --- |
+| Current explicit `IO` | Existing 115-test suite and Valgrind pass | Correct, but deterministic mnemonic conversion remains effectful to callers |
+| Audited pure facade over cardano-c | 26 vectors, exact error parity, GC, concurrent/shared-thunk evaluation and cancellation smoke checks pass | Small private unsafe boundary; native dependency changes require a fresh purity review |
+| Pure Haskell conversion | 26 vectors and 1,280 varied cases agree with native and an independent Python SHA256 oracle | Own the conversion algorithm and dictionary, plus a hash dependency |
+
+The recommended direction is the native-backed pure facade. It preserves one
+BIP39 implementation and dictionary while allowing ordinary `Either` composition.
+This recommendation is specific to the audited BIP39 functions; it does not
+justify hiding arbitrary native calls, key scopes, callbacks or providers in
+pure functions.
+
+Proposed minimal API, preserving current representation and error reporting:
+
+```haskell
+fromEntropy :: ByteString -> Either Error Mnemonic
+fromText :: Text -> Either Error Mnemonic
+fromWords :: [Text] -> Either Error Mnemonic
+exportEntropy :: Mnemonic -> Either Error ByteString
+```
+
+`exportText` and `wordCount` are already pure. Keeping `Either` on entropy export
+preserves unexpected native/contract failures without a partial getter. A total
+`exportEntropy :: Mnemonic -> ByteString` would be a separate representation
+choice: cache validated entropy alongside words, retaining another secret value,
+or store a representation that supports total pure decoding. The native spike
+keeps the words-only representation. The pure Haskell spike stores both words
+and entropy and therefore demonstrates a total accessor with that retention cost.
+
+Native audit at the pinned revision: both conversions use bounded stack scratch,
+static English strings, byte/string operations and the bundled SHA256 routine.
+There is no logger, configured allocator, RNG, callback, reference counting,
+initialization dependency or mutable error state on this path. The selected
+SHA256 implementation uses local state and constant tables and always returns
+success. The wordlist pointer slots are translation-unit-private and never
+modified. Existing wrappers copy outputs before buffers expire and wipe entropy
+scratch even after checksum failure. Expected errors remain values; cancellation
+propagates after safe foreign unwind and cleanup.
+
+The prototype uses concrete `NOINLINE` entry points, `unsafePerformIO`, and local
+`-fno-cse`/`-fno-full-laziness` safeguards. Success and failure results are forced
+before returning; it does not use `unsafeDupablePerformIO`, lazy foreign reads,
+or a public arbitrary-IO runner. See the [base unsafe-IO contract](https://hackage-content.haskell.org/package/base-4.18.3.0/docs/System-IO-Unsafe.html).
+These safeguards alone are not a purity proof: independence from external state
+and absence of observable effects are the essential requirements. Production
+code should force the internal words directly; the temporary facade forces via
+`exportText`, which creates an avoidable transient phrase copy.
+
+The pure Haskell prototype adds 113 lines of conversion logic and a formatted
+28 KB dictionary module (13,116 bytes of canonical wordlist data). All 2,048 words
+match the pinned Trezor English dictionary. Direct additions are `SHA-1.6.4.4`
+and `containers`; the SHA package also uses `array`, `binary`, `base` and
+`bytestring`. The selected SHA source was inspected: its hashing algorithm is
+Haskell arithmetic, with no foreign imports or C sources. A standalone consumer
+builds without cardano-c. This establishes feasibility, not endorsement of that
+hash dependency or a maintenance audit of it. Duplication of protocol logic and
+wordlist provenance remains a cost even with conformance tests.
+
+Experiment coverage is GHC 9.6.7 on Linux x86-64. The native facade was tested
+with `-O2` and `-N4`: 26 fixtures, invalid-input error parity, 100 varied-input GC
+round trips, eight workers running ten fixture rounds each, shared-thunk
+forcing, and cancellation followed by reuse. Cancellation is a smoke test; it
+does not prove an exception arrived during the short C call. The Haskell
+prototype additionally passed 1,280 cases spanning all five entropy sizes,
+validation precedence/whitespace checks, and formatting/lint checks. No timing
+benchmark was performed. Neither approach guarantees comprehensive erasure of
+host secrets or native stack temporaries.
+
+The optimized native spike also ran under Valgrind. Functional checks passed,
+but Valgrind reported 16 bytes in four definitely-lost blocks from GHC's
+`initCapabilityIOManager` startup path. A standalone `main = pure ()` executable
+built with the same GHC/options and `-N4`, without Cometa or cardano-c, reproduced
+the identical allocation stack and counts. This is a runtime baseline finding,
+not evidence of a BIP39 allocation leak; the spike must not be described as a
+zero-error Valgrind run. No suppressions were used.
+
+Before adopting the pure native boundary, implement internal strictness without
+extra phrase copies, carry its optimized/concurrency regression cases into the
+suite, document the narrow exception in the coding conventions, and validate the
+supported compiler/platform builds. Re-audit reachable C code, SHA256 and memory
+clearing paths when native source/build choices change; the tested native object
+used the volatile-store memory-clearing branch, while other platforms select
+other implementations. Keep the existing API until that implementation work is
+explicitly undertaken.
+
 ## 19. Haskell engineering standards and reference libraries
 
 Added 2026-11-04 following the request for a professional, idiomatic Haskell
