@@ -29,6 +29,7 @@ import Control.Exception (AsyncException (ThreadKilled), fromException)
 import Control.Monad (forever, replicateM_)
 import qualified Data.ByteString as ByteString
 import qualified Data.Text as Text
+import qualified Ed25519
 import qualified ErrorCode
 import Hedgehog (Property, evalEither, evalIO, forAll, property, (===))
 import qualified Hedgehog.Gen as Gen
@@ -47,7 +48,7 @@ main :: IO ()
 main =
   defaultMain $
     testGroup "Cometa foundation" $
-      [ErrorCode.tests, Callback.tests, Ownership.tests, Cbor.tests, Transaction.tests] ++ foundationTests
+      [ErrorCode.tests, Callback.tests, Ownership.tests, Cbor.tests, Transaction.tests, Ed25519.tests] ++ foundationTests
 
 foundationTests :: [TestTree]
 foundationTests =
