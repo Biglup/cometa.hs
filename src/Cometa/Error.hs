@@ -58,6 +58,13 @@ data Error
   | -- | Hexadecimal input is empty, has an odd number of digits, or contains
     -- characters other than ASCII hexadecimal digits. Both cases are accepted.
     InvalidHex
+  | -- | A CBOR integer is outside the supported primitive range, from
+    -- @-2^64@ through @2^64 - 1@ inclusive. Tagged bignums are not encoded here.
+    InvalidCborInteger
+      -- | Requested integer value.
+      !Integer
+  | -- | A decoded CBOR text string contains invalid UTF-8.
+    InvalidCborUtf8
   | -- | An operation reported success but did not produce a valid result.
     NativeContractViolation
       -- | Operation name; excludes user input.

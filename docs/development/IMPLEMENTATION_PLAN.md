@@ -681,7 +681,7 @@ in [CI run 41775741679](https://github.com/Biglup/cometa.hs/actions/runs/4177574
 
 ### P02 ownership and callback work
 
-The next slice introduces named native error codes and a private `core` Cabal
+Merged [PR #2](https://github.com/Biglup/cometa.hs/pull/2) introduces named native error codes and a private `core` Cabal
 component. Public Error definitions stay in the main library so its Haddock and
 Hackage archives are self-contained. Private native failures retain exact numeric
 statuses and map to public errors at the domain boundary.
@@ -709,7 +709,7 @@ Same-provider overlap/reentry is rejected; independent providers may overlap.
 Tests cover GC, copied payloads, weak-root release, retained aliases, partial
 allocation failures, synchronous/lazy exceptions, pre-dispatch cancellation,
 cancellation races, delayed masked-handler unwind, and concurrent error isolation.
-The current 25-test suite and full Valgrind run pass locally. The public provider
+The 27-test suite and full Valgrind run passed locally before merge. The public provider
 API is still deferred to P09. Actual borrowed deferred-redeemer registrations and
 deterministic native constructor-allocation failure injection remain unverified;
 this prototype does not close those gates or establish P11 balancing behavior.
@@ -717,6 +717,44 @@ this prototype does not close those gates or establish P11 balancing behavior.
 Update this plan with decisions, PR links, tested revisions, results and remaining
 work as implementation proceeds. Keep release-specific pins in implementation
 metadata and test provenance, not in the general binding architecture guide.
+
+### P03 encoding and transaction-identity prototype
+
+This slice adds `Cometa.Encoding.Cbor`: exact encoded values, hexadecimal
+conversion, primitive integer/byte/text/Boolean codecs, and compositional arrays
+and ordered maps. Integer codecs cover the complete primitive CBOR integer range;
+tagged bignums, floating-point codecs, and the complete streaming reader/writer
+surface remain pending in the native API ledger. Encoding identity is bytewise,
+not semantic equality. Maps preserve duplicate entries and order.
+
+`Cometa.Internal.Transaction` is an internal design prototype, not public
+transaction support. It snapshots the original full/body/witness bytes, body hash,
+and fee into Haskell values. Native decoding alone cannot preserve the full outer
+encoding: serialization emits a definite envelope. Therefore unchanged values
+return the original full bytes, including indefinite and historical layouts.
+
+Fee edits decode and deep-clone native state. The native fee setter does not
+invalidate the body's cached encoding; the adapter explicitly clears that cache.
+It removes outer vkey/bootstrap signatures while retaining script witnesses,
+datums, redeemers, and auxiliary data. An equal-fee update returns the original
+snapshot exactly. A changed fee may normalize body/envelope encoding and requires
+rebalance, reevaluation, and signing before submission; the prototype does none
+of those tasks. Other fields, nested transactions, and the public editing API
+remain P08/P12 work.
+
+Tests use imported historical bytes and constructed noncanonical/frame variants,
+with independent body-hash/signature provenance in
+`test/Fixtures/TRANSACTIONS.md`. The 28 new tests include seven 300-case properties;
+together with the earlier foundation, all 55 tests and 2,400 property cases pass
+locally with warnings as errors. Full Valgrind reports zero errors and zero lost
+allocations without suppressions. The build, CBOR example, Haddock, strict guide,
+and native inventory checks pass. Hosted results are recorded in the PR.
+
+Full P03/P08 coverage is not implied: streaming interfaces, JSON/other encodings,
+tagged bignum/float construction, public complete transaction fields, broader
+mutation laws, and deterministic native allocation-failure injection remain
+pending. Text decoding validates UTF-8 per indefinite chunk, while raw CBOR
+import preserves native-reader-accepted structures without schema/tag validation.
 
 ## 19. Haskell engineering standards and reference libraries
 
