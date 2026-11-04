@@ -83,7 +83,7 @@ data Shared = Shared (MVar ()) (IORef Bool) CallbackControl
 -- Keeping a Haskell handle after its scope ends does not retain native ownership.
 data Provider = Provider (IORef (Maybe (Ptr FFI.NativeProvider))) Shared
 
--- SCOPED HANDLES -------------------------------------------------------------
+-- DEFINITIONS ----------------------------------------------------------------
 
 -- | Acquire one provider reference and close it on every exit. The native
 -- context roots the handler until the last retained reference is released.
@@ -113,8 +113,6 @@ closeProvider (Provider handle (Shared lifetime _ _)) =
     pointer <- readIORef handle
     writeIORef handle Nothing
     maybe (pure ()) FFI.cRelease pointer
-
--- CONFIRMATION ---------------------------------------------------------------
 
 -- | Confirm through the synchronous native provider using scoped workers.
 -- Independent providers can overlap. Overlap or callback reentry on aliases of
@@ -167,8 +165,6 @@ cancelAndJoinNative state finished cause = uninterruptibleMask_ $ do
   _ <- readMVar finished
   throwIO cause
 
--- LIFECYCLE EVIDENCE ---------------------------------------------------------
-
 -- | Number of native contexts still rooting Haskell callback registrations.
 -- This instrumentation is lifecycle evidence, not a public API contract.
 liveCallbackContexts :: IO Int
@@ -178,8 +174,6 @@ liveCallbackContexts = fromIntegral <$> FFI.cLiveContexts
 -- hash cleanup have returned. Used to establish safe exception unwind in tests.
 completedNativeCalls :: IO Integer
 completedNativeCalls = toInteger <$> FFI.cCompletedCalls
-
--- NATIVE OWNERSHIP -----------------------------------------------------------
 
 -- | Register runtime handles under masking. Successful native construction
 -- adopts both handles; before that transfer, Haskell owns their cleanup.

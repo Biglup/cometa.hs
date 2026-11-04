@@ -50,7 +50,7 @@ import Foreign.C.Types (CInt (..), CSize (..), CUInt (..))
 import Foreign.Ptr (FunPtr, Ptr)
 import Foreign.StablePtr (StablePtr)
 
--- ABI TYPES ------------------------------------------------------------------
+-- TYPES ----------------------------------------------------------------------
 
 -- | Opaque native provider. Only the C adapter reads its representation.
 data NativeProvider
@@ -71,7 +71,7 @@ type ConfirmationCallback state =
   CSize ->
   IO CInt
 
--- STATUS VALUES --------------------------------------------------------------
+-- DEFINITIONS ----------------------------------------------------------------
 
 -- | Successful callback status.
 success :: CInt

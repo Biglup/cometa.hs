@@ -99,7 +99,7 @@ module Cometa.Error.Code
   )
 where
 
--- STATUS CODES ---------------------------------------------------------------
+-- TYPES ----------------------------------------------------------------------
 
 -- | A native status code. 'Success' represents a successful operation; all other
 -- named constructors represent failures. Use 'fromNumber' to construct a code
@@ -231,7 +231,7 @@ data ErrorCode
   | UnknownCode !Integer
   deriving (Eq, Show)
 
--- NUMERIC CONVERSION ---------------------------------------------------------
+-- DEFINITIONS ----------------------------------------------------------------
 
 -- | Interpret a numeric status code. Every integer is accepted, including
 -- negative values and values outside machine integer ranges, without truncation.
@@ -309,8 +309,6 @@ toNumber code = case code of
   MissingRedeemer -> 1106
   ScriptEvaluationFailure -> 1200
   UnknownCode number -> number
-
--- INSPECTION -----------------------------------------------------------------
 
 -- | Whether a code has a name in this build of the package.
 -- This does not indicate success: use equality with 'Success' for that purpose.

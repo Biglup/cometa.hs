@@ -234,14 +234,17 @@ Use consistent comment banners, similar to the C sources, for meaningful groups:
 
 -- TYPES ----------------------------------------------------------------------
 
--- CONSTRUCTION ---------------------------------------------------------------
+-- DEFINITIONS ---------------------------------------------------------------
 
--- INTERNAL HELPERS -----------------------------------------------------------
+-- FOREIGN IMPORTS ------------------------------------------------------------
 ```
 
-Choose domain-specific section names when useful. Small modules need only a few
-sections; do not add empty regions or a banner per declaration. Export-list
-Haddock headings remain the navigation for generated API documentation.
+Use these general names consistently: `IMPORTS` for module imports, `TYPES` for
+data and type declarations and their instances, `DEFINITIONS` for functions and
+other value bindings, and `FOREIGN IMPORTS` for FFI declarations. Do not add
+domain-specific banners, empty sections, or a banner per declaration. Small
+modules need only the sections they use. Export-list Haddock headings may remain
+domain-oriented for navigation in generated API documentation.
 
 Keep functions focused on one responsibility. Prefer short orchestration functions
 and named helpers for distinct validation, acquisition, execution, and conversion

@@ -65,7 +65,7 @@ import Foreign.Ptr (castPtr)
 newtype Blake2bHash = Blake2bHash ByteString
   deriving (Eq, Ord, Show)
 
--- HASHING --------------------------------------------------------------------
+-- DEFINITIONS ----------------------------------------------------------------
 
 -- | Compute an unkeyed digest with an output length of 16 through 64 bytes.
 -- Invalid output lengths return 'InvalidHashLength'. Empty messages are currently
@@ -85,8 +85,6 @@ compute hashLength bytes
         either (Left . fromNativeFailure) (Right . Blake2bHash)
           <$> copyHashResult "blake2b.compute" (Native.cCompute (castPtr input) (fromIntegral size) (fromIntegral hashLength))
 
--- IMPORTING DIGESTS ----------------------------------------------------------
-
 -- | Import digest bytes without hashing them. Any nonempty length is accepted;
 -- this operation does not assert a particular digest role or algorithm variant.
 -- Empty input returns 'EmptyHash'.
@@ -104,8 +102,6 @@ fromHex text =
     Just [] -> Left InvalidHex
     Just bytes -> fromBytes (ByteString.pack bytes)
 
--- INSPECTION -----------------------------------------------------------------
-
 -- | Observe the immutable digest bytes.
 toBytes :: Blake2bHash -> ByteString
 toBytes (Blake2bHash bytes) = bytes
@@ -118,8 +114,6 @@ toHex = Text.pack . concatMap encodeByte . ByteString.unpack . toBytes
     digit value
       | value < 10 = toEnum (fromIntegral value + fromEnum '0')
       | otherwise = toEnum (fromIntegral value - 10 + fromEnum 'a')
-
--- INTERNAL HELPERS -----------------------------------------------------------
 
 -- | Total hexadecimal decoder: no unchecked indexing or partial digit conversion.
 decodeHex :: String -> Maybe [Word8]

@@ -38,7 +38,7 @@ import qualified Cometa.Internal.FFI.Native as Native
 import Cometa.Internal.Ownership (copyStaticText)
 import Data.Text (Text)
 
--- VERSION --------------------------------------------------------------------
+-- DEFINITIONS ----------------------------------------------------------------
 
 -- | Return the version of cardano-c used by the running application. This is
 -- independent of the Cometa.hs package version.

@@ -31,7 +31,7 @@ import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertEqual, testCase, (@?=))
 import Test.Tasty.Hedgehog (testProperty)
 
--- TESTS ----------------------------------------------------------------------
+-- DEFINITIONS ----------------------------------------------------------------
 
 tests :: TestTree
 tests =
@@ -79,16 +79,12 @@ tests =
       testProperty "arbitrary numeric codes round trip" propNumberRoundTrip
     ]
 
--- PROPERTIES -----------------------------------------------------------------
-
 propNumberRoundTrip :: Property
 propNumberRoundTrip = property $ do
   number <- forAll (Gen.integral (Range.linear (negate (2 ^ (256 :: Int))) (2 ^ (256 :: Int))))
   let code = Code.fromNumber number
   Code.toNumber code === number
   Code.fromNumber (Code.toNumber code) === code
-
--- FIXTURES -------------------------------------------------------------------
 
 -- Independent expectations transcribed from cardano/error.h at the pinned
 -- revision 8dc0c55f4132fcaa2e7961b6cfbfea96a6d93b5d (Apache-2.0). These do not
@@ -159,7 +155,7 @@ expectedCodes =
     (Code.ScriptEvaluationFailure, 1200)
   ]
 
--- TEST-ONLY NATIVE ORACLE -----------------------------------------------------
+-- FOREIGN IMPORTS ------------------------------------------------------------
 
 foreign import ccall unsafe "cometa_test_error_code_count"
   cErrorCodeCount :: IO CSize

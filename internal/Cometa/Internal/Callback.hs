@@ -78,7 +78,7 @@ newtype CallbackControl = CallbackControl (MVar (Maybe Operation))
 -- | Handler and operation state rooted by the native context's stable pointer.
 data CallbackState = CallbackState ConfirmationHandler CallbackControl
 
--- CALLBACK STATE -------------------------------------------------------------
+-- DEFINITIONS ----------------------------------------------------------------
 
 -- | Start with no active operation or retained exception.
 newCallbackControl :: IO CallbackControl
@@ -133,8 +133,6 @@ rememberCallbackException (CallbackControl control) cause =
         Nothing -> writeIORef slot (Just cause)
         Just _ -> pure ()
 
--- NATIVE CALLBACK ------------------------------------------------------------
-
 -- | Catch every user exception, including marshaling and lazy results, before
 -- returning a native failure. Emergency handling does not render user values.
 confirmationCallback :: Native.ConfirmationCallback CallbackState
@@ -160,8 +158,6 @@ confirmationCallback stable hash size timeout confirmed diagnostic capacity =
               pure Native.success
       )
       `catch` failed
-
--- WORKER LIFETIME ------------------------------------------------------------
 
 -- | The user worker's entire lifetime is enclosed by the ABI callback. Even an
 -- unexpected asynchronous exception in the ABI thread cancels and joins this
@@ -216,8 +212,6 @@ cancelAndJoinWorker worker finished cause = uninterruptibleMask_ $ do
   throwTo worker cause
   _ <- readMVar finished
   throwIO cause
-
--- DIAGNOSTICS ----------------------------------------------------------------
 
 -- | Copy UTF-8 bytes into a borrowed C buffer, reserving a trailing NUL.
 -- Truncation is by byte capacity and may split a multibyte UTF-8 sequence.

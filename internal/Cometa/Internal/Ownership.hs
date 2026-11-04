@@ -43,7 +43,7 @@ import Foreign.Marshal.Alloc (alloca)
 import Foreign.Ptr (Ptr, castPtr, nullPtr)
 import Foreign.Storable (peek, poke)
 
--- DIAGNOSTICS ----------------------------------------------------------------
+-- DEFINITIONS ----------------------------------------------------------------
 
 -- | Copy a static UTF-8 diagnostic. Native diagnostics are expected to be UTF-8;
 -- invalid sequences are replaced rather than raising an unrelated exception.
@@ -52,8 +52,6 @@ copyStaticText pointer =
   if pointer == nullPtr
     then pure ""
     else Text.decodeUtf8With Text.lenientDecode <$> ByteString.packCString pointer
-
--- OWNED OUTPUTS --------------------------------------------------------------
 
 -- | Scope one owned output reference, including a partial result written before
 -- failure or an exception. Acquisition runs with the caller's masking state after
@@ -90,8 +88,6 @@ withOwnedOutput operation release acquire action =
       if pointer == nullPtr
         then pure ()
         else release slot `finally` poke slot nullPtr
-
--- HASH SNAPSHOTS -------------------------------------------------------------
 
 -- | Copy borrowed hash storage before releasing its owned output reference.
 -- A null pointer, zero length, or length beyond Haskell's 'Int' range is a native

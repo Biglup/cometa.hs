@@ -26,7 +26,7 @@ import qualified Data.Text.IO as Text
 import System.Environment (getArgs)
 import System.Exit (die)
 
--- ENTRY POINT ----------------------------------------------------------------
+-- DEFINITIONS ----------------------------------------------------------------
 
 main :: IO ()
 main = do

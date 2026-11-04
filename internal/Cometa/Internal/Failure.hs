@@ -25,7 +25,7 @@ where
 
 import Data.Text (Text)
 
--- ERRORS ---------------------------------------------------------------------
+-- TYPES ----------------------------------------------------------------------
 
 -- | Native status, copied context, and contract failures without a dependency on
 -- a public domain API. Numeric codes remain exact, including unknown values.

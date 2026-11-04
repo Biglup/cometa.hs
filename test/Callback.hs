@@ -41,14 +41,14 @@ import System.Timeout (timeout)
 import Test.Tasty (TestTree)
 import Test.Tasty.HUnit (assertBool, assertFailure, testCase, (@?=))
 
--- FIXTURE TYPES --------------------------------------------------------------
+-- TYPES ----------------------------------------------------------------------
 
 -- Distinct from expected native failures, so exception identity is observable.
 data CallbackException = CallbackException deriving (Eq, Show)
 
 instance Exception CallbackException
 
--- TESTS ----------------------------------------------------------------------
+-- DEFINITIONS ----------------------------------------------------------------
 
 tests :: TestTree
 tests = testCase "native provider callback ownership, exceptions and cancellation" $ do
@@ -68,8 +68,6 @@ tests = testCase "native provider callback ownership, exceptions and cancellatio
   checkRepeatedFailures
   performGC
   Provider.liveCallbackContexts >>= (@?= baseline)
-
--- SCENARIOS ------------------------------------------------------------------
 
 checkCopiedArguments :: Int -> IO ()
 checkCopiedArguments baseline = do
@@ -163,8 +161,6 @@ checkRegistrationRelease = do
   waitFor "callback registration finalization" (takeMVar finalized)
   deRefWeak weak >>= assertBool "final native release frees the StablePtr root" . isNothing
 
--- CANCELLATION AND CONCURRENCY -----------------------------------------------
-
 -- Cancellation of a blocked handler must join native work before propagating.
 checkCancellation :: Int -> IO ()
 checkCancellation baseline = do
@@ -238,8 +234,6 @@ checkReentry = do
       assertBool "outer callback succeeds after rejected reentry" (result == Right True)
   -- Do not keep the closed handle in a test-owned reference unnecessarily.
   writeIORef owner Nothing
-
--- CANCELLATION BOUNDARIES ----------------------------------------------------
 
 -- Deterministic unit coverage of cancellation arriving before native dispatch.
 -- The normal path above exercises the same trampoline through real cardano-c.
@@ -319,8 +313,6 @@ checkCallerMasking = do
       Provider.confirmTransaction provider transactionId 0 >>= (@?= Right True)
       writeIORef expected MaskedInterruptible
       mask_ (Provider.confirmTransaction provider transactionId 0) >>= (@?= Right True)
-
--- FIXTURES -------------------------------------------------------------------
 
 -- Deterministic 32-byte input, independent of the provider under test.
 transactionId :: ByteString.ByteString

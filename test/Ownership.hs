@@ -39,7 +39,7 @@ import System.Timeout (timeout)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
--- NATIVE OBSERVERS -----------------------------------------------------------
+-- FOREIGN IMPORTS ------------------------------------------------------------
 
 -- These imports stay test-only: they make a second ownership obligation visible
 -- without exposing reference-count operations through the public Haskell API.
@@ -49,7 +49,7 @@ foreign import capi unsafe "cardano/crypto/blake2b_hash.h cardano_blake2b_hash_r
 foreign import capi unsafe "cardano/crypto/blake2b_hash.h cardano_blake2b_hash_refcount"
   cRefCount :: Ptr Native.NativeHash -> IO CSize
 
--- TESTS ----------------------------------------------------------------------
+-- DEFINITIONS ----------------------------------------------------------------
 
 tests :: TestTree
 tests =
@@ -65,8 +65,6 @@ tests =
       testCase "null success is rejected without invoking destructor" checkNullSuccess,
       testCase "failure before output allocation does not invoke destructor" checkFailureBeforeAllocation
     ]
-
--- SCENARIOS ------------------------------------------------------------------
 
 checkCopiedSnapshot :: IO ()
 checkCopiedSnapshot = do
@@ -180,8 +178,6 @@ checkFailureBeforeAllocation = do
         throwIO (userError "injected failure before allocation")
   expectException (withOwnedOutput "ownership.empty" (countedRelease releases) acquire unexpectedAction)
   readIORef releases >>= (@?= 0)
-
--- FIXTURES -------------------------------------------------------------------
 
 -- Allocate a real native digest only after checking the helper initialized its
 -- output slot. Assertions distinguish fixture setup failures from cleanup bugs.

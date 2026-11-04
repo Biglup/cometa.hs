@@ -42,7 +42,7 @@ import Foreign.C.String (CString)
 import Foreign.C.Types (CSize (..), CUInt (..))
 import Foreign.Ptr (Ptr)
 
--- ABI TYPES ------------------------------------------------------------------
+-- TYPES ----------------------------------------------------------------------
 
 -- | Opaque native allocation; never dereferenced by Haskell.
 data {-# CTYPE "cardano/crypto/blake2b_hash.h" "cardano_blake2b_hash_t" #-} NativeHash
@@ -51,6 +51,8 @@ data {-# CTYPE "cardano/crypto/blake2b_hash.h" "cardano_blake2b_hash_t" #-} Nati
 -- the C adapter converts enum parameters and all raw status-returning calls.
 -- No native enum representation is assumed by a direct Haskell import.
 type NativeCode = CUInt
+
+-- DEFINITIONS ---------------------------------------------------------------
 
 -- | Successful native status.
 success :: NativeCode

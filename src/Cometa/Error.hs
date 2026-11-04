@@ -35,7 +35,7 @@ where
 import Cometa.Error.Code (ErrorCode)
 import Data.Text (Text)
 
--- ERRORS ---------------------------------------------------------------------
+-- TYPES ----------------------------------------------------------------------
 
 -- | Expected failures returned by Cometa operations. Equality compares every
 -- payload, including diagnostic text. 'Show' is diagnostic output.

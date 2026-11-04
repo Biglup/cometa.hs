@@ -39,7 +39,7 @@ import Test.Tasty (TestTree, defaultMain, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 import Test.Tasty.Hedgehog (testProperty)
 
--- TESTS ----------------------------------------------------------------------
+-- DEFINITIONS ----------------------------------------------------------------
 
 main :: IO ()
 main =
@@ -76,8 +76,6 @@ foundationTests =
     testProperty "computed digest has requested length" propDigestLength
   ]
 
--- LIFECYCLE SCENARIOS --------------------------------------------------------
-
 checkCopiedBytes :: IO ()
 checkCopiedBytes = do
   original <- Blake2b.compute 32 "abc"
@@ -105,8 +103,6 @@ checkCancellation = replicateM_ 10 $ do
   result <- Blake2b.compute 32 "abc"
   fmap Blake2b.toHex result @?= Right "bddd813c634239723171ef3fee98579b94964e3bb1cb3e427262c8c068d52319"
 
--- ASSERTIONS -----------------------------------------------------------------
-
 checkNativeFailure :: Text.Text -> Code.ErrorCode -> Either Error value -> IO ()
 checkNativeFailure operation code result = case result of
   Left (NativeError actualOperation actualCode message) -> do
@@ -115,8 +111,6 @@ checkNativeFailure operation code result = case result of
     message @?= "Out of bounds memory read"
   Left other -> assertFailure ("Expected native error, got " <> show other)
   Right _ -> assertFailure "Expected native error, got success"
-
--- PROPERTIES -----------------------------------------------------------------
 
 propRoundTrip :: Property
 propRoundTrip = property $ do
