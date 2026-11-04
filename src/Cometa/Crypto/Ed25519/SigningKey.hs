@@ -62,8 +62,7 @@ import qualified Cometa.Crypto.Ed25519.PublicKey as PublicKey
 import Cometa.Crypto.Ed25519.Signature (Signature)
 import qualified Cometa.Crypto.Ed25519.Signature as Signature
 import Cometa.Error (Error (..))
-import qualified Cometa.Error.Code as Code
-import qualified Cometa.Internal.Failure as Failure
+import Cometa.Internal.Error (fromNativeFailure)
 import qualified Cometa.Internal.Hex as Hex
 import qualified Cometa.Internal.SigningKey as Internal
 import Control.Monad (join)
@@ -168,5 +167,4 @@ publicFailure failure = case failure of
   Internal.Closed -> SigningKeyClosed
   Internal.InvalidLength expected actual -> InvalidEd25519SigningKeyLength expected actual
   Internal.InvalidHex -> InvalidHex
-  Internal.NativeFailure (Failure.NativeFailure operation code message) -> NativeError operation (Code.fromNumber code) message
-  Internal.NativeFailure (Failure.NativeContractFailure operation) -> NativeContractViolation operation
+  Internal.NativeFailure failureValue -> fromNativeFailure failureValue

@@ -49,7 +49,7 @@ import qualified Cometa.Crypto.Blake2b as Blake2b
 import Cometa.Crypto.Ed25519.Signature (Signature)
 import qualified Cometa.Crypto.Ed25519.Signature as Signature
 import Cometa.Error (Error (..))
-import qualified Cometa.Error.Code as Code
+import Cometa.Internal.Error (fromNativeFailure)
 import qualified Cometa.Internal.FFI.Ed25519Values as Native
 import qualified Cometa.Internal.FFI.Native as Status
 import Cometa.Internal.Failure (NativeFailure (..))
@@ -118,7 +118,7 @@ verify publicKey message signature =
             then Right . (/= 0) <$> peek verified
             else do
               diagnostic <- Status.cErrorMessage code >>= copyStaticText
-              pure (Left (NativeError "ed25519.publicKey.verify" (Code.fromNumber (toInteger code)) diagnostic))
+              pure (Left (fromNativeFailure (NativeFailure "ed25519.publicKey.verify" (toInteger code) diagnostic)))
 
 -- | Compute the 28-byte BLAKE2b-224 digest of the encoded public key. The result
 -- is a general digest, without a payment/stake role distinction. Operation
@@ -132,9 +132,3 @@ hash publicKey =
       Right bytes
         | ByteString.length bytes /= 28 -> Left (NativeContractViolation "ed25519.publicKey.hash")
         | otherwise -> Blake2b.fromBytes bytes
-
--- | Preserve the exact native failure at the public operation boundary.
-fromNativeFailure :: NativeFailure -> Error
-fromNativeFailure failure = case failure of
-  NativeFailure operation code message -> NativeError operation (Code.fromNumber code) message
-  NativeContractFailure operation -> NativeContractViolation operation

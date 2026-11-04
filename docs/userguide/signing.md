@@ -24,8 +24,37 @@ have hexadecimal-input forms ending in `Hex`.
 
 The callback returns `IO (Either Error a)`. Acquisition errors and callback errors
 use the same result channel. Exceptions and asynchronous cancellation propagate
-after cleanup. `ExceptT` is convenient when composing several operations; it is
-optional and not required by the library.
+after cleanup. A single signing operation needs no additional composition tools:
+
+```haskell
+{-# LANGUAGE OverloadedStrings #-}
+
+import qualified Cometa.Crypto.Ed25519.SigningKey as SigningKey
+
+main :: IO ()
+main = do
+  -- Published RFC 8032 test seed; never use it for funds.
+  let seed = "9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60"
+      message = "Hello, Cardano!"
+
+  result <- SigningKey.withNormalKeyHex seed $ \key ->
+    SigningKey.sign key message
+
+  case result of
+    Left failure -> print failure
+    Right signature -> print signature
+```
+
+`sign` signs the supplied bytes exactly, including empty messages and embedded
+NUL bytes. It does not hash or decode hexadecimal text for you. Cardano transaction
+signatures use the transaction body hash, not the complete transaction encoding.
+
+## Compose several operations
+
+`ExceptT` is an optional standard Haskell tool for sequencing fallible operations.
+It stops at the first `Left`, without nested `case` expressions. `runExceptT`
+returns the usual `IO (Either Error a)` result. Key cleanup belongs to the scope
+and works the same way with or without `ExceptT`.
 
 ```haskell
 {-# LANGUAGE OverloadedStrings #-}
@@ -49,12 +78,9 @@ main = do
   print result
 ```
 
-`sign` signs the supplied bytes exactly, including empty messages and embedded
-NUL bytes. It does not hash or decode hexadecimal text for you. Cardano transaction
-signatures use the transaction body hash, not the complete transaction encoding.
-
 A successful `verify` call returns `Right True` only when verification succeeds.
 `Right False` means it did not succeed; `Left` reports an operation error.
+`ExceptT` continues after `Right False`, because it is still a successful result.
 
 The runnable example prints only public values:
 
