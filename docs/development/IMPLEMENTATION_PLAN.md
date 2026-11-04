@@ -1315,5 +1315,8 @@ no suppressions were added. Hosted rerun results must be reviewed separately.
 
 The consolidated API passes all 138 tests, the warnings-as-errors build,
 format/lint checks, Haddock and strict Sphinx HTML locally. Public type and
-instance links were inspected after consolidating the path module. Final
-source-distribution and full Valgrind validation are in progress.
+instance links were inspected after consolidating the path module. The fresh source-distribution consumer builds and passes all 138 tests.
+The final binary completes the full Valgrind suite normally in 132.75 seconds:
+138 tests pass, with zero errors and zero definite, indirect or possible losses;
+no suppressions are used. Hosted quality and documentation checks passed on the
+implementation commit; the platform matrix remains in progress.
