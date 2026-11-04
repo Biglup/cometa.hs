@@ -1,0 +1,78 @@
+cabal-version: 3.0
+name: cometa
+version: 0.1.0.0
+synopsis: Idiomatic Haskell bindings to cardano-c
+description: An experimental foundation for Haskell-owned Cardano domain values.
+license: Apache-2.0
+license-file: LICENSE
+author: Biglup Labs
+maintainer: angel.castillob@protonmail.com
+category: Blockchain
+homepage: https://github.com/Biglup/cometa.hs
+bug-reports: https://github.com/Biglup/cometa.hs/issues
+build-type: Simple
+extra-source-files:
+  README.md
+  CODING_CONVENTIONS.md
+  AGENTS.md
+  tools/*.py
+  .hlint.yaml
+  .readthedocs.yaml
+  assets/*.png
+  native/cardano-c.ref
+  docs/requirements.txt
+  docs/userguide/*.md
+  docs/userguide/conf.py
+  docs/development/*.md
+  docs/development/*.json
+  docs/development/*.csv
+
+source-repository head
+  type: git
+  location: https://github.com/Biglup/cometa.hs.git
+
+common language
+  default-language: Haskell2010
+  ghc-options: -Wall -Wcompat -Wincomplete-uni-patterns -Wincomplete-record-updates
+
+library
+  import: language
+  hs-source-dirs: src
+  exposed-modules:
+    Cometa
+    Cometa.Crypto.Blake2b
+    Cometa.Error
+  other-modules:
+    Cometa.Internal.FFI.Native
+    Cometa.Internal.Ownership
+  build-depends:
+    base >=4.18 && <4.22,
+    bytestring >=0.11 && <0.13,
+    text >=2.0 && <2.2
+  extra-libraries: cardano-c
+
+executable cometa-hash
+  import: language
+  hs-source-dirs: examples
+  main-is: Hash.hs
+  build-depends:
+    base >=4.18 && <4.22,
+    bytestring >=0.11 && <0.13,
+    text >=2.0 && <2.2,
+    cometa
+
+test-suite cometa-test
+  import: language
+  type: exitcode-stdio-1.0
+  hs-source-dirs: test
+  main-is: Main.hs
+  ghc-options: -threaded
+  build-depends:
+    base >=4.18 && <4.22,
+    bytestring >=0.11 && <0.13,
+    text >=2.0 && <2.2,
+    cometa,
+    tasty >=1.4 && <1.6,
+    tasty-hunit >=0.10 && <0.11,
+    tasty-hedgehog >=1.4 && <1.5,
+    hedgehog >=1.2 && <1.6

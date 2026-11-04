@@ -22,3 +22,11 @@ cabal.project.local~
 .HTF/
 .idea
 .ghc.environment.*
+
+# Generated narrative documentation and local native builds.
+docs/_build/
+.native/
+__pycache__/
+
+# Source distribution consumer builds.
+.sdist/
