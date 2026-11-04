@@ -27,10 +27,11 @@ import qualified Cometa.Internal.FFI.Bip39 as Native
 import Cometa.Internal.FFI.Native (NativeCode, cErrorMessage, success)
 import Cometa.Internal.Failure (NativeFailure (..))
 import Cometa.Internal.Ownership (copyStaticText)
-import Control.Exception (finally)
+import Control.Exception (evaluate, finally)
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as ByteString
 import Data.Text (Text)
+import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
 import Data.Word (Word8)
 import Foreign.C.String (CString)
@@ -60,9 +61,9 @@ fromEntropy entropy = ByteString.useAsCString entropy $ \input ->
               then pure (Left (NativeContractFailure "bip39.fromEntropy"))
               else do
                 bytes <- mapM ByteString.packCString pointers
-                pure $ case traverse Text.decodeUtf8' bytes of
+                evaluate $ case traverse Text.decodeUtf8' bytes of
                   Left _ -> Left (NativeContractFailure "bip39.fromEntropy")
-                  Right words' -> Right words'
+                  Right words' -> forceWords words' `seq` Right words'
   where
     size = ByteString.length entropy
 
@@ -72,7 +73,9 @@ validate words' = decodeEntropy words' (\_ _ -> pure ())
 
 -- | Copy entropy only when explicitly requested by the public caller.
 exportEntropy :: [Text] -> IO (Either NativeFailure ByteString)
-exportEntropy words' = decodeEntropy words' $ \output size -> ByteString.packCStringLen (castPtr output, size)
+exportEntropy words' = decodeEntropy words' $ \output size -> do
+  bytes <- ByteString.packCStringLen (castPtr output, size)
+  evaluate (ByteString.length bytes `seq` bytes)
 
 decodeEntropy :: [Text] -> (Ptr Word8 -> Int -> IO a) -> IO (Either NativeFailure a)
 decodeEntropy words' consume =
@@ -101,4 +104,8 @@ withWords words' action = go words' []
 nativeFailure :: Text -> NativeCode -> IO NativeFailure
 nativeFailure operation status = do
   diagnostic <- cErrorMessage status >>= copyStaticText
-  pure (NativeFailure operation (fromIntegral status) diagnostic)
+  evaluate (NativeFailure operation (fromIntegral status) diagnostic)
+
+-- Complete strict decoded words before the static-pointer/input scope ends.
+forceWords :: [Text] -> ()
+forceWords = foldr (seq . Text.length) ()

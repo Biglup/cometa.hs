@@ -21,7 +21,7 @@ module Main (main) where
 import qualified Cometa.Crypto.Bip32.PrivateKey as PrivateKey
 import qualified Cometa.Crypto.Bip32.PublicKey as PublicKey
 import qualified Cometa.Crypto.Bip39 as Bip39
-import Control.Monad.Trans.Except (ExceptT (..), runExceptT)
+import Control.Monad.Trans.Except (ExceptT (..), except, runExceptT)
 import qualified Data.ByteString as ByteString
 import Data.Text (Text)
 import qualified Data.Text.IO as Text
@@ -36,8 +36,8 @@ testPhrase = "abandon abandon abandon abandon abandon abandon abandon abandon ab
 main :: IO ()
 main = do
   result <- runExceptT $ do
-    mnemonic <- ExceptT (Bip39.fromText testPhrase)
-    entropy <- ExceptT (Bip39.exportEntropy mnemonic)
+    mnemonic <- except (Bip39.fromText testPhrase)
+    entropy <- except (Bip39.exportEntropy mnemonic)
     ExceptT (PrivateKey.withEntropy ByteString.empty entropy PrivateKey.publicKey)
 
   either (die . show) (Text.putStrLn . PublicKey.toHex) result

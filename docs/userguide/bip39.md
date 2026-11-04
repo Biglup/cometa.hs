@@ -17,7 +17,7 @@ correction, case folding or support for other language dictionaries.
 import qualified Cometa.Crypto.Bip39 as Bip39
 import qualified Cometa.Crypto.Bip32.PrivateKey as PrivateKey
 import qualified Cometa.Crypto.Bip32.PublicKey as PublicKey
-import Control.Monad.Trans.Except (ExceptT (..), runExceptT)
+import Control.Monad.Trans.Except (ExceptT (..), except, runExceptT)
 import qualified Data.ByteString as ByteString
 import Data.Text (Text)
 import qualified Data.Text.IO as Text
@@ -30,16 +30,17 @@ testPhrase = "abandon abandon abandon abandon abandon abandon abandon abandon ab
 main :: IO ()
 main = do
   result <- runExceptT $ do
-    mnemonic <- ExceptT (Bip39.fromText testPhrase)
-    entropy <- ExceptT (Bip39.exportEntropy mnemonic)
+    mnemonic <- except (Bip39.fromText testPhrase)
+    entropy <- except (Bip39.exportEntropy mnemonic)
     ExceptT (PrivateKey.withEntropy ByteString.empty entropy PrivateKey.publicKey)
 
   either (die . show) (Text.putStrLn . PublicKey.toHex) result
 ```
 
 This example is also built as `cometa-bip39`; run `cabal run cometa-bip39`.
-`ExceptT` is an optional way to compose these `IO (Either Error a)` operations;
-it is not required by the library. The example prints only a public key. Its
+Mnemonic construction and entropy export return pure `Either Error a` values.
+`ExceptT` optionally lifts those results with `except` to compose with the scoped
+BIP32 key operation in `IO`; it is not required by the library. The example prints only a public key. Its
 phrase is public test material and must never secure funds.
 
 The entropy exported here feeds Cardano's Ed25519-BIP32 `withEntropy`, whose
@@ -68,3 +69,5 @@ ordinary diagnostics. `exportText` and `exportEntropy` expose wallet secrets;
 never log them. Input and exported text/bytes have ordinary Haskell lifetimes.
 This API does not guarantee erasure of these values or every temporary copy.
 A mnemonic remains usable while the application holds it; it has no close scope.
+Pure evaluation may share secret values and retain them for longer; it does not
+promise when or how often a conversion is evaluated.

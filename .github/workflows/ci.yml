@@ -71,6 +71,8 @@ jobs:
           cabal run cometa-signing
           cabal run cometa-bip32
           cabal run cometa-bip39
+      - name: Exercise optimized BIP39 evaluation and concurrency
+        run: cabal test cometa-test --enable-optimization=2 --test-show-details=direct --test-options="-p BIP39 +RTS -N2 -RTS"
       - name: Build Haddock
         run: cabal haddock lib:cometa --haddock-for-hackage --haddock-hyperlink-source
       - uses: actions/upload-artifact@v4

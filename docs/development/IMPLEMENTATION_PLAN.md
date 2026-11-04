@@ -912,24 +912,24 @@ Hosted CI remains to be reviewed in the new pull request.
 
 ### BIP39 purity spike
 
-Reviewed 2026-11-04 after the P04 mnemonic slice. This is an experiment and a
-recommendation, not a change to the implemented `IO` API. Two isolated prototypes
-were built against the same native pin and public fixtures; neither prototype
-nor an additional cryptographic dependency is part of the package.
+Reviewed 2026-11-04 after the initial P04 mnemonic slice. The experiment below
+led to the production native-backed pure boundary documented in the next section.
+Two isolated prototypes were built against the same native pin and public fixtures;
+neither prototype nor an additional cryptographic dependency is part of the package.
 
 | Approach | Evidence | Ongoing cost |
 | --- | --- | --- |
-| Current explicit `IO` | Existing 115-test suite and Valgrind pass | Correct, but deterministic mnemonic conversion remains effectful to callers |
+| Initial explicit `IO` | Original 115-test suite and Valgrind pass | Correct, but deterministic mnemonic conversion remains effectful to callers |
 | Audited pure facade over cardano-c | 26 vectors, exact error parity, GC, concurrent/shared-thunk evaluation and cancellation smoke checks pass | Small private unsafe boundary; native dependency changes require a fresh purity review |
 | Pure Haskell conversion | 26 vectors and 1,280 varied cases agree with native and an independent Python SHA256 oracle | Own the conversion algorithm and dictionary, plus a hash dependency |
 
-The recommended direction is the native-backed pure facade. It preserves one
+The experiment recommended the native-backed pure facade. It preserves one
 BIP39 implementation and dictionary while allowing ordinary `Either` composition.
 This recommendation is specific to the audited BIP39 functions; it does not
 justify hiding arbitrary native calls, key scopes, callbacks or providers in
 pure functions.
 
-Proposed minimal API, preserving current representation and error reporting:
+Adopted minimal API, preserving the words-only representation and error reporting:
 
 ```haskell
 fromEntropy :: ByteString -> Either Error Mnemonic
@@ -996,14 +996,52 @@ blocks, as did a runtime-only concurrency control. An earlier `-N1` run reported
 an unreproduced 288-byte possible loss without its allocation stack captured;
 that observation remains unclassified. No suppressions were used.
 
-Before adopting the pure native boundary, implement internal strictness without
-extra phrase copies, carry its optimized/concurrency regression cases into the
-suite, document the narrow exception in the coding conventions, and validate the
-supported compiler/platform builds. Re-audit reachable C code, SHA256 and memory
-clearing paths when native source/build choices change; the tested native object
-used the volatile-store memory-clearing branch, while other platforms select
-other implementations. Keep the existing API until that implementation work is
-explicitly undertaken.
+### Production BIP39 pure boundary
+
+Adopted 2026-11-04 following explicit maintainer approval. Public `fromEntropy`,
+`fromText`, `fromWords` and `exportEntropy` now return pure `Either` values;
+`wordCount` and `exportText` are unchanged. `Mnemonic` remains words-only, opaque
+and without `Show`/`Eq`. Native and contract failures remain explicit, including
+on entropy export. No hidden retained entropy, partial getter or new crypto/hash
+dependency is introduced.
+
+`Cometa.Internal.Bip39Pure` is a private implementation module with three concrete
+monomorphic `NOINLINE` unsafe boundaries and local optimizer safeguards. It
+forces complete word lists directly, copied entropy and public error payloads
+before returning from IO; lower marshaling scopes also force decoded/copied
+outputs. It creates no extra phrase just to force evaluation. The sole purity
+exception and source/build/platform re-audit obligations are documented in
+[BIP39_PURITY.md](BIP39_PURITY.md), the conventions and repository instructions.
+The native API ledger records the pure public adaptation. The example and guide
+use ordinary `Either` composition lifted with `except` into the scoped key flow.
+
+Regression coverage is 116 tests, including 14 BIP39 tests and 300 BIP39 property
+cases (4,800 property cases overall). Optimized GHC 9.6.7 Linux x86-64 `-O2`/`-N4`
+passes the full suite. New cases force independent varied inputs, perform GC
+between conversion/export, repeat distinct native failures, contend concurrently
+on a shared result, and cancel repeated evaluation before fresh later conversion.
+Cancellation remains a smoke test, with no claim of guaranteed interruption
+inside these brief foreign calls. Sharing can extend secret retention; erasure
+and evaluation-count guarantees are not added.
+
+The existing compiler matrix is GHC 9.6.7 across Linux x86-64/ARM, macOS ARM/Intel
+and Windows, plus GHC 9.10.3 on Linux x86-64. The boundary uses base's existing
+monomorphic unsafe-IO/NOINLINE optimizer controls supported across those compilers;
+no new GHC feature or dependency bound is required. Each matrix job now additionally
+runs the BIP39 group at `-O2`/`-N2`. Native platform branches were source-reviewed
+in the audit; only local Linux x86-64 execution has completed at this point.
+Hosted matrix results must still be reviewed before claiming cross-platform
+validation of this change.
+
+Local production checks pass: warnings-as-errors optimized build, all five
+examples, extracted guide example compiled at `-O2 -Wall -Werror`, Haddock all
+(100% BIP39 coverage), Cabal check, strict Sphinx HTML/linkcheck, Ormolu 0.8.0.2,
+HLint 3.8 (no hints), ClangFormat 18 and native inventory. Full optimized-suite
+Valgrind at both `-N1` and the existing CI `-N2` configuration passes all 116
+tests (55.96s and 58.33s) with zero errors, zero definite/indirect/possible losses,
+and no suppressions. A targeted optimized BIP39 `-N2` run also passes. The historical spike's independently
+reproduced `-N4` RTS startup finding and unclassified transient possible loss
+remain recorded above; this passing production run does not erase those findings.
 
 ## 19. Haskell engineering standards and reference libraries
 

@@ -25,7 +25,8 @@ and passing tests establish implemented behavior.
 - Follow `CODING_CONVENTIONS.md`, explicit exports, public signatures, and the
   configured formatter/HLint policy. Do not impose C/C++ formatting on Haskell.
 - Use abstract validated values, structured errors, and qualified domain modules.
-  Keep expected failure total and keep native effects in `IO`.
+  Keep expected failure total and keep native effects in `IO`, except for the
+  specifically audited private BIP39 boundary in `docs/development/BIP39_PURITY.md`.
 - Keep raw FFI, marshaling, resource scopes, and callbacks internal. Audit every
   acquired, borrowed, retained, and transferred native reference.
 - Never hide arbitrary native calls with `unsafePerformIO`. Never derive printable

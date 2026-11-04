@@ -95,6 +95,7 @@ library
     Cometa.Encoding.Cbor
   other-modules:
     Cometa.Internal.Error
+    Cometa.Internal.Bip39Pure
     Cometa.Internal.Ed25519SigningKey
   build-depends:
     base >=4.18 && <4.22,
