@@ -44,6 +44,11 @@ jobs:
         with:
           ghc-version: ${{ matrix.ghc }}
           cabal-version: '3.12.1.0'
+          cabal-update: false
+      - name: Configure secure package repository and update index
+        run: |
+          cabal user-config init --force --augment=$'repository hackage.haskell.org\n  url: https://hackage.haskell.org/\n  secure: True'
+          cabal update
       - name: Read native source pin
         id: pin
         run: echo "revision=$(cat native/cardano-c.ref)" >> "$GITHUB_OUTPUT"
@@ -56,8 +61,6 @@ jobs:
       - name: Build pinned native static library
         id: native
         run: python tools/build-native.py .native/cardano-c .native/build --configure-cabal
-      - name: Update package index
-        run: cabal update
       - name: Build with warnings as errors
         run: cabal build all
       - name: Run tests and example
