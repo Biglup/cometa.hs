@@ -991,7 +991,10 @@ but Valgrind reported 16 bytes in four definitely-lost blocks from GHC's
 built with the same GHC/options and `-N4`, without Cometa or cardano-c, reproduced
 the identical allocation stack and counts. This is a runtime baseline finding,
 not evidence of a BIP39 allocation leak; the spike must not be described as a
-zero-error Valgrind run. No suppressions were used.
+zero-error Valgrind run. A full-spike `-N1` rerun reported zero errors and lost
+blocks, as did a runtime-only concurrency control. An earlier `-N1` run reported
+an unreproduced 288-byte possible loss without its allocation stack captured;
+that observation remains unclassified. No suppressions were used.
 
 Before adopting the pure native boundary, implement internal strictness without
 extra phrase copies, carry its optimized/concurrency regression cases into the
