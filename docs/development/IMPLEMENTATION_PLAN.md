@@ -1404,5 +1404,9 @@ native wrapper-allocation counter is claimed. The guide example is compiled as
 Local GHC 9.6.7 verification against the new isolated static native archive:
 all 158 tests pass, public handler Haddock coverage is 100%, strict Sphinx HTML
 build passes, HLint is clean, and external-consumer role/capability checks pass.
-Additional package/style/Valgrind evidence follows when those checks finish;
-hosted platform/compiler evidence remains separate.
+The fresh source-distribution consumer builds and passes all 158 tests. Ormolu,
+ClangFormat, HLint, Cabal package checks and the compiled guide example pass.
+The final binary completes all 158 tests under Valgrind in 177.57 seconds with
+zero errors and zero definite, indirect or possible losses, without suppressions.
+Hosted quality and documentation checks passed on the implementation commit;
+the platform/compiler matrix remains separate and is still running.
