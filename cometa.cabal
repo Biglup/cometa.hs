@@ -28,6 +28,7 @@ extra-source-files:
   docs/development/*.md
   docs/development/*.json
   docs/development/*.csv
+  test/Fixtures/*.md
 
 source-repository head
   type: git
@@ -48,12 +49,19 @@ library core
     Cometa.Internal.FFI.Provider
     Cometa.Internal.FFI.Native
     Cometa.Internal.Ownership
+    Cometa.Internal.Hex
+    Cometa.Internal.FFI.Cbor
+    Cometa.Internal.Transaction
+    Cometa.Internal.FFI.Transaction
   build-depends:
     base >=4.18 && <4.22,
     bytestring >=0.11 && <0.13,
     text >=2.0 && <2.2
   extra-libraries: cardano-c
-  c-sources: cbits/cometa_provider.c
+  c-sources:
+    cbits/cometa_provider.c
+    cbits/cometa_cbor.c
+    cbits/cometa_transaction.c
   include-dirs: cbits
   includes: cometa_provider.h
   cc-options: -std=c11 -Wall -Wextra
@@ -66,6 +74,7 @@ library
     Cometa.Crypto.Blake2b
     Cometa.Error
     Cometa.Error.Code
+    Cometa.Encoding.Cbor
   build-depends:
     base >=4.18 && <4.22,
     bytestring >=0.11 && <0.13,
@@ -82,17 +91,30 @@ executable cometa-hash
     text >=2.0 && <2.2,
     cometa
 
+executable cometa-cbor
+  import: language
+  hs-source-dirs: examples
+  main-is: Cbor.hs
+  build-depends:
+    base >=4.18 && <4.22,
+    cometa
+
 test-suite cometa-test
   import: language
   type: exitcode-stdio-1.0
   hs-source-dirs: test
   main-is: Main.hs
-  c-sources: cbits/cometa_error_codes_test.c
+  c-sources:
+    cbits/cometa_error_codes_test.c
+    test/cbits/transaction_oracle.c
   cc-options: -std=c11 -Wall -Wextra
   other-modules:
     ErrorCode
     Ownership
     Callback
+    Cbor
+    Transaction
+    Fixtures.Transaction
   ghc-options: -threaded
   build-depends:
     base >=4.18 && <4.22,

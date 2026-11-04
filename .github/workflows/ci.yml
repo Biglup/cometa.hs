@@ -67,6 +67,7 @@ jobs:
         run: |
           cabal test all --test-show-details=direct
           cabal run cometa-hash
+          cabal run cometa-cbor
       - name: Build Haddock
         run: cabal haddock lib:cometa --haddock-for-hackage --haddock-hyperlink-source
       - uses: actions/upload-artifact@v4
@@ -115,7 +116,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y clang-format-18
-          clang-format-18 --dry-run --Werror cbits/*.c cbits/*.h
+          clang-format-18 --dry-run --Werror cbits/*.c cbits/*.h test/cbits/*.c
       - name: Check formatting and lint
         run: |
           find src internal test examples \( -name '*.hs' -o -name '*.hsc' \) -print0 | xargs -0 "$RUNNER_TEMP/style-bin/ormolu" --mode check

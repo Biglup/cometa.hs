@@ -19,6 +19,7 @@ module Main (main) where
 -- IMPORTS --------------------------------------------------------------------
 
 import qualified Callback
+import qualified Cbor
 import qualified Cometa
 import qualified Cometa.Crypto.Blake2b as Blake2b
 import Cometa.Error (Error (..))
@@ -38,6 +39,7 @@ import System.Timeout (timeout)
 import Test.Tasty (TestTree, defaultMain, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 import Test.Tasty.Hedgehog (testProperty)
+import qualified Transaction
 
 -- DEFINITIONS ----------------------------------------------------------------
 
@@ -45,7 +47,7 @@ main :: IO ()
 main =
   defaultMain $
     testGroup "Cometa foundation" $
-      [ErrorCode.tests, Callback.tests, Ownership.tests] ++ foundationTests
+      [ErrorCode.tests, Callback.tests, Ownership.tests, Cbor.tests, Transaction.tests] ++ foundationTests
 
 foundationTests :: [TestTree]
 foundationTests =
