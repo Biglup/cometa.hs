@@ -2,17 +2,21 @@
 
 module Main (main) where
 
+import qualified Callback
 import qualified Cometa
 import qualified Cometa.Crypto.Blake2b as Blake2b
 import Cometa.Error (Error (..))
+import qualified Cometa.Error.Code as Code
 import Control.Concurrent (forkFinally, killThread, newEmptyMVar, putMVar, takeMVar, threadDelay, yield)
 import Control.Exception (AsyncException (ThreadKilled), fromException)
 import Control.Monad (forever, replicateM_)
 import qualified Data.ByteString as ByteString
 import qualified Data.Text as Text
+import qualified ErrorCode
 import Hedgehog (Property, evalEither, evalIO, forAll, property, (===))
 import qualified Hedgehog.Gen as Gen
 import qualified Hedgehog.Range as Range
+import qualified Ownership
 import System.Mem (performGC)
 import System.Timeout (timeout)
 import Test.Tasty (defaultMain, testGroup)
@@ -24,7 +28,10 @@ main =
   defaultMain $
     testGroup
       "Cometa foundation"
-      [ testCase "linked native version is available" $ do
+      [ ErrorCode.tests,
+        Callback.tests,
+        Ownership.tests,
+        testCase "linked native version is available" $ do
           version <- Cometa.nativeVersion
           Text.null version @?= False,
         -- Independently checked with Python hashlib.blake2b(b"abc", digest_size=32).
@@ -44,7 +51,7 @@ main =
           Blake2b.fromBytes ByteString.empty @?= Left EmptyHash,
         testCase "native errors preserve exact code and operation" $ do
           computed <- Blake2b.compute 32 ByteString.empty
-          checkNativeFailure "blake2b.compute" 5 computed,
+          checkNativeFailure "blake2b.compute" Code.OutOfBoundsMemoryRead computed,
         testCase "copied bytes survive native cleanup and GC" $ do
           original <- Blake2b.compute 32 "abc"
           replicateM_ 1000 $ do
@@ -73,7 +80,7 @@ main =
         testProperty "computed digest has requested length" propDigestLength
       ]
 
-checkNativeFailure :: Text.Text -> Integer -> Either Error value -> IO ()
+checkNativeFailure :: Text.Text -> Code.ErrorCode -> Either Error value -> IO ()
 checkNativeFailure operation code result = case result of
   Left (NativeError actualOperation actualCode message) -> do
     actualOperation @?= operation

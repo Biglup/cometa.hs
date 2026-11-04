@@ -650,7 +650,7 @@ Workflow:
 
 Apply the engineering standards and reference set in section 19 during P00/P01.
 
-The first foundation is under review in [PR #1](https://github.com/Biglup/cometa.hs/pull/1).
+The first foundation was merged in [PR #1](https://github.com/Biglup/cometa.hs/pull/1).
 It covers the initial P00/P01 foundation and a small P02/P04 hashing slice. Read `AGENTS.md`, `CODING_CONVENTIONS.md`, the current CI results,
 and `native-api.csv` before continuing. The ledger inventories 3,881 declarations
 from 231 public headers; presence in that inventory does not mean implemented.
@@ -664,7 +664,7 @@ operations use `IO (Either Error a)` and return copied Haskell values. This does
 not yet establish the callback, secret-resource, or transaction ownership model.
 Continue with the remaining ABI/ownership/cancellation prototypes before broad
 crypto and encoding coverage. Hackage name availability, native distribution,
-callback retention, and the full platform matrix remain acceptance gates.
+callback retention across all native families remains an acceptance gate.
 
 Documentation uses Haddock for API contracts and Sphinx/MyST for the narrative
 guide. Read the Docs needs project import; Hackage publication is a release task.
@@ -675,8 +675,43 @@ include 200 Hedgehog cases; Ormolu and HLint pass; all three public modules have
 complete Haddock coverage; strict Sphinx and link checking pass. A clean extracted
 sdist builds against the pinned native library, and the README example compiles
 and runs. Full Valgrind checks, including cancellation, pass with zero errors and no lost
-allocations using fair thread scheduling and two RTS capabilities. Hosted platform
-results remain under review. No full phase completion or release readiness is implied by these checks.
+allocations using fair thread scheduling and two RTS capabilities. The first foundation passed all six compiler/platform legs and both quality jobs
+in [CI run 41775741679](https://github.com/Biglup/cometa.hs/actions/runs/41775741679). No full phase completion or release readiness is implied by these checks.
+
+### P02 ownership and callback work
+
+The next slice introduces named native error codes and a private `core` Cabal
+component. Public Error definitions stay in the main library so its Haddock and
+Hackage archives are self-contained. Private native failures retain exact numeric
+statuses and map to public errors at the domain boundary.
+
+`withOwnedOutput` installs cleanup before acquisition, releases partial output on
+failure/exception/cancellation, and records release even when another owner keeps
+the native pointer non-null. Real hash allocations exercise those paths. Borrowed
+bytes are copied while their owner remains alive.
+
+The private provider-confirmation adapter exercises an actual native callback.
+The C shim owns native structure layout and Boolean conversion. A successful
+provider construction adopts the context; final native destruction frees the
+StablePtr and dynamic callback pointer. Independent aliases and active operations
+hold separate native references. Their non-atomic refcount updates are serialized.
+A closed alias is invalid even when another reference keeps the native object alive.
+
+Each operation has fresh error and cancellation state. A native worker and a
+scoped handler worker keep cancellation out of the ABI callback thread. Results
+are forced before C resumes. Cancellation targets the handler, waits for native
+unwind, then rethrows the original exception. Caller masking state is preserved;
+a deliberately masked/nonterminating handler or nonreturning native operation can
+delay cancellation indefinitely. State and buffers remain alive during that wait.
+Same-provider overlap/reentry is rejected; independent providers may overlap.
+
+Tests cover GC, copied payloads, weak-root release, retained aliases, partial
+allocation failures, synchronous/lazy exceptions, pre-dispatch cancellation,
+cancellation races, delayed masked-handler unwind, and concurrent error isolation.
+The current 25-test suite and full Valgrind run pass locally. The public provider
+API is still deferred to P09. Actual borrowed deferred-redeemer registrations and
+deterministic native constructor-allocation failure injection remain unverified;
+this prototype does not close those gates or establish P11 balancing behavior.
 
 Update this plan with decisions, PR links, tested revisions, results and remaining
 work as implementation proceeds. Keep release-specific pins in implementation

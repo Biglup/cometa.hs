@@ -174,6 +174,14 @@ licenses. Test through public values, not only opaque CBOR forwarding. Native
 agreement detects binding errors; use independent vectors or oracles where
 possible. Keep authorized live-network evidence separate from fixture evidence.
 
+## Native adapters
+
+Keep C adapters in `cbits` limited to ABI layout, ownership, and marshaling.
+Use the checked-in `.clang-format` with ClangFormat 18, matching cardano-c's
+formatting. Haskell keeps its own Ormolu conventions. Document adoption, borrowing,
+callback lifetime, and failure ownership at each boundary. Native callbacks must
+never unwind a Haskell exception through C.
+
 ## Compatibility and review
 
 Follow the Haskell Package Versioning Policy for exposed types, declarations,

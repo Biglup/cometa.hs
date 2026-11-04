@@ -49,3 +49,9 @@ Use the same native library options as for your build when needed.
 Inspect `Left` results using the error constructors from `Cometa.Error`.
 `Right` contains a validated result. Keep invalid external input in the ordinary
 error path; a failed conversion must not be treated as an empty hash.
+
+`NativeError` carries an `ErrorCode` from `Cometa.Error.Code`. Compare codes
+with named constructors, such as `Code.InvalidArgument`, rather than parsing
+diagnostic messages. `Code.toNumber` returns the original numeric value for
+logging or interchange. `Code.fromNumber` preserves unrecognized codes, and
+`Code.isKnown` reports whether a code has a name in this build.

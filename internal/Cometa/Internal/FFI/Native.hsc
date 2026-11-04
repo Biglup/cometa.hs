@@ -1,5 +1,6 @@
 {-# LANGUAGE CApiFFI #-}
 {-# LANGUAGE ForeignFunctionInterface #-}
+{-# OPTIONS_HADDOCK hide #-}
 
 -- | Raw, private declarations. Headers determine the enum representation and
 -- success constant. All input buffers are borrowed for the call; successful hash
@@ -37,6 +38,7 @@ data {-# CTYPE "cardano/crypto/blake2b_hash.h" "cardano_blake2b_hash_t" #-} Nati
 {- ORMOLU_DISABLE -}
 type NativeCode = #{type cardano_error_t}
 
+-- | Header-defined success status.
 success :: NativeCode
 success = #{const CARDANO_SUCCESS}
 {- ORMOLU_ENABLE -}
@@ -46,14 +48,16 @@ foreign import capi safe "cardano/crypto/blake2b_hash.h cardano_blake2b_compute_
   cCompute :: Ptr Word8 -> CSize -> CSize -> Ptr (Ptr NativeHash) -> IO NativeCode
 
 -- | Nonblocking bounded destructor. Decrements the reference in the slot and
--- clears it when that reference was the final one. Our acquisition scopes own
--- the only reference and never retain or transfer it.
+-- clears it when that reference was the final one. A released alias must not
+-- be used again, even when another owner leaves the pointer non-null.
 foreign import capi unsafe "cardano/crypto/blake2b_hash.h cardano_blake2b_hash_unref"
   cUnref :: Ptr (Ptr NativeHash) -> IO ()
 
+-- | Borrowed bytes remain valid only while an owner retains the hash.
 foreign import ccall unsafe "cardano_blake2b_hash_get_data"
   cData :: Ptr NativeHash -> IO (Ptr Word8)
 
+-- | Digest byte length; the native function returns zero for a null hash.
 foreign import capi unsafe "cardano/crypto/blake2b_hash.h cardano_blake2b_hash_get_bytes_size"
   cSize :: Ptr NativeHash -> IO CSize
 
@@ -61,5 +65,6 @@ foreign import capi unsafe "cardano/crypto/blake2b_hash.h cardano_blake2b_hash_g
 foreign import ccall unsafe "cardano_error_to_string"
   cErrorMessage :: NativeCode -> IO CString
 
+-- | Borrowed static, NUL-terminated version string; copy it and never free it.
 foreign import ccall unsafe "cardano_get_lib_version"
   cVersion :: IO CString

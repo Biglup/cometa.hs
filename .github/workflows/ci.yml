@@ -68,11 +68,11 @@ jobs:
           cabal test all --test-show-details=direct
           cabal run cometa-hash
       - name: Build Haddock
-        run: cabal haddock all --haddock-hyperlink-source --haddock-html
+        run: cabal haddock lib:cometa --haddock-for-hackage --haddock-hyperlink-source
       - uses: actions/upload-artifact@v4
         with:
           name: haddock-${{ matrix.os }}-ghc-${{ matrix.ghc }}
-          path: dist-newstyle/**/doc/html/cometa/
+          path: dist-newstyle/build/*/ghc-*/cometa-*/doc/html/cometa-*-docs/
           if-no-files-found: error
       - name: Check package and build source distribution consumer
         env:
@@ -111,10 +111,15 @@ jobs:
           curl --fail --location https://github.com/ndmitchell/hlint/releases/download/v3.8/hlint-3.8-x86_64-linux.tar.gz -o "$RUNNER_TEMP/hlint.tar.gz"
           echo "882363872064c70801858b4e9fa17468531fc30b91ed5b8d260eb48fc90b3e61  $RUNNER_TEMP/hlint.tar.gz" | sha256sum --check
           tar -xzf "$RUNNER_TEMP/hlint.tar.gz" -C "$RUNNER_TEMP/style-bin" --strip-components=1
+      - name: Check native adapter formatting
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-format-18
+          clang-format-18 --dry-run --Werror cbits/*.c cbits/*.h
       - name: Check formatting and lint
         run: |
-          find src test examples \( -name '*.hs' -o -name '*.hsc' \) -print0 | xargs -0 "$RUNNER_TEMP/style-bin/ormolu" --mode check
-          "$RUNNER_TEMP/style-bin/hlint" src test examples
+          find src internal test examples \( -name '*.hs' -o -name '*.hsc' \) -print0 | xargs -0 "$RUNNER_TEMP/style-bin/ormolu" --mode check
+          "$RUNNER_TEMP/style-bin/hlint" src internal test examples
 
   documentation:
     runs-on: ubuntu-24.04

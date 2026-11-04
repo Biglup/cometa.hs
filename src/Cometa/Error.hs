@@ -11,6 +11,7 @@ module Cometa.Error
   )
 where
 
+import Cometa.Error.Code (ErrorCode)
 import Data.Text (Text)
 
 -- | Errors returned by Cometa operations. Native codes and messages are copied
@@ -19,7 +20,7 @@ data Error
   = -- | @NativeError operation code message@ preserves the operation name,
     -- exact numeric @cardano_error_t@ value, and native description. Operation
     -- names never contain user input.
-    NativeError !Text !Integer !Text
+    NativeError !Text !ErrorCode !Text
   | -- | BLAKE2b computation requires a digest length from 16 through 64 bytes.
     InvalidHashLength !Int
   | -- | A digest byte sequence must be nonempty.

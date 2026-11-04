@@ -25,7 +25,9 @@ module Cometa.Crypto.Blake2b
 where
 
 import Cometa.Error (Error (..))
+import qualified Cometa.Error.Code as Code
 import qualified Cometa.Internal.FFI.Native as Native
+import Cometa.Internal.Failure (NativeFailure (..))
 import Cometa.Internal.Ownership (copyHashResult)
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as ByteString
@@ -49,7 +51,7 @@ compute hashLength bytes
   | hashLength < 16 || hashLength > 64 = pure (Left (InvalidHashLength hashLength))
   | otherwise =
       ByteString.useAsCStringLen bytes $ \(input, size) ->
-        fmap Blake2bHash
+        either (Left . fromNativeFailure) (Right . Blake2bHash)
           <$> copyHashResult "blake2b.compute" (Native.cCompute (castPtr input) (fromIntegral size) (fromIntegral hashLength))
 
 -- | Import digest bytes without hashing them. Any nonempty length is accepted;
@@ -100,3 +102,9 @@ hexDigit character
   | otherwise = Nothing
   where
     offset start = fromIntegral (fromEnum character - fromEnum start)
+
+-- | Translate a private native snapshot at the public domain boundary.
+fromNativeFailure :: NativeFailure -> Error
+fromNativeFailure failure = case failure of
+  NativeFailure operation code message -> NativeError operation (Code.fromNumber code) message
+  NativeContractFailure operation -> NativeContractViolation operation
