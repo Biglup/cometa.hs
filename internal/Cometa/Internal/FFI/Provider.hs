@@ -1,7 +1,21 @@
+-- Copyright 2026 Biglup Labs
+-- SPDX-License-Identifier: Apache-2.0
+--
+-- Licensed under the Apache License, Version 2.0 (the "License");
+-- you may not use this file except in compliance with the License.
+-- You may obtain a copy of the License at
+--
+--     https://www.apache.org/licenses/LICENSE-2.0
+--
+-- Unless required by applicable law or agreed to in writing, software
+-- distributed under the License is distributed on an "AS IS" BASIS,
+-- WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-- See the License for the specific language governing permissions and
+-- limitations under the License.
 {-# LANGUAGE ForeignFunctionInterface #-}
 {-# OPTIONS_HADDOCK hide #-}
 
--- | Private C adapter. The installed headers determine native enum values;
+-- | Private C adapter. Explicit status values use an unsigned C ABI;
 -- the adapter owns layout, native bool conversion and adopted runtime handles.
 -- All entry points use safe calls, including reference destruction.
 module Cometa.Internal.FFI.Provider
@@ -27,16 +41,16 @@ module Cometa.Internal.FFI.Provider
   )
 where
 
-{- ORMOLU_DISABLE -}
-#include <cardano/error.h>
-{- ORMOLU_ENABLE -}
+-- IMPORTS --------------------------------------------------------------------
 
 import Cometa.Internal.FFI.Native (NativeCode)
 import Data.Word (Word64, Word8)
 import Foreign.C.String (CString)
-import Foreign.C.Types (CInt (..), CSize (..))
+import Foreign.C.Types (CInt (..), CSize (..), CUInt (..))
 import Foreign.Ptr (FunPtr, Ptr)
 import Foreign.StablePtr (StablePtr)
+
+-- ABI TYPES ------------------------------------------------------------------
 
 -- | Opaque native provider. Only the C adapter reads its representation.
 data NativeProvider
@@ -57,15 +71,17 @@ type ConfirmationCallback state =
   CSize ->
   IO CInt
 
-{- ORMOLU_DISABLE -}
--- | Header-defined successful callback status.
+-- STATUS VALUES --------------------------------------------------------------
+
+-- | Successful callback status.
 success :: CInt
-success = #{const CARDANO_SUCCESS}
+success = 0
 
 -- | Generic callback failure status used after exception containment.
 failure :: CInt
-failure = #{const CARDANO_ERROR_GENERIC}
-{- ORMOLU_ENABLE -}
+failure = 1
+
+-- FOREIGN IMPORTS ------------------------------------------------------------
 
 -- | Allocate a callable trampoline. The native context adopts it only after
 -- 'cNew' succeeds; otherwise Haskell must free it along with its stable pointer.

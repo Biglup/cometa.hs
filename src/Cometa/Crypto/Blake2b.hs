@@ -1,3 +1,17 @@
+-- Copyright 2026 Biglup Labs
+-- SPDX-License-Identifier: Apache-2.0
+--
+-- Licensed under the Apache License, Version 2.0 (the "License");
+-- you may not use this file except in compliance with the License.
+-- You may obtain a copy of the License at
+--
+--     https://www.apache.org/licenses/LICENSE-2.0
+--
+-- Unless required by applicable law or agreed to in writing, software
+-- distributed under the License is distributed on an "AS IS" BASIS,
+-- WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-- See the License for the specific language governing permissions and
+-- limitations under the License.
 {-# LANGUAGE OverloadedStrings #-}
 
 -- | BLAKE2b digests as immutable byte sequences. This general digest type does
@@ -28,6 +42,8 @@ module Cometa.Crypto.Blake2b
   )
 where
 
+-- IMPORTS --------------------------------------------------------------------
+
 import Cometa.Error (Error (..))
 import qualified Cometa.Error.Code as Code
 import qualified Cometa.Internal.FFI.Native as Native
@@ -41,11 +57,15 @@ import qualified Data.Text as Text
 import Data.Word (Word8)
 import Foreign.Ptr (castPtr)
 
+-- TYPES ----------------------------------------------------------------------
+
 -- | A nonempty digest byte sequence. Equality compares bytes; ordering is
 -- lexicographic byte ordering.
 -- 'Show' is diagnostic; use 'toHex' for a stable textual encoding.
 newtype Blake2bHash = Blake2bHash ByteString
   deriving (Eq, Ord, Show)
+
+-- HASHING --------------------------------------------------------------------
 
 -- | Compute an unkeyed digest with an output length of 16 through 64 bytes.
 -- Invalid output lengths return 'InvalidHashLength'. Empty messages are currently
@@ -65,6 +85,8 @@ compute hashLength bytes
         either (Left . fromNativeFailure) (Right . Blake2bHash)
           <$> copyHashResult "blake2b.compute" (Native.cCompute (castPtr input) (fromIntegral size) (fromIntegral hashLength))
 
+-- IMPORTING DIGESTS ----------------------------------------------------------
+
 -- | Import digest bytes without hashing them. Any nonempty length is accepted;
 -- this operation does not assert a particular digest role or algorithm variant.
 -- Empty input returns 'EmptyHash'.
@@ -82,6 +104,8 @@ fromHex text =
     Just [] -> Left InvalidHex
     Just bytes -> fromBytes (ByteString.pack bytes)
 
+-- INSPECTION -----------------------------------------------------------------
+
 -- | Observe the immutable digest bytes.
 toBytes :: Blake2bHash -> ByteString
 toBytes (Blake2bHash bytes) = bytes
@@ -94,6 +118,8 @@ toHex = Text.pack . concatMap encodeByte . ByteString.unpack . toBytes
     digit value
       | value < 10 = toEnum (fromIntegral value + fromEnum '0')
       | otherwise = toEnum (fromIntegral value - 10 + fromEnum 'a')
+
+-- INTERNAL HELPERS -----------------------------------------------------------
 
 -- | Total hexadecimal decoder: no unchecked indexing or partial digit conversion.
 decodeHex :: String -> Maybe [Word8]

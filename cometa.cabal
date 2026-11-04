@@ -87,6 +87,8 @@ test-suite cometa-test
   type: exitcode-stdio-1.0
   hs-source-dirs: test
   main-is: Main.hs
+  c-sources: cbits/cometa_error_codes_test.c
+  cc-options: -std=c11 -Wall -Wextra
   other-modules:
     ErrorCode
     Ownership

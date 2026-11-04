@@ -1,9 +1,23 @@
+-- Copyright 2026 Biglup Labs
+-- SPDX-License-Identifier: Apache-2.0
+--
+-- Licensed under the Apache License, Version 2.0 (the "License");
+-- you may not use this file except in compliance with the License.
+-- You may obtain a copy of the License at
+--
+--     https://www.apache.org/licenses/LICENSE-2.0
+--
+-- Unless required by applicable law or agreed to in writing, software
+-- distributed under the License is distributed on an "AS IS" BASIS,
+-- WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-- See the License for the specific language governing permissions and
+-- limitations under the License.
 {-# LANGUAGE CApiFFI #-}
 {-# LANGUAGE ForeignFunctionInterface #-}
 {-# OPTIONS_HADDOCK hide #-}
 
--- | Raw, private declarations. Headers determine the enum representation and
--- success constant. All input buffers are borrowed for the call; successful hash
+-- | Raw, private declarations. Status values use an explicit unsigned C ABI.
+-- All input buffers are borrowed for the call; successful hash
 -- output owns one reference. The data observer borrows from that reference.
 -- No function in this module retains a Haskell buffer or invokes a callback.
 -- Const-pointer observers use ccall because GHC's CAPI wrappers discard const;
@@ -21,27 +35,28 @@ module Cometa.Internal.FFI.Native
   )
 where
 
-{- ORMOLU_DISABLE -}
-#include <cardano/crypto/blake2b_hash.h>
-#include <cardano/error.h>
-{- ORMOLU_ENABLE -}
+-- IMPORTS --------------------------------------------------------------------
 
-import Data.Word (Word32, Word8)
+import Data.Word (Word8)
 import Foreign.C.String (CString)
-import Foreign.C.Types (CSize (..))
+import Foreign.C.Types (CSize (..), CUInt (..))
 import Foreign.Ptr (Ptr)
+
+-- ABI TYPES ------------------------------------------------------------------
 
 -- | Opaque native allocation; never dereferenced by Haskell.
 data {-# CTYPE "cardano/crypto/blake2b_hash.h" "cardano_blake2b_hash_t" #-} NativeHash
 
--- | ABI representation of cardano_error_t, derived from the installed header.
-{- ORMOLU_DISABLE -}
-type NativeCode = #{type cardano_error_t}
+-- | Explicit unsigned C status ABI. CAPI calls convert native enum results;
+-- the C adapter converts enum parameters and all raw status-returning calls.
+-- No native enum representation is assumed by a direct Haskell import.
+type NativeCode = CUInt
 
--- | Header-defined success status.
+-- | Successful native status.
 success :: NativeCode
-success = #{const CARDANO_SUCCESS}
-{- ORMOLU_ENABLE -}
+success = 0
+
+-- FOREIGN IMPORTS ------------------------------------------------------------
 
 -- | Safe because hashing can take time proportional to unbounded input length.
 foreign import capi safe "cardano/crypto/blake2b_hash.h cardano_blake2b_compute_hash"
@@ -62,7 +77,7 @@ foreign import capi unsafe "cardano/crypto/blake2b_hash.h cardano_blake2b_hash_g
   cSize :: Ptr NativeHash -> IO CSize
 
 -- | Returned string is static and must be copied, never freed.
-foreign import ccall unsafe "cardano_error_to_string"
+foreign import ccall unsafe "cometa_error_message"
   cErrorMessage :: NativeCode -> IO CString
 
 -- | Borrowed static, NUL-terminated version string; copy it and never free it.

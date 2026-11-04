@@ -9,7 +9,8 @@ Before editing, inspect nearby modules and match their organization and vocabula
 
 Use Ormolu 0.8.0.2 and HLint 3.8 with the repository's HLint configuration. Prefer readable
 named arguments and pattern matching over dense point-free expressions. Use
-normal Haskell layout, not Allman braces or C++ region markers.
+normal Haskell layout, not Allman braces. Use ordinary comment section banners
+to separate imports, types, and related operations, as described below.
 
 Every module has an explicit export list and a Haddock introduction explaining
 its domain. Group public exports by construction, inspection, transformation,
@@ -164,7 +165,8 @@ invariants. Avoid comments that merely repeat a name or narrate a line of code.
 
 Separate acquisition, computation, and result handling with blank lines where they
 form distinct steps. Keep related bindings together. Let Ormolu determine indentation
-and wrapping; do not add decorative C section banners to Haskell modules.
+and wrapping. Use section banners for substantial logical groups, not individual
+functions. Keep banners outside Haddock comments so they do not enter API prose.
 Use the Microsoft Writing Style Guide as an editorial reference and established
 Haddock syntax for declarations. Narrative pages teach tasks; proposed interfaces
 stay in developer plans and must be labeled as proposals.
@@ -217,3 +219,40 @@ The reference set and rationale are maintained in implementation-plan section 19
 containers, text, async, Hasql, Megaparsec, optics, Hedgehog, the Kowainik naming
 guide, Google Haskell style guide, and the Haskell PVP. Adopt the specific contracts
 that fit this library rather than copying historical partial APIs or dependencies.
+
+## File headers, sections, and function size
+
+Start every Haskell source file with the Apache-2.0 copyright and license
+notice used by neighboring modules, before language pragmas. Keep the module's
+Haddock introduction immediately before its declaration. License notices are
+ordinary comments, not API documentation.
+
+Use consistent comment banners, similar to the C sources, for meaningful groups:
+
+```haskell
+-- IMPORTS --------------------------------------------------------------------
+
+-- TYPES ----------------------------------------------------------------------
+
+-- CONSTRUCTION ---------------------------------------------------------------
+
+-- INTERNAL HELPERS -----------------------------------------------------------
+```
+
+Choose domain-specific section names when useful. Small modules need only a few
+sections; do not add empty regions or a banner per declaration. Export-list
+Haddock headings remain the navigation for generated API documentation.
+
+Keep functions focused on one responsibility. Prefer short orchestration functions
+and named helpers for distinct validation, acquisition, execution, and conversion
+steps. Roughly 20–30 lines is a review prompt, not a hard limit: never split a
+resource scope or cancellation protocol merely to meet a line count. Helpers must
+clarify intent and retain the same exception masking, cleanup, evaluation order,
+and resource lifetime. Keep closely related local helpers local when that makes
+their scope clearer. Name test scenarios instead of embedding long sequences in
+the test tree; preserve lifecycle-test ordering where global counters require it.
+
+Keep C headers out of Haskell source. Write native constants explicitly and record
+their source in internal comments; verify them against the pinned headers in tests.
+Keep ABI-dependent representation conversions in small C adapters. Do not replace
+header-derived types with guessed platform sizes or signedness.

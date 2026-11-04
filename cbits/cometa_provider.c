@@ -136,7 +136,7 @@ cometa_provider_await(
 
 /* DEFINITIONS ***************************************************************/
 
-cardano_error_t
+unsigned int
 cometa_provider_new(
   HsStablePtr                    state,
   cometa_confirmation_callback_t callback,
@@ -195,7 +195,7 @@ cometa_provider_release(cardano_provider_t* provider)
   cardano_provider_unref(&provider);
 }
 
-cardano_error_t
+unsigned int
 cometa_provider_confirm(
   cardano_provider_t*  provider,
   const unsigned char* hash,
@@ -233,6 +233,12 @@ const char*
 cometa_provider_error(const cardano_provider_t* provider)
 {
   return cardano_provider_get_last_error(provider);
+}
+
+const char*
+cometa_error_message(unsigned int code)
+{
+  return cardano_error_to_string((cardano_error_t)code);
 }
 
 size_t

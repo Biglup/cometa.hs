@@ -139,10 +139,11 @@ Likely optional packages:
 - cardano-api interoperability: explicit conversions for applications already
   depending on that ecosystem; schedule after the first complete binding.
 
-Use Cabal with explicit dependency bounds and tested GHC versions. Evaluate
-`hsc2hs` or equivalent header-derived declarations for ABI sizes/offsets. Do not
-select a generator solely because it emits function declarations: ownership still
-needs manual auditing. Any C shim must be small, documented, and tested.
+Use Cabal with explicit dependency bounds and tested GHC versions. Keep native
+constants as explicit Haskell definitions, with tests comparing their values
+against the pinned C headers. Keep platform-dependent layouts and enum conversion
+in small C adapters rather than embedding C headers in Haskell modules. Ownership
+still needs manual auditing; adapters must be documented and tested.
 
 ## 5. Domain values and native API coverage
 

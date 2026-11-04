@@ -1,3 +1,17 @@
+-- Copyright 2026 Biglup Labs
+-- SPDX-License-Identifier: Apache-2.0
+--
+-- Licensed under the Apache License, Version 2.0 (the "License");
+-- you may not use this file except in compliance with the License.
+-- You may obtain a copy of the License at
+--
+--     https://www.apache.org/licenses/LICENSE-2.0
+--
+-- Unless required by applicable law or agreed to in writing, software
+-- distributed under the License is distributed on an "AS IS" BASIS,
+-- WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-- See the License for the specific language governing permissions and
+-- limitations under the License.
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# OPTIONS_HADDOCK hide #-}
@@ -24,6 +38,8 @@ module Cometa.Internal.Callback
   )
 where
 
+-- IMPORTS --------------------------------------------------------------------
+
 import qualified Cometa.Internal.FFI.Provider as Native
 import Control.Concurrent (ThreadId, forkIOWithUnmask, newEmptyMVar, putMVar, readMVar, takeMVar, throwTo)
 import Control.Concurrent.MVar (MVar, modifyMVar, modifyMVar_, newMVar, withMVar)
@@ -43,6 +59,8 @@ import Foreign.Ptr (castPtr, nullPtr)
 import Foreign.StablePtr (deRefStablePtr)
 import Foreign.Storable (poke, pokeByteOff)
 
+-- TYPES ----------------------------------------------------------------------
+
 -- | Timeout is milliseconds; the hash is an owned 32-byte Haskell snapshot.
 -- Expected failures return text. Thrown exceptions propagate after C returns.
 -- The user action runs on its own Haskell thread, with the initiating caller's
@@ -59,6 +77,8 @@ newtype CallbackControl = CallbackControl (MVar (Maybe Operation))
 
 -- | Handler and operation state rooted by the native context's stable pointer.
 data CallbackState = CallbackState ConfirmationHandler CallbackControl
+
+-- CALLBACK STATE -------------------------------------------------------------
 
 -- | Start with no active operation or retained exception.
 newCallbackControl :: IO CallbackControl
@@ -113,6 +133,8 @@ rememberCallbackException (CallbackControl control) cause =
         Nothing -> writeIORef slot (Just cause)
         Just _ -> pure ()
 
+-- NATIVE CALLBACK ------------------------------------------------------------
+
 -- | Catch every user exception, including marshaling and lazy results, before
 -- returning a native failure. Emergency handling does not render user values.
 confirmationCallback :: Native.ConfirmationCallback CallbackState
@@ -139,18 +161,14 @@ confirmationCallback stable hash size timeout confirmed diagnostic capacity =
       )
       `catch` failed
 
+-- WORKER LIFETIME ------------------------------------------------------------
+
 -- | The user worker's entire lifetime is enclosed by the ABI callback. Even an
 -- unexpected asynchronous exception in the ABI thread cancels and joins this
 -- worker before the callback's outer catch can return to C.
 runCallbackWorker :: forall a. CallbackControl -> IO a -> IO a
 runCallbackWorker (CallbackControl control) action = mask $ \restore -> do
-  masking <- withMVar control $ \case
-    Just (Operation state exception _ _) -> do
-      previous <- readIORef exception
-      maybe (pure ()) throwIO previous
-      pure state
-    Nothing -> throwIO (userError "confirmation callback outside its operation")
-
+  masking <- callbackMaskingState control
   start <- newEmptyMVar
   finished <- newEmptyMVar :: IO (MVar (Either SomeException a))
   worker <- forkIOWithUnmask $ \unmask -> do
@@ -162,16 +180,8 @@ runCallbackWorker (CallbackControl control) action = mask $ \restore -> do
         MaskedUninterruptible -> uninterruptibleMask_ action
     putMVar finished outcome
 
-  let cancelAndJoin (cause :: SomeException) = uninterruptibleMask_ $ do
-        throwTo worker cause
-        _ <- readMVar finished
-        throwIO cause
-
   ( do
-      pending <- modifyMVar control $ \case
-        Just (Operation state exception cause _) -> pure (Just (Operation state exception cause (Just worker)), cause)
-        Nothing -> pure (Nothing, Nothing)
-      maybe (putMVar start ()) (throwTo worker) pending
+      registerCallbackWorker control worker start
 
       outcome <- restore (readMVar finished)
       modifyMVar_ control $ \current -> pure $ case current of
@@ -179,7 +189,35 @@ runCallbackWorker (CallbackControl control) action = mask $ \restore -> do
         Nothing -> Nothing
       either throwIO pure outcome
     )
-    `catch` cancelAndJoin
+    `catch` cancelAndJoinWorker worker finished
+
+-- | Check that an operation is active before starting a user worker, preserving
+-- an earlier callback exception instead of invoking the handler again.
+callbackMaskingState :: MVar (Maybe Operation) -> IO MaskingState
+callbackMaskingState control = withMVar control $ \case
+  Just (Operation state exception _ _) -> do
+    previous <- readIORef exception
+    maybe (pure ()) throwIO previous
+    pure state
+  Nothing -> throwIO (userError "confirmation callback outside its operation")
+
+-- | Publish the worker before opening its gate. Pending cancellation is delivered
+-- instead of starting the user action. The caller keeps the ABI thread masked.
+registerCallbackWorker :: MVar (Maybe Operation) -> ThreadId -> MVar () -> IO ()
+registerCallbackWorker control worker start = do
+  pending <- modifyMVar control $ \case
+    Just (Operation state exception cause _) -> pure (Just (Operation state exception cause (Just worker)), cause)
+    Nothing -> pure (Nothing, Nothing)
+  maybe (putMVar start ()) (throwTo worker) pending
+
+-- | Never let cancellation leave the ABI callback while its user worker lives.
+cancelAndJoinWorker :: ThreadId -> MVar (Either SomeException a) -> SomeException -> IO b
+cancelAndJoinWorker worker finished cause = uninterruptibleMask_ $ do
+  throwTo worker cause
+  _ <- readMVar finished
+  throwIO cause
+
+-- DIAGNOSTICS ----------------------------------------------------------------
 
 -- | Copy UTF-8 bytes into a borrowed C buffer, reserving a trailing NUL.
 -- Truncation is by byte capacity and may split a multibyte UTF-8 sequence.

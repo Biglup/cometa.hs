@@ -1,9 +1,25 @@
+-- Copyright 2026 Biglup Labs
+-- SPDX-License-Identifier: Apache-2.0
+--
+-- Licensed under the Apache License, Version 2.0 (the "License");
+-- you may not use this file except in compliance with the License.
+-- You may obtain a copy of the License at
+--
+--     https://www.apache.org/licenses/LICENSE-2.0
+--
+-- Unless required by applicable law or agreed to in writing, software
+-- distributed under the License is distributed on an "AS IS" BASIS,
+-- WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-- See the License for the specific language governing permissions and
+-- limitations under the License.
 {-# LANGUAGE OverloadedStrings #-}
 
 -- | Ownership evidence against the actual pinned cardano-c provider callback.
 -- The suite is sequential because it checks process-wide native allocation and
 -- unwind counters; independent providers are explicitly overlapped below.
 module Callback (tests) where
+
+-- IMPORTS --------------------------------------------------------------------
 
 import qualified Cometa.Error.Code as Code
 import qualified Cometa.Internal.Callback as Bridge
@@ -25,16 +41,38 @@ import System.Timeout (timeout)
 import Test.Tasty (TestTree)
 import Test.Tasty.HUnit (assertBool, assertFailure, testCase, (@?=))
 
+-- FIXTURE TYPES --------------------------------------------------------------
+
 -- Distinct from expected native failures, so exception identity is observable.
 data CallbackException = CallbackException deriving (Eq, Show)
 
 instance Exception CallbackException
 
+-- TESTS ----------------------------------------------------------------------
+
 tests :: TestTree
 tests = testCase "native provider callback ownership, exceptions and cancellation" $ do
   baseline <- Provider.liveCallbackContexts
   checkRegistrationRelease
+  checkCopiedArguments baseline
+  checkRetainedHandle baseline
+  checkFailureRecovery
+  checkExceptionalResults
+  checkPendingCancellation
+  checkCancellation baseline
+  checkDelayedCancellation baseline
+  checkFastCancellationRaces
+  checkCallerMasking
+  checkConcurrencyAndClose baseline
+  checkReentry
+  checkRepeatedFailures
+  performGC
+  Provider.liveCallbackContexts >>= (@?= baseline)
 
+-- SCENARIOS ------------------------------------------------------------------
+
+checkCopiedArguments :: Int -> IO ()
+checkCopiedArguments baseline = do
   copied <- newIORef ByteString.empty
   Provider.withProvider
     ( \hash milliseconds -> do
@@ -54,6 +92,8 @@ tests = testCase "native provider callback ownership, exceptions and cancellatio
   readIORef copied >>= (@?= transactionId)
   Provider.liveCallbackContexts >>= (@?= baseline)
 
+checkRetainedHandle :: Int -> IO ()
+checkRetainedHandle baseline = do
   escaped <- Provider.withProvider (\_ _ -> pure (Right True)) $ \original -> do
     Provider.withRetainedProvider original $ \retained -> do
       closeTwice original
@@ -65,6 +105,8 @@ tests = testCase "native provider callback ownership, exceptions and cancellatio
   Provider.confirmTransaction escaped transactionId 0 >>= (@?= Left Provider.ProviderClosed)
   Provider.liveCallbackContexts >>= (@?= baseline)
 
+checkFailureRecovery :: IO ()
+checkFailureRecovery = do
   count <- newIORef (0 :: Int)
   Provider.withProvider
     ( \_ _ -> do
@@ -77,6 +119,8 @@ tests = testCase "native provider callback ownership, exceptions and cancellatio
         >>= (@?= Left (Provider.ProviderNativeFailure (Code.toNumber Code.GenericFailure) "declined"))
       Provider.confirmTransaction provider transactionId 0 >>= (@?= Right True)
 
+checkExceptionalResults :: IO ()
+checkExceptionalResults =
   mapM_
     checkThrown
     [ \_ _ -> throwIO CallbackException,
@@ -85,30 +129,13 @@ tests = testCase "native provider callback ownership, exceptions and cancellatio
       \_ _ -> pure (throw CallbackException)
     ]
 
-  checkPendingCancellation
-  checkCancellation baseline
-  checkDelayedCancellation baseline
-  checkFastCancellationRaces
-  checkCallerMasking
-  checkConcurrencyAndClose baseline
-  checkReentry
-
+checkRepeatedFailures :: IO ()
+checkRepeatedFailures =
   replicateM_ 50 $ do
     Provider.withProvider (\_ _ -> pure (Left "expected failure")) $ \provider -> do
       result <- Provider.confirmTransaction provider transactionId 0
       result @?= Left (Provider.ProviderNativeFailure (Code.toNumber Code.GenericFailure) "expected failure")
     checkThrown (\_ _ -> throwIO CallbackException)
-
-  performGC
-  Provider.liveCallbackContexts >>= (@?= baseline)
-
--- Deterministic 32-byte input, independent of the provider under test.
-transactionId :: ByteString.ByteString
-transactionId = ByteString.pack [0 .. 31]
-
--- Exercise handle idempotence even when native ownership is shared.
-closeTwice :: Provider.Provider -> IO ()
-closeTwice provider = Provider.closeProvider provider >> Provider.closeProvider provider
 
 -- Callback exceptions may reach Haskell only after the C call has unwound.
 checkThrown :: Provider.ConfirmationHandler -> IO ()
@@ -120,6 +147,23 @@ checkThrown handler = do
     -- This counter is incremented in C after the real provider call and hash
     -- destructor. An exception escaping through the ABI cannot satisfy it.
     Provider.completedNativeCalls >>= (@?= before + 1)
+
+-- The marker is reachable only through the handler after this helper returns.
+-- A leaked StablePtr keeps it alive even after the native context counter falls.
+checkRegistrationRelease :: IO ()
+checkRegistrationRelease = do
+  finalized <- newEmptyMVar
+  (closed, weak) <- withMarkedProvider (putMVar finalized ()) $ \provider marker -> do
+    performGC
+    deRefWeak marker >>= assertBool "native registration roots captured state" . isJust
+    Provider.confirmTransaction provider transactionId 0 >>= (@?= Right True)
+    pure (provider, marker)
+  performGC
+  Provider.confirmTransaction closed transactionId 0 >>= (@?= Left Provider.ProviderClosed)
+  waitFor "callback registration finalization" (takeMVar finalized)
+  deRefWeak weak >>= assertBool "final native release frees the StablePtr root" . isNothing
+
+-- CANCELLATION AND CONCURRENCY -----------------------------------------------
 
 -- Cancellation of a blocked handler must join native work before propagating.
 checkCancellation :: Int -> IO ()
@@ -195,37 +239,7 @@ checkReentry = do
   -- Do not keep the closed handle in a test-owned reference unnecessarily.
   writeIORef owner Nothing
 
--- Bound synchronization waits so a broken lifecycle yields a test failure.
-waitFor :: String -> IO a -> IO a
-waitFor label action = do
-  result <- timeout 10000000 action
-  case result of
-    Nothing -> assertFailure (label ++ " timed out") >> fail label
-    Just value -> pure value
-
--- The marker is reachable only through the handler after this helper returns.
--- A leaked StablePtr keeps it alive even after the native context counter falls.
-checkRegistrationRelease :: IO ()
-checkRegistrationRelease = do
-  finalized <- newEmptyMVar
-  (closed, weak) <- withMarkedProvider (putMVar finalized ()) $ \provider marker -> do
-    performGC
-    deRefWeak marker >>= assertBool "native registration roots captured state" . isJust
-    Provider.confirmTransaction provider transactionId 0 >>= (@?= Right True)
-    pure (provider, marker)
-  performGC
-  Provider.confirmTransaction closed transactionId 0 >>= (@?= Left Provider.ProviderClosed)
-  waitFor "callback registration finalization" (takeMVar finalized)
-  deRefWeak weak >>= assertBool "final native release frees the StablePtr root" . isNothing
-
--- Capture the marker only in the native-rooted handler after construction.
-withMarkedProvider :: IO () -> (Provider.Provider -> Weak (IORef Int) -> IO a) -> IO a
-withMarkedProvider finalizer action = do
-  marker <- newIORef (0 :: Int)
-  weak <- mkWeakIORef marker finalizer
-  Provider.withProvider
-    (\_ _ -> modifyIORef' marker (+ 1) >> pure (Right True))
-    (`action` weak)
+-- CANCELLATION BOUNDARIES ----------------------------------------------------
 
 -- Deterministic unit coverage of cancellation arriving before native dispatch.
 -- The normal path above exercises the same trampoline through real cardano-c.
@@ -305,3 +319,30 @@ checkCallerMasking = do
       Provider.confirmTransaction provider transactionId 0 >>= (@?= Right True)
       writeIORef expected MaskedInterruptible
       mask_ (Provider.confirmTransaction provider transactionId 0) >>= (@?= Right True)
+
+-- FIXTURES -------------------------------------------------------------------
+
+-- Deterministic 32-byte input, independent of the provider under test.
+transactionId :: ByteString.ByteString
+transactionId = ByteString.pack [0 .. 31]
+
+-- Exercise handle idempotence even when native ownership is shared.
+closeTwice :: Provider.Provider -> IO ()
+closeTwice provider = Provider.closeProvider provider >> Provider.closeProvider provider
+
+-- Bound synchronization waits so a broken lifecycle yields a test failure.
+waitFor :: String -> IO a -> IO a
+waitFor label action = do
+  result <- timeout 10000000 action
+  case result of
+    Nothing -> assertFailure (label ++ " timed out") >> fail label
+    Just value -> pure value
+
+-- Capture the marker only in the native-rooted handler after construction.
+withMarkedProvider :: IO () -> (Provider.Provider -> Weak (IORef Int) -> IO a) -> IO a
+withMarkedProvider finalizer action = do
+  marker <- newIORef (0 :: Int)
+  weak <- mkWeakIORef marker finalizer
+  Provider.withProvider
+    (\_ _ -> modifyIORef' marker (+ 1) >> pure (Right True))
+    (`action` weak)

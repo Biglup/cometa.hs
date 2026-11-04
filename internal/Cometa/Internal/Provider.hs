@@ -1,3 +1,17 @@
+-- Copyright 2026 Biglup Labs
+-- SPDX-License-Identifier: Apache-2.0
+--
+-- Licensed under the Apache License, Version 2.0 (the "License");
+-- you may not use this file except in compliance with the License.
+-- You may obtain a copy of the License at
+--
+--     https://www.apache.org/licenses/LICENSE-2.0
+--
+-- Unless required by applicable law or agreed to in writing, software
+-- distributed under the License is distributed on an "AS IS" BASIS,
+-- WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-- See the License for the specific language governing permissions and
+-- limitations under the License.
 {-# OPTIONS_HADDOCK hide #-}
 
 -- | Private confirmation adapter and scoped native ownership. This establishes
@@ -22,7 +36,9 @@ module Cometa.Internal.Provider
   )
 where
 
-import Cometa.Internal.Callback (CallbackControl, ConfirmationHandler)
+-- IMPORTS --------------------------------------------------------------------
+
+import Cometa.Internal.Callback (CallbackControl, CallbackState, ConfirmationHandler)
 import qualified Cometa.Internal.Callback as Callback
 import qualified Cometa.Internal.FFI.Native as Native
 import qualified Cometa.Internal.FFI.Provider as FFI
@@ -39,6 +55,8 @@ import Foreign.Marshal.Alloc (alloca)
 import Foreign.Ptr (Ptr, castPtr, freeHaskellFunPtr, nullPtr)
 import Foreign.StablePtr (freeStablePtr, newStablePtr)
 import Foreign.Storable (peek, poke)
+
+-- TYPES ----------------------------------------------------------------------
 
 -- | Expected adapter failures. Acquisition failure is raised as an exception;
 -- confirmation returns these failures explicitly. User exceptions stay original.
@@ -64,6 +82,8 @@ data Shared = Shared (MVar ()) (IORef Bool) CallbackControl
 -- | One independently closable reference plus shared alias synchronization.
 -- Keeping a Haskell handle after its scope ends does not retain native ownership.
 data Provider = Provider (IORef (Maybe (Ptr FFI.NativeProvider))) Shared
+
+-- SCOPED HANDLES -------------------------------------------------------------
 
 -- | Acquire one provider reference and close it on every exit. The native
 -- context roots the handler until the last retained reference is released.
@@ -94,6 +114,8 @@ closeProvider (Provider handle (Shared lifetime _ _)) =
     writeIORef handle Nothing
     maybe (pure ()) FFI.cRelease pointer
 
+-- CONFIRMATION ---------------------------------------------------------------
+
 -- | Confirm through the synchronous native provider using scoped workers.
 -- Independent providers can overlap. Overlap or callback reentry on aliases of
 -- this provider returns ProviderBusy. A closed handle returns ProviderClosed.
@@ -117,27 +139,35 @@ confirmTransaction provider hash timeout
               ( do
                   Callback.beginCallbackOperation state callerMasking
                   finished <- newEmptyMVar
-                  _ <- forkFinally (nativeConfirmation state pointer) (putMVar finished)
-                  let cancelAndJoin cause = uninterruptibleMask_ $ do
-                        Callback.cancelCallbackOperation state cause
-                        _ <- readMVar finished
-                        throwIO (cause :: SomeException)
-                  outcome <- restore (readMVar finished) `catch` cancelAndJoin
+                  _ <- forkFinally (nativeConfirmation state pointer hash timeout) (putMVar finished)
+                  outcome <- restore (readMVar finished) `catch` cancelAndJoinNative state finished
                   either throwIO pure outcome
               )
                 `finally` (Callback.finishCallbackOperation state >> writeIORef busy False)
-  where
-    nativeConfirmation state pointer =
-      ByteString.useAsCStringLen hash $ \(bytes, size) ->
-        alloca $ \confirmed -> do
-          poke confirmed 0
-          code <- FFI.cConfirm pointer (castPtr bytes) (fromIntegral size) timeout confirmed
-          Callback.rethrowCallbackException state
-          if code == Native.success
-            then Right . (/= 0) <$> peek confirmed
-            else do
-              diagnostic <- FFI.cError pointer >>= copyStaticText
-              pure (Left (ProviderNativeFailure (toInteger code) diagnostic))
+
+-- | Borrow buffers through the full native call, then rethrow saved callback
+-- exceptions before translating the native status or reading its diagnostic.
+nativeConfirmation :: CallbackControl -> Ptr FFI.NativeProvider -> ByteString -> Word64 -> IO (Either ProviderError Bool)
+nativeConfirmation state pointer hash timeout =
+  ByteString.useAsCStringLen hash $ \(bytes, size) ->
+    alloca $ \confirmed -> do
+      poke confirmed 0
+      code <- FFI.cConfirm pointer (castPtr bytes) (fromIntegral size) timeout confirmed
+      Callback.rethrowCallbackException state
+      if code == Native.success
+        then Right . (/= 0) <$> peek confirmed
+        else do
+          diagnostic <- FFI.cError pointer >>= copyStaticText
+          pure (Left (ProviderNativeFailure (toInteger code) diagnostic))
+
+-- | Request user cancellation and retain all native state until safe unwind.
+cancelAndJoinNative :: CallbackControl -> MVar (Either SomeException a) -> SomeException -> IO b
+cancelAndJoinNative state finished cause = uninterruptibleMask_ $ do
+  Callback.cancelCallbackOperation state cause
+  _ <- readMVar finished
+  throwIO cause
+
+-- LIFECYCLE EVIDENCE ---------------------------------------------------------
 
 -- | Number of native contexts still rooting Haskell callback registrations.
 -- This instrumentation is lifecycle evidence, not a public API contract.
@@ -148,6 +178,8 @@ liveCallbackContexts = fromIntegral <$> FFI.cLiveContexts
 -- hash cleanup have returned. Used to establish safe exception unwind in tests.
 completedNativeCalls :: IO Integer
 completedNativeCalls = toInteger <$> FFI.cCompletedCalls
+
+-- NATIVE OWNERSHIP -----------------------------------------------------------
 
 -- | Register runtime handles under masking. Successful native construction
 -- adopts both handles; before that transfer, Haskell owns their cleanup.
@@ -160,7 +192,12 @@ acquireProvider handler = mask_ $ do
   handle <- newIORef Nothing
   shared <- evaluate (Shared lifetime busy exceptions)
   provider <- evaluate (Provider handle shared)
+  registerProvider provider state
 
+-- | Install the rooted callback while construction remains masked. Native
+-- success transfers registration cleanup to the context before publication.
+registerProvider :: Provider -> CallbackState -> IO Provider
+registerProvider provider@(Provider handle _) state = do
   stable <- newStablePtr state
   function <- FFI.wrapConfirmation Callback.confirmationCallback `onException` freeStablePtr stable
   let freeRegistration = freeHaskellFunPtr function >> freeStablePtr stable

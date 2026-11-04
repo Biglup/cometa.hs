@@ -1,19 +1,62 @@
+-- Copyright 2026 Biglup Labs
+-- SPDX-License-Identifier: Apache-2.0
+--
+-- Licensed under the Apache License, Version 2.0 (the "License");
+-- you may not use this file except in compliance with the License.
+-- You may obtain a copy of the License at
+--
+--     https://www.apache.org/licenses/LICENSE-2.0
+--
+-- Unless required by applicable law or agreed to in writing, software
+-- distributed under the License is distributed on an "AS IS" BASIS,
+-- WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-- See the License for the specific language governing permissions and
+-- limitations under the License.
+{-# LANGUAGE ForeignFunctionInterface #-}
+
 module ErrorCode (tests) where
 
+-- IMPORTS --------------------------------------------------------------------
+
 import qualified Cometa.Error.Code as Code
+import qualified Cometa.Internal.FFI.Native as Native
 import Data.List (nub)
+import Foreign.C.String (CString, peekCString)
+import Foreign.C.Types (CSize (..), CUInt (..))
+import Foreign.Storable (sizeOf)
 import Hedgehog (Property, forAll, property, (===))
 import qualified Hedgehog.Gen as Gen
 import qualified Hedgehog.Range as Range
 import Test.Tasty (TestTree, testGroup)
-import Test.Tasty.HUnit (testCase, (@?=))
+import Test.Tasty.HUnit (assertEqual, testCase, (@?=))
 import Test.Tasty.Hedgehog (testProperty)
+
+-- TESTS ----------------------------------------------------------------------
 
 tests :: TestTree
 tests =
   testGroup
     "Native error codes"
-    [ testCase "every pinned header code has its expected name and number" $
+    [ testCase "copied codes agree with all installed native header constants" $ do
+        count <- cErrorCodeCount
+        count @?= fromIntegral (length Code.knownCodes)
+        mapM_
+          ( \(index, code) -> do
+              symbol <- cErrorCodeName index >>= peekCString
+              number <- cErrorCodeValue index
+              assertEqual symbol (Code.toNumber code) (toInteger number)
+          )
+          (zip [0 .. count - 1] Code.knownCodes),
+      testCase "explicit unsigned status ABI matches C width and range" $ do
+        cStatusSize >>= (@?= fromIntegral (sizeOf (0 :: Native.NativeCode)))
+        cStatusMax >>= (@?= (maxBound :: Native.NativeCode))
+        mapM_
+          ( \code -> do
+              let number = fromInteger (Code.toNumber code)
+              cStatusRoundTrip number >>= (@?= number)
+          )
+          Code.knownCodes,
+      testCase "every pinned header code has its expected name and number" $
         mapM_
           ( \(code, number) -> do
               Code.toNumber code @?= number
@@ -36,6 +79,8 @@ tests =
       testProperty "arbitrary numeric codes round trip" propNumberRoundTrip
     ]
 
+-- PROPERTIES -----------------------------------------------------------------
+
 propNumberRoundTrip :: Property
 propNumberRoundTrip = property $ do
   number <- forAll (Gen.integral (Range.linear (negate (2 ^ (256 :: Int))) (2 ^ (256 :: Int))))
@@ -43,10 +88,12 @@ propNumberRoundTrip = property $ do
   Code.toNumber code === number
   Code.fromNumber (Code.toNumber code) === code
 
+-- FIXTURES -------------------------------------------------------------------
+
 -- Independent expectations transcribed from cardano/error.h at the pinned
 -- revision 8dc0c55f4132fcaa2e7961b6cfbfea96a6d93b5d (Apache-2.0). These do not
--- reuse the implementation's hsc2hs constants: changed native assignments must
--- trigger review rather than silently updating both sides of the test.
+-- reuse the implementation's copied values. The C oracle independently reads
+-- every installed header constant, so changed native assignments trigger review.
 expectedCodes :: [(Code.ErrorCode, Integer)]
 expectedCodes =
   [ (Code.Success, 0),
@@ -111,3 +158,23 @@ expectedCodes =
     (Code.MissingRedeemer, 1106),
     (Code.ScriptEvaluationFailure, 1200)
   ]
+
+-- TEST-ONLY NATIVE ORACLE -----------------------------------------------------
+
+foreign import ccall unsafe "cometa_test_error_code_count"
+  cErrorCodeCount :: IO CSize
+
+foreign import ccall unsafe "cometa_test_error_code_name"
+  cErrorCodeName :: CSize -> IO CString
+
+foreign import ccall unsafe "cometa_test_error_code_value"
+  cErrorCodeValue :: CSize -> IO CUInt
+
+foreign import ccall unsafe "cometa_test_status_size"
+  cStatusSize :: IO CSize
+
+foreign import ccall unsafe "cometa_test_status_max"
+  cStatusMax :: IO CUInt
+
+foreign import ccall unsafe "cometa_test_status_roundtrip"
+  cStatusRoundTrip :: CUInt -> IO CUInt

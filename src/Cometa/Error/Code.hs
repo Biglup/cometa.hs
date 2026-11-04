@@ -1,3 +1,18 @@
+-- Copyright 2026 Biglup Labs
+-- SPDX-License-Identifier: Apache-2.0
+--
+-- Licensed under the Apache License, Version 2.0 (the "License");
+-- you may not use this file except in compliance with the License.
+-- You may obtain a copy of the License at
+--
+--     https://www.apache.org/licenses/LICENSE-2.0
+--
+-- Unless required by applicable law or agreed to in writing, software
+-- distributed under the License is distributed on an "AS IS" BASIS,
+-- WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-- See the License for the specific language governing permissions and
+-- limitations under the License.
+
 -- | Named cardano-c status codes, including success. Unknown numeric codes are
 -- preserved exactly for logging and interchange. A code can be named even when
 -- this package does not expose operations from the corresponding domain.
@@ -84,9 +99,7 @@ module Cometa.Error.Code
   )
 where
 
-{- ORMOLU_DISABLE -}
-#include <cardano/error.h>
-{- ORMOLU_ENABLE -}
+-- STATUS CODES ---------------------------------------------------------------
 
 -- | A native status code. 'Success' represents a successful operation; all other
 -- named constructors represent failures. Use 'fromNumber' to construct a code
@@ -218,6 +231,8 @@ data ErrorCode
   | UnknownCode !Integer
   deriving (Eq, Show)
 
+-- NUMERIC CONVERSION ---------------------------------------------------------
+
 -- | Interpret a numeric status code. Every integer is accepted, including
 -- negative values and values outside machine integer ranges, without truncation.
 -- A recognized number becomes its named constructor; all others remain unknown.
@@ -231,71 +246,71 @@ fromNumber number = case lookup number [(toNumber code, code) | code <- knownCod
 -- | Return the exact numeric code. No conversion to a bounded machine integer
 -- occurs. This is the inverse of 'fromNumber' on all 'ErrorCode' values.
 toNumber :: ErrorCode -> Integer
-{- ORMOLU_DISABLE -}
 toNumber code = case code of
-  Success -> #{const CARDANO_SUCCESS}
-  GenericFailure -> #{const CARDANO_ERROR_GENERIC}
-  InsufficientBufferSize -> #{const CARDANO_ERROR_INSUFFICIENT_BUFFER_SIZE}
-  NullPointer -> #{const CARDANO_ERROR_POINTER_IS_NULL}
-  MemoryAllocationFailed -> #{const CARDANO_ERROR_MEMORY_ALLOCATION_FAILED}
-  OutOfBoundsMemoryRead -> #{const CARDANO_ERROR_OUT_OF_BOUNDS_MEMORY_READ}
-  OutOfBoundsMemoryWrite -> #{const CARDANO_ERROR_OUT_OF_BOUNDS_MEMORY_WRITE}
-  InvalidArgument -> #{const CARDANO_ERROR_INVALID_ARGUMENT}
-  InvalidUrl -> #{const CARDANO_ERROR_INVALID_URL}
-  ElementNotFound -> #{const CARDANO_ERROR_ELEMENT_NOT_FOUND}
-  EncodingFailure -> #{const CARDANO_ERROR_ENCODING}
-  DecodingFailure -> #{const CARDANO_ERROR_DECODING}
-  ChecksumMismatch -> #{const CARDANO_ERROR_CHECKSUM_MISMATCH}
-  InvalidJson -> #{const CARDANO_ERROR_INVALID_JSON}
-  IntegerOverflow -> #{const CARDANO_ERROR_INTEGER_OVERFLOW}
-  IntegerUnderflow -> #{const CARDANO_ERROR_INTEGER_UNDERFLOW}
-  ConversionFailed -> #{const CARDANO_ERROR_CONVERSION_FAILED}
-  IndexOutOfBounds -> #{const CARDANO_ERROR_INDEX_OUT_OF_BOUNDS}
-  InvalidCertificateType -> #{const CARDANO_ERROR_INVALID_CERTIFICATE_TYPE}
-  NotImplemented -> #{const CARDANO_ERROR_NOT_IMPLEMENTED}
-  InvalidPassphrase -> #{const CARDANO_ERROR_INVALID_PASSPHRASE}
-  IllegalState -> #{const CARDANO_ERROR_ILLEGAL_STATE}
-  DuplicateKey -> #{const CARDANO_ERROR_DUPLICATED_KEY}
-  JsonTypeMismatch -> #{const CARDANO_ERROR_JSON_TYPE_MISMATCH}
-  LossOfPrecision -> #{const CARDANO_ERROR_LOSS_OF_PRECISION}
-  InvalidMagic -> #{const CARDANO_ERROR_INVALID_MAGIC}
-  InvalidChecksum -> #{const CARDANO_ERROR_INVALID_CHECKSUM}
-  InvalidBlake2bHashSize -> #{const CARDANO_ERROR_INVALID_BLAKE2B_HASH_SIZE}
-  InvalidEd25519SignatureSize -> #{const CARDANO_ERROR_INVALID_ED25519_SIGNATURE_SIZE}
-  InvalidEd25519PublicKeySize -> #{const CARDANO_ERROR_INVALID_ED25519_PUBLIC_KEY_SIZE}
-  InvalidEd25519PrivateKeySize -> #{const CARDANO_ERROR_INVALID_ED25519_PRIVATE_KEY_SIZE}
-  InvalidBip32PublicKeySize -> #{const CARDANO_ERROR_INVALID_BIP32_PUBLIC_KEY_SIZE}
-  InvalidBip32PrivateKeySize -> #{const CARDANO_ERROR_INVALID_BIP32_PRIVATE_KEY_SIZE}
-  InvalidBip32DerivationIndex -> #{const CARDANO_ERROR_INVALID_BIP32_DERIVATION_INDEX}
-  UnexpectedCborType -> #{const CARDANO_ERROR_UNEXPECTED_CBOR_TYPE}
-  InvalidCborValue -> #{const CARDANO_ERROR_INVALID_CBOR_VALUE}
-  InvalidCborArraySize -> #{const CARDANO_ERROR_INVALID_CBOR_ARRAY_SIZE}
-  InvalidCborMapSize -> #{const CARDANO_ERROR_INVALID_CBOR_MAP_SIZE}
-  DuplicateCborMapKey -> #{const CARDANO_ERROR_DUPLICATED_CBOR_MAP_KEY}
-  InvalidCborMapKey -> #{const CARDANO_ERROR_INVALID_CBOR_MAP_KEY}
-  InvalidAddressType -> #{const CARDANO_ERROR_INVALID_ADDRESS_TYPE}
-  InvalidAddressFormat -> #{const CARDANO_ERROR_INVALID_ADDRESS_FORMAT}
-  InvalidCredentialType -> #{const CARDANO_ERROR_INVALID_CREDENTIAL_TYPE}
-  InvalidPlutusDataConversion -> #{const CARDANO_ERROR_INVALID_PLUTUS_DATA_CONVERSION}
-  InvalidDatumType -> #{const CARDANO_ERROR_INVALID_DATUM_TYPE}
-  InvalidScriptLanguage -> #{const CARDANO_ERROR_INVALID_SCRIPT_LANGUAGE}
-  InvalidNativeScriptType -> #{const CARDANO_ERROR_INVALID_NATIVE_SCRIPT_TYPE}
-  InvalidPlutusCostModel -> #{const CARDANO_ERROR_INVALID_PLUTUS_COST_MODEL}
-  InvalidProposalProcedureType -> #{const CARDANO_ERROR_INVALID_PROCEDURE_PROPOSAL_TYPE}
-  InvalidMetadatumConversion -> #{const CARDANO_ERROR_INVALID_METADATUM_CONVERSION}
-  InvalidMetadatumTextStringSize -> #{const CARDANO_ERROR_INVALID_METADATUM_TEXT_STRING_SIZE}
-  InvalidMetadatumBoundedBytesSize -> #{const CARDANO_ERROR_INVALID_METADATUM_BOUNDED_BYTES_SIZE}
-  InvalidHttpRequest -> #{const CARDANO_ERROR_INVALID_HTTP_REQUEST}
-  InsufficientBalance -> #{const CARDANO_ERROR_BALANCE_INSUFFICIENT}
-  UtxoNotFragmentedEnough -> #{const CARDANO_ERROR_UTXO_NOT_FRAGMENTED_ENOUGH}
-  UtxoFullyDepleted -> #{const CARDANO_ERROR_UTXO_FULLY_DEPLETED}
-  MaximumInputCountExceeded -> #{const CARDANO_ERROR_MAXIMUM_INPUT_COUNT_EXCEEDED}
-  UnbalancedSubTransactions -> #{const CARDANO_ERROR_UNBALANCED_SUB_TRANSACTIONS}
-  DisallowedSupplementalDatums -> #{const CARDANO_ERROR_NOT_ALLOWED_SUPPLEMENTAL_DATUMS}
-  MissingRedeemer -> #{const CARDANO_ERROR_MISSING_REDEEMER}
-  ScriptEvaluationFailure -> #{const CARDANO_ERROR_SCRIPT_EVALUATION_FAILURE}
+  Success -> 0
+  GenericFailure -> 1
+  InsufficientBufferSize -> 2
+  NullPointer -> 3
+  MemoryAllocationFailed -> 4
+  OutOfBoundsMemoryRead -> 5
+  OutOfBoundsMemoryWrite -> 6
+  InvalidArgument -> 7
+  InvalidUrl -> 8
+  ElementNotFound -> 9
+  EncodingFailure -> 10
+  DecodingFailure -> 11
+  ChecksumMismatch -> 12
+  InvalidJson -> 13
+  IntegerOverflow -> 14
+  IntegerUnderflow -> 15
+  ConversionFailed -> 16
+  IndexOutOfBounds -> 17
+  InvalidCertificateType -> 18
+  NotImplemented -> 19
+  InvalidPassphrase -> 20
+  IllegalState -> 21
+  DuplicateKey -> 22
+  JsonTypeMismatch -> 23
+  LossOfPrecision -> 100
+  InvalidMagic -> 101
+  InvalidChecksum -> 102
+  InvalidBlake2bHashSize -> 200
+  InvalidEd25519SignatureSize -> 201
+  InvalidEd25519PublicKeySize -> 202
+  InvalidEd25519PrivateKeySize -> 203
+  InvalidBip32PublicKeySize -> 204
+  InvalidBip32PrivateKeySize -> 205
+  InvalidBip32DerivationIndex -> 206
+  UnexpectedCborType -> 300
+  InvalidCborValue -> 301
+  InvalidCborArraySize -> 302
+  InvalidCborMapSize -> 303
+  DuplicateCborMapKey -> 304
+  InvalidCborMapKey -> 305
+  InvalidAddressType -> 400
+  InvalidAddressFormat -> 401
+  InvalidCredentialType -> 500
+  InvalidPlutusDataConversion -> 600
+  InvalidDatumType -> 601
+  InvalidScriptLanguage -> 700
+  InvalidNativeScriptType -> 701
+  InvalidPlutusCostModel -> 702
+  InvalidProposalProcedureType -> 800
+  InvalidMetadatumConversion -> 900
+  InvalidMetadatumTextStringSize -> 901
+  InvalidMetadatumBoundedBytesSize -> 902
+  InvalidHttpRequest -> 1000
+  InsufficientBalance -> 1100
+  UtxoNotFragmentedEnough -> 1101
+  UtxoFullyDepleted -> 1102
+  MaximumInputCountExceeded -> 1103
+  UnbalancedSubTransactions -> 1104
+  DisallowedSupplementalDatums -> 1105
+  MissingRedeemer -> 1106
+  ScriptEvaluationFailure -> 1200
   UnknownCode number -> number
-{- ORMOLU_ENABLE -}
+
+-- INSPECTION -----------------------------------------------------------------
 
 -- | Whether a code has a name in this build of the package.
 -- This does not indicate success: use equality with 'Success' for that purpose.

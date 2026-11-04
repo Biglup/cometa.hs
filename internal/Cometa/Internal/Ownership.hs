@@ -1,3 +1,17 @@
+-- Copyright 2026 Biglup Labs
+-- SPDX-License-Identifier: Apache-2.0
+--
+-- Licensed under the Apache License, Version 2.0 (the "License");
+-- you may not use this file except in compliance with the License.
+-- You may obtain a copy of the License at
+--
+--     https://www.apache.org/licenses/LICENSE-2.0
+--
+-- Unless required by applicable law or agreed to in writing, software
+-- distributed under the License is distributed on an "AS IS" BASIS,
+-- WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-- See the License for the specific language governing permissions and
+-- limitations under the License.
 {-# LANGUAGE OverloadedStrings #-}
 {-# OPTIONS_HADDOCK hide #-}
 
@@ -14,6 +28,8 @@ module Cometa.Internal.Ownership
   )
 where
 
+-- IMPORTS --------------------------------------------------------------------
+
 import qualified Cometa.Internal.FFI.Native as Native
 import Cometa.Internal.Failure (NativeFailure (..))
 import Control.Exception (bracket, finally)
@@ -27,6 +43,8 @@ import Foreign.Marshal.Alloc (alloca)
 import Foreign.Ptr (Ptr, castPtr, nullPtr)
 import Foreign.Storable (peek, poke)
 
+-- DIAGNOSTICS ----------------------------------------------------------------
+
 -- | Copy a static UTF-8 diagnostic. Native diagnostics are expected to be UTF-8;
 -- invalid sequences are replaced rather than raising an unrelated exception.
 copyStaticText :: CString -> IO Text
@@ -34,6 +52,8 @@ copyStaticText pointer =
   if pointer == nullPtr
     then pure ""
     else Text.decodeUtf8With Text.lenientDecode <$> ByteString.packCString pointer
+
+-- OWNED OUTPUTS --------------------------------------------------------------
 
 -- | Scope one owned output reference, including a partial result written before
 -- failure or an exception. Acquisition runs with the caller's masking state after
@@ -70,6 +90,8 @@ withOwnedOutput operation release acquire action =
       if pointer == nullPtr
         then pure ()
         else release slot `finally` poke slot nullPtr
+
+-- HASH SNAPSHOTS -------------------------------------------------------------
 
 -- | Copy borrowed hash storage before releasing its owned output reference.
 -- A null pointer, zero length, or length beyond Haskell's 'Int' range is a native

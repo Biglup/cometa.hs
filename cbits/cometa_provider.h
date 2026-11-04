@@ -81,14 +81,14 @@ typedef int (*cometa_confirmation_callback_t)(
  * \param[in]  callback  Haskell callback trampoline. Must not be NULL.
  * \param[out] provider  Pointer receiving one owned provider reference. Must not be NULL.
  *
- * \returns CARDANO_SUCCESS on success, CARDANO_ERROR_POINTER_IS_NULL for a NULL argument, or
+ * \returns An unsigned status value: CARDANO_SUCCESS on success, CARDANO_ERROR_POINTER_IS_NULL for a NULL argument, or
  *          CARDANO_ERROR_MEMORY_ALLOCATION_FAILED if context or provider allocation fails.
  *
  * \note On success, ownership of both runtime handles transfers to the native context. On failure,
  *       neither handle transfers; the caller must release both. When all arguments are non-NULL,
  *       the output slot is initialized to NULL before allocation.
  */
-cardano_error_t cometa_provider_new(
+unsigned int cometa_provider_new(
   HsStablePtr                    state,
   cometa_confirmation_callback_t callback,
   cardano_provider_t**           provider);
@@ -128,13 +128,13 @@ void cometa_provider_release(cardano_provider_t* provider);
  * \param[in]  timeout_ms  Confirmation timeout in milliseconds.
  * \param[out] confirmed   Pointer receiving 0 or 1. Must not be NULL. Initialized to 0 after argument validation.
  *
- * \returns CARDANO_ERROR_POINTER_IS_NULL for a NULL argument, or the status returned by hash
+ * \returns An unsigned status value: CARDANO_ERROR_POINTER_IS_NULL for a NULL argument, or the status returned by hash
  *          construction or native transaction confirmation.
  *
  * \note The caller must retain an operation reference until this call returns, including during
  *       callback cancellation. A timeout does not authorize releasing state still used by C.
  */
-cardano_error_t cometa_provider_confirm(
+unsigned int cometa_provider_confirm(
   cardano_provider_t*  provider,
   const unsigned char* hash,
   size_t               hash_size,
@@ -151,6 +151,15 @@ cardano_error_t cometa_provider_confirm(
  * \note Copy the string before releasing its owner or starting another operation that may overwrite it.
  */
 const char* cometa_provider_error(const cardano_provider_t* provider);
+
+/**
+ * \brief Retrieves a native status diagnostic through the explicit unsigned status ABI.
+ *
+ * \param[in] code Numeric status converted to the native enum inside this adapter.
+ *
+ * \returns A borrowed static diagnostic string. The caller must not modify or free it.
+ */
+const char* cometa_error_message(unsigned int code);
 
 /**
  * \brief Retrieves the process-wide number of live callback contexts.
