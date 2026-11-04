@@ -15,9 +15,12 @@ main = do
   let message = case arguments of
         [] -> "Hello, Cardano!"
         _ -> unwords arguments
+
   version <- Cometa.nativeVersion
   Text.putStrLn (Text.pack "cardano-c " <> version)
+
   result <- Blake2b.compute 32 (Text.encodeUtf8 (Text.pack message))
+
   case result of
     Left failure -> die (show failure)
     Right digest -> Text.putStrLn (Blake2b.toHex digest)

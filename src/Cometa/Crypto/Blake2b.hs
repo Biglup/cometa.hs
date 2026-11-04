@@ -1,20 +1,24 @@
 {-# LANGUAGE OverloadedStrings #-}
 
--- | BLAKE2b digests as immutable Haskell-owned bytes. This general digest type
--- does not identify a payment, stake, or script role. It must not be used as a
--- substitute for future role-specific hash types.
+-- | BLAKE2b digests as immutable byte sequences. This general digest type does
+-- not distinguish payment, stake, or script hashes.
 --
 -- @
 -- import qualified Cometa.Crypto.Blake2b as Blake2b
+-- import qualified Data.ByteString.Char8 as ByteString
 --
--- result <- Blake2b.compute 32 messageBytes
--- print (Blake2b.toHex <$> result)
+-- main :: IO ()
+-- main = do
+--   result <- Blake2b.compute 32 (ByteString.pack "abc")
+--   print (Blake2b.toHex <$> result)
 -- @
 module Cometa.Crypto.Blake2b
   ( Blake2bHash,
 
-    -- * Construction
+    -- * Hashing
     compute,
+
+    -- * Importing digests
     fromBytes,
     fromHex,
 
@@ -45,8 +49,15 @@ newtype Blake2bHash = Blake2bHash ByteString
 
 -- | Compute an unkeyed digest with an output length of 16 through 64 bytes.
 -- Invalid output lengths return 'InvalidHashLength'. Empty messages are currently
--- unsupported and return 'NativeError'.
-compute :: Int -> ByteString -> IO (Either Error Blake2bHash)
+-- unsupported and return 'NativeError' with code 'Code.OutOfBoundsMemoryRead'.
+-- Other cardano-c failures also return 'NativeError'.
+compute ::
+  -- | Digest length in bytes, from 16 through 64 inclusive.
+  Int ->
+  -- | Nonempty message to hash.
+  ByteString ->
+  -- | Digest with the requested length, or a validation or operation failure.
+  IO (Either Error Blake2bHash)
 compute hashLength bytes
   | hashLength < 16 || hashLength > 64 = pure (Left (InvalidHashLength hashLength))
   | otherwise =

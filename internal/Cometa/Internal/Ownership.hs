@@ -45,7 +45,12 @@ copyStaticText pointer =
 -- transfer, or replace it. Its result must not contain a borrowed native view.
 -- The bounded destructor must not throw or block interruptibly. Clearing the
 -- slot records release even when another native owner keeps the object alive.
-withOwnedOutput :: Text -> (Ptr (Ptr native) -> IO ()) -> (Ptr (Ptr native) -> IO Native.NativeCode) -> (Ptr native -> IO (Either NativeFailure value)) -> IO (Either NativeFailure value)
+withOwnedOutput ::
+  Text ->
+  (Ptr (Ptr native) -> IO ()) ->
+  (Ptr (Ptr native) -> IO Native.NativeCode) ->
+  (Ptr native -> IO (Either NativeFailure value)) ->
+  IO (Either NativeFailure value)
 withOwnedOutput operation release acquire action =
   alloca $ \slot ->
     bracket (poke slot nullPtr >> pure slot) cleanup $ \output -> do
@@ -67,6 +72,8 @@ withOwnedOutput operation release acquire action =
         else release slot `finally` poke slot nullPtr
 
 -- | Copy borrowed hash storage before releasing its owned output reference.
+-- A null pointer, zero length, or length beyond Haskell's 'Int' range is a native
+-- contract failure. No borrowed storage escapes in the returned bytes.
 copyHashResult :: Text -> (Ptr (Ptr Native.NativeHash) -> IO Native.NativeCode) -> IO (Either NativeFailure ByteString)
 copyHashResult operation acquire =
   withOwnedOutput operation Native.cUnref acquire $ \hash -> do

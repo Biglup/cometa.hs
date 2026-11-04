@@ -7,8 +7,8 @@ import to keep conversions and operations easy to identify:
 import qualified Cometa.Crypto.Blake2b as Blake2b
 ```
 
-A hash owns its bytes as a Haskell value. Callers do not allocate or release native
-objects.
+A hash is an immutable value. Its bytes remain available for as long as you keep
+the value.
 
 ## Construct and inspect
 
@@ -21,17 +21,16 @@ not enforce a role-specific hash length. This general digest type is not a
 payment, stake, or script hash.
 
 `toBytes` returns the digest bytes, and `toHex` returns lowercase hexadecimal
-text without a prefix.
-Neither operation changes the value. Use these conversions for interchange;
+text without a prefix. Neither operation changes the value. Use these conversions for interchange;
 `Show` is diagnostic output.
 
 ## Compute a digest
 
-`compute` hashes a message using the native Blake2b implementation. Its type makes
-the effect explicit: callers receive a result in `IO`, with expected failures
+`compute` hashes a message with Blake2b. Callers receive a result in `IO`, with expected failures
 represented by `Either`. Its first argument selects a digest length from 16
 through 64 bytes, and its second argument is the message as a `ByteString`.
-The current native operation rejects an empty message.
+An out-of-range length returns `InvalidHashLength`. An empty message returns
+`NativeError` with `Code.OutOfBoundsMemoryRead`.
 
 The repository includes a complete runnable program in `examples/Hash.hs`:
 
@@ -53,5 +52,10 @@ error path; a failed conversion must not be treated as an empty hash.
 `NativeError` carries an `ErrorCode` from `Cometa.Error.Code`. Compare codes
 with named constructors, such as `Code.InvalidArgument`, rather than parsing
 diagnostic messages. `Code.toNumber` returns the original numeric value for
-logging or interchange. `Code.fromNumber` preserves unrecognized codes, and
-`Code.isKnown` reports whether a code has a name in this build.
+logging or interchange. `Code.fromNumber` preserves every integer, including
+unrecognized codes. `Code.isKnown` reports whether a code has a name in this
+build; it does not indicate success. Use `Code.Success` to test for success.
+
+`NativeContractViolation` means an operation reported success without a valid
+result. Asynchronous cancellation remains an exception rather than a `Left`
+value.

@@ -1,10 +1,14 @@
--- | Expected validation and native failures. Applications can pattern-match on
--- errors without parsing diagnostic text.
+-- | Validation and operation failures. Match constructors and status codes to
+-- handle errors; diagnostic messages are intended for people.
 --
 -- @
--- case result of
+-- import qualified Cometa.Crypto.Blake2b as Blake2b
+-- import qualified Data.ByteString as ByteString
+--
+-- main :: IO ()
+-- main = case Blake2b.fromBytes ByteString.empty of
 --   Left err -> print err
---   Right value -> use value
+--   Right digest -> print digest
 -- @
 module Cometa.Error
   ( Error (..),
@@ -14,21 +18,29 @@ where
 import Cometa.Error.Code (ErrorCode)
 import Data.Text (Text)
 
--- | Errors returned by Cometa operations. Native codes and messages are copied
--- verbatim from cardano-c; no unknown native code is discarded.
+-- | Expected failures returned by Cometa operations. Equality compares every
+-- payload, including diagnostic text. 'Show' is diagnostic output.
 data Error
-  = -- | @NativeError operation code message@ preserves the operation name,
-    -- exact numeric @cardano_error_t@ value, and native description. Operation
-    -- names never contain user input.
-    NativeError !Text !ErrorCode !Text
-  | -- | BLAKE2b computation requires a digest length from 16 through 64 bytes.
-    InvalidHashLength !Int
-  | -- | A digest byte sequence must be nonempty.
+  = -- | An operation failed with a cardano-c status code. Unknown numeric codes
+    -- remain available through @toNumber@ in "Cometa.Error.Code".
+    NativeError
+      -- | Operation name, such as @blake2b.compute@; excludes user input.
+      !Text
+      -- | Exact status code, with a name when recognized.
+      !ErrorCode
+      -- | Diagnostic message; do not parse it to determine the failure.
+      !Text
+  | -- | The requested BLAKE2b digest length is outside 16 through 64 bytes.
+    InvalidHashLength
+      -- | Requested digest length in bytes.
+      !Int
+  | -- | The digest byte sequence is empty.
     EmptyHash
-  | -- | A hash's hexadecimal input must have a nonzero, even number of ASCII
-    -- hexadecimal digits. Both uppercase and lowercase digits are accepted.
+  | -- | Hexadecimal input is empty, has an odd number of digits, or contains
+    -- characters other than ASCII hexadecimal digits. Both cases are accepted.
     InvalidHex
-  | -- | The native library violated its success-result contract. This is kept
-    -- separate from native error codes rather than inventing a native code.
-    NativeContractViolation !Text
+  | -- | An operation reported success but did not produce a valid result.
+    NativeContractViolation
+      -- | Operation name; excludes user input.
+      !Text
   deriving (Eq, Show)

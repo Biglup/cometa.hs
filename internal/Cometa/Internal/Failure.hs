@@ -12,6 +12,8 @@ import Data.Text (Text)
 -- | Native status, copied context, and contract failures without a dependency on
 -- a public domain API. Numeric codes remain exact, including unknown values.
 data NativeFailure
-  = NativeFailure !Text !Integer !Text
-  | NativeContractFailure !Text
+  = -- | Operation label, exact native status, and copied diagnostic.
+    NativeFailure !Text !Integer !Text
+  | -- | Operation label for a successful status with an invalid native result.
+    NativeContractFailure !Text
   deriving (Eq, Show)

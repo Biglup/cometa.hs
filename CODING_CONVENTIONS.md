@@ -3,6 +3,7 @@
 These rules apply to Cometa.hs. They turn the engineering requirements in
 `docs/development/IMPLEMENTATION_PLAN.md`, section 19, into review criteria.
 Use the checked-in formatter and HLint settings as the mechanical source of truth.
+Before editing, inspect nearby modules and match their organization and vocabulary.
 
 ## Modules, layout, and imports
 
@@ -151,7 +152,19 @@ export must be explicit and explain the loss of controlled lifetime after copyin
 
 Public Haddock describes observable behavior: meaning, parameter units and bounds,
 return values, errors, defaults, ordering, and effects. Each public module explains
-its purpose and has a small valid example. Keep raw ownership mechanics internal.
+its purpose and has a small valid example. Keep raw ownership mechanics internal. Do not put implementation status, future
+roadmaps, pointer ownership, copying strategies, or ABI details in public API
+contracts. Document observable restrictions honestly, including unsupported inputs.
+
+Use Haddock section headings to group related exports. Document constructor
+payloads and arguments when their meaning, units, or bounds are not clear from
+the type. Internal modules should document ownership, synchronization, and exception
+contracts at the declarations that enforce them; ordinary comments explain local
+invariants. Avoid comments that merely repeat a name or narrate a line of code.
+
+Separate acquisition, computation, and result handling with blank lines where they
+form distinct steps. Keep related bindings together. Let Ormolu determine indentation
+and wrapping; do not add decorative C section banners to Haskell modules.
 Use the Microsoft Writing Style Guide as an editorial reference and established
 Haddock syntax for declarations. Narrative pages teach tasks; proposed interfaces
 stay in developer plans and must be labeled as proposals.
@@ -179,7 +192,11 @@ possible. Keep authorized live-network evidence separate from fixture evidence.
 Keep C adapters in `cbits` limited to ABI layout, ownership, and marshaling.
 Use the checked-in `.clang-format` with ClangFormat 18, matching cardano-c's
 formatting. Haskell keeps its own Ormolu conventions. Document adoption, borrowing,
-callback lifetime, and failure ownership at each boundary. Native callbacks must
+callback lifetime, and failure ownership at each boundary. Match the section
+banners, Doxygen `\brief`/`\param`/`\return` comments, header guards, and logical
+spacing in cardano-c provider headers and sources. A formatter alone does not
+establish this organization. Document declarations in headers and local helpers
+next to their definitions; avoid duplicating the same contract in both. Native callbacks must
 never unwind a Haskell exception through C.
 
 ## Compatibility and review

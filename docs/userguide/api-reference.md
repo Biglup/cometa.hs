@@ -13,7 +13,8 @@ cabal haddock all
 ```
 
 Cabal prints the generated HTML location under `dist-newstyle`. Open the package
-index there and browse `Cometa`, `Cometa.Crypto.Blake2b`, `Cometa.Error`, and `Cometa.Error.Code`.
+index for the main library, then browse `Cometa`, `Cometa.Crypto.Blake2b`,
+`Cometa.Error`, and `Cometa.Error.Code`.
 Use the same `--extra-include-dirs` and `--extra-lib-dirs` options as your build
 when the native library is installed outside the default search paths.
 

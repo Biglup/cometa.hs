@@ -5,13 +5,18 @@
 -- retaining creates an independent obligation and an operation temporarily owns
 -- another reference. Native context destruction owns runtime-handle cleanup.
 module Cometa.Internal.Provider
-  ( Provider,
+  ( -- * Scoped handles
+    Provider,
     ProviderError (..),
     ConfirmationHandler,
     withProvider,
     withRetainedProvider,
     closeProvider,
+
+    -- * Confirmation
     confirmTransaction,
+
+    -- * Lifecycle evidence
     liveCallbackContexts,
     completedNativeCalls,
   )
@@ -38,21 +43,31 @@ import Foreign.Storable (peek, poke)
 -- | Expected adapter failures. Acquisition failure is raised as an exception;
 -- confirmation returns these failures explicitly. User exceptions stay original.
 data ProviderError
-  = ProviderClosed
-  | ProviderBusy
-  | InvalidTransactionIdLength !Int
-  | ProviderNativeFailure !Integer !Text
+  = -- | This handle has already released its reference.
+    ProviderClosed
+  | -- | An operation is already active on this provider or a retained alias.
+    ProviderBusy
+  | -- | Supplied transaction ID byte length; exactly 32 bytes are required.
+    InvalidTransactionIdLength !Int
+  | -- | Exact native status and a diagnostic copied before owner release.
+    ProviderNativeFailure !Integer !Text
   deriving (Eq, Show)
 
 instance Exception ProviderError
 
--- All reference-count transitions for aliases of one native object share this
+-- | All reference-count transitions for aliases of one native object share this
 -- lock. Neither it nor the operation gate is held while running user callbacks.
--- The gate's occupied bit stays set; reentry fails instead of blocking.
+-- The fields are the refcount lock, operation gate, and callback control. The
+-- gate's occupied bit stays set; reentry fails instead of blocking.
 data Shared = Shared (MVar ()) (IORef Bool) CallbackControl
 
+-- | One independently closable reference plus shared alias synchronization.
+-- Keeping a Haskell handle after its scope ends does not retain native ownership.
 data Provider = Provider (IORef (Maybe (Ptr FFI.NativeProvider))) Shared
 
+-- | Acquire one provider reference and close it on every exit. The native
+-- context roots the handler until the last retained reference is released.
+-- Construction failures raise 'ProviderError'; user exceptions are preserved.
 withProvider :: ConfirmationHandler -> (Provider -> IO a) -> IO a
 withProvider handler = bracket (acquireProvider handler) closeProvider
 
@@ -124,7 +139,8 @@ confirmTransaction provider hash timeout
               diagnostic <- FFI.cError pointer >>= copyStaticText
               pure (Left (ProviderNativeFailure (toInteger code) diagnostic))
 
--- | Internal allocation evidence; neither statistic is a public API contract.
+-- | Number of native contexts still rooting Haskell callback registrations.
+-- This instrumentation is lifecycle evidence, not a public API contract.
 liveCallbackContexts :: IO Int
 liveCallbackContexts = fromIntegral <$> FFI.cLiveContexts
 
@@ -133,6 +149,8 @@ liveCallbackContexts = fromIntegral <$> FFI.cLiveContexts
 completedNativeCalls :: IO Integer
 completedNativeCalls = toInteger <$> FFI.cCompletedCalls
 
+-- | Register runtime handles under masking. Successful native construction
+-- adopts both handles; before that transfer, Haskell owns their cleanup.
 acquireProvider :: ConfirmationHandler -> IO Provider
 acquireProvider handler = mask_ $ do
   exceptions <- Callback.newCallbackControl
@@ -142,9 +160,11 @@ acquireProvider handler = mask_ $ do
   handle <- newIORef Nothing
   shared <- evaluate (Shared lifetime busy exceptions)
   provider <- evaluate (Provider handle shared)
+
   stable <- newStablePtr state
   function <- FFI.wrapConfirmation Callback.confirmationCallback `onException` freeStablePtr stable
   let freeRegistration = freeHaskellFunPtr function >> freeStablePtr stable
+
   alloca $ \output -> do
     poke output nullPtr
     code <- FFI.cNew stable function output `onException` freeRegistration
@@ -161,6 +181,7 @@ acquireProvider handler = mask_ $ do
         (writeIORef handle (Just pointer) >> pure provider)
           `onException` (writeIORef handle Nothing >> FFI.cRelease pointer)
 
+-- | Retain an open handle while serializing non-atomic native refcounts.
 acquireReference :: Provider -> IO (Either ProviderError (Ptr FFI.NativeProvider))
 acquireReference (Provider handle (Shared lifetime _ _)) =
   -- The lock protects only bounded refcount operations. Its holder never runs
@@ -171,10 +192,13 @@ acquireReference (Provider handle (Shared lifetime _ _)) =
       Nothing -> pure (Left ProviderClosed)
       Just pointer -> FFI.cRef pointer >> pure (Right pointer)
 
+-- | Release one operation reference under the same lock used for retention.
 releaseReference :: Shared -> Ptr FFI.NativeProvider -> IO ()
 releaseReference (Shared lifetime _ _) pointer =
   uninterruptibleMask_ $ withMVar lifetime $ \() -> FFI.cRelease pointer
 
+-- | Keep the native object alive through the action, even if another alias
+-- closes its handle. A closed input handle never runs the action.
 withReference :: Provider -> (Ptr FFI.NativeProvider -> IO (Either ProviderError a)) -> IO (Either ProviderError a)
 withReference provider action = mask $ \restore -> do
   acquired <- acquireReference provider

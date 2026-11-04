@@ -25,6 +25,7 @@ import System.Timeout (timeout)
 import Test.Tasty (TestTree)
 import Test.Tasty.HUnit (assertBool, assertFailure, testCase, (@?=))
 
+-- Distinct from expected native failures, so exception identity is observable.
 data CallbackException = CallbackException deriving (Eq, Show)
 
 instance Exception CallbackException
@@ -33,6 +34,7 @@ tests :: TestTree
 tests = testCase "native provider callback ownership, exceptions and cancellation" $ do
   baseline <- Provider.liveCallbackContexts
   checkRegistrationRelease
+
   copied <- newIORef ByteString.empty
   Provider.withProvider
     ( \hash milliseconds -> do
@@ -47,6 +49,7 @@ tests = testCase "native provider callback ownership, exceptions and cancellatio
       Provider.confirmTransaction provider transactionId maxBound >>= (@?= Right True)
       Provider.confirmTransaction provider ByteString.empty 0 >>= (@?= Left (Provider.InvalidTransactionIdLength 0))
       replicateM_ 50 $ Provider.confirmTransaction provider transactionId 1 >>= (@?= Right False)
+
   performGC
   readIORef copied >>= (@?= transactionId)
   Provider.liveCallbackContexts >>= (@?= baseline)
@@ -89,20 +92,25 @@ tests = testCase "native provider callback ownership, exceptions and cancellatio
   checkCallerMasking
   checkConcurrencyAndClose baseline
   checkReentry
+
   replicateM_ 50 $ do
     Provider.withProvider (\_ _ -> pure (Left "expected failure")) $ \provider -> do
       result <- Provider.confirmTransaction provider transactionId 0
       result @?= Left (Provider.ProviderNativeFailure (Code.toNumber Code.GenericFailure) "expected failure")
     checkThrown (\_ _ -> throwIO CallbackException)
+
   performGC
   Provider.liveCallbackContexts >>= (@?= baseline)
 
+-- Deterministic 32-byte input, independent of the provider under test.
 transactionId :: ByteString.ByteString
 transactionId = ByteString.pack [0 .. 31]
 
+-- Exercise handle idempotence even when native ownership is shared.
 closeTwice :: Provider.Provider -> IO ()
 closeTwice provider = Provider.closeProvider provider >> Provider.closeProvider provider
 
+-- Callback exceptions may reach Haskell only after the C call has unwound.
 checkThrown :: Provider.ConfirmationHandler -> IO ()
 checkThrown handler = do
   before <- Provider.completedNativeCalls
@@ -113,6 +121,7 @@ checkThrown handler = do
     -- destructor. An exception escaping through the ABI cannot satisfy it.
     Provider.completedNativeCalls >>= (@?= before + 1)
 
+-- Cancellation of a blocked handler must join native work before propagating.
 checkCancellation :: Int -> IO ()
 checkCancellation baseline = do
   entered <- newEmptyMVar
@@ -132,6 +141,8 @@ checkCancellation baseline = do
       Provider.liveCallbackContexts >>= (@?= baseline + 1)
   Provider.liveCallbackContexts >>= (@?= baseline)
 
+-- Independent providers isolate exceptions; closing a busy handle leaves its
+-- operation reference alive until the callback has finished.
 checkConcurrencyAndClose :: Int -> IO ()
 checkConcurrencyAndClose baseline = do
   entered <- newEmptyMVar
@@ -165,6 +176,7 @@ checkConcurrencyAndClose baseline = do
           Provider.liveCallbackContexts >>= (@?= baseline + 1)
   Provider.liveCallbackContexts >>= (@?= baseline)
 
+-- Recursive use of the same provider rejects overlap rather than deadlocking.
 checkReentry :: IO ()
 checkReentry = do
   owner <- newIORef Nothing
@@ -183,6 +195,7 @@ checkReentry = do
   -- Do not keep the closed handle in a test-owned reference unnecessarily.
   writeIORef owner Nothing
 
+-- Bound synchronization waits so a broken lifecycle yields a test failure.
 waitFor :: String -> IO a -> IO a
 waitFor label action = do
   result <- timeout 10000000 action
@@ -205,6 +218,7 @@ checkRegistrationRelease = do
   waitFor "callback registration finalization" (takeMVar finalized)
   deRefWeak weak >>= assertBool "final native release frees the StablePtr root" . isNothing
 
+-- Capture the marker only in the native-rooted handler after construction.
 withMarkedProvider :: IO () -> (Provider.Provider -> Weak (IORef Int) -> IO a) -> IO a
 withMarkedProvider finalizer action = do
   marker <- newIORef (0 :: Int)
@@ -235,6 +249,7 @@ checkPendingCancellation = do
           result @?= Left ThreadKilled
   Bridge.finishCallbackOperation control
 
+-- A handler masking cancellation keeps native ownership until explicitly resumed.
 checkDelayedCancellation :: Int -> IO ()
 checkDelayedCancellation baseline = do
   entered <- newEmptyMVar
@@ -261,6 +276,7 @@ checkDelayedCancellation baseline = do
       Provider.completedNativeCalls >>= (@?= before + 1)
   Provider.liveCallbackContexts >>= (@?= baseline)
 
+-- Either result may win the race, but the next operation must start cleanly.
 checkFastCancellationRaces :: IO ()
 checkFastCancellationRaces =
   Provider.withProvider (\_ _ -> pure (Right True)) $ \provider ->
@@ -275,6 +291,7 @@ checkFastCancellationRaces =
       -- gate whether the previous cancellation won before or after dispatch.
       Provider.confirmTransaction provider transactionId 0 >>= (@?= Right True)
 
+-- Worker dispatch preserves the initiating caller's masking state.
 checkCallerMasking :: IO ()
 checkCallerMasking = do
   expected <- newIORef Unmasked

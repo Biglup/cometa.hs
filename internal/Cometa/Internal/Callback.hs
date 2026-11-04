@@ -6,15 +6,20 @@
 -- callback's user action each have one scoped worker. Cancellation targets the
 -- user worker; the ABI callback always waits for it before returning to C.
 module Cometa.Internal.Callback
-  ( ConfirmationHandler,
+  ( -- * Callback state
+    ConfirmationHandler,
     CallbackState,
     CallbackControl,
     newCallbackControl,
     newCallbackState,
+
+    -- * Operation lifetime
     beginCallbackOperation,
     finishCallbackOperation,
     cancelCallbackOperation,
     rethrowCallbackException,
+
+    -- * Native entry point
     confirmationCallback,
   )
 where
@@ -44,25 +49,33 @@ import Foreign.Storable (poke, pokeByteOff)
 -- masking state. It must finish before the callback and its native call finish.
 type ConfirmationHandler = ByteString -> Word64 -> IO (Either Text Bool)
 
+-- | One serialized operation: caller masking state, first callback exception,
+-- pending cancellation, and the currently running user worker, respectively.
 data Operation = Operation MaskingState (IORef (Maybe SomeException)) (Maybe SomeException) (Maybe ThreadId)
 
+-- | Provider-wide state shared by retained aliases. 'Nothing' means no native
+-- operation may invoke the callback; the provider's operation gate enforces this.
 newtype CallbackControl = CallbackControl (MVar (Maybe Operation))
 
+-- | Handler and operation state rooted by the native context's stable pointer.
 data CallbackState = CallbackState ConfirmationHandler CallbackControl
 
+-- | Start with no active operation or retained exception.
 newCallbackControl :: IO CallbackControl
 newCallbackControl = CallbackControl <$> newMVar Nothing
 
+-- | Pair the handler with the control shared by this provider's aliases.
 newCallbackState :: ConfirmationHandler -> CallbackControl -> CallbackState
 newCallbackState = CallbackState
 
--- Each operation gets a fresh error/cancellation cell. The provider-wide gate
+-- | Each operation gets a fresh error/cancellation cell. The provider-wide gate
 -- prevents overlap; the native-rooted callback reads only the active operation.
 beginCallbackOperation :: CallbackControl -> MaskingState -> IO ()
 beginCallbackOperation (CallbackControl control) masking = do
   exception <- newIORef Nothing
   modifyMVar_ control (const (pure (Just (Operation masking exception Nothing Nothing))))
 
+-- | Clear operation state after the native worker and callback have joined.
 finishCallbackOperation :: CallbackControl -> IO ()
 finishCallbackOperation (CallbackControl control) = modifyMVar_ control (const (pure Nothing))
 
@@ -77,6 +90,8 @@ cancelCallbackOperation (CallbackControl control) cause = do
       pure (Just (Operation masking exception (Just original) thread), (,) original <$> thread)
   maybe (pure ()) (\(original, thread) -> throwTo thread original) target
 
+-- | Consume and rethrow the first saved callback exception after native unwind.
+-- The operation must still be active so its exception cell remains reachable.
 rethrowCallbackException :: CallbackControl -> IO ()
 rethrowCallbackException (CallbackControl control) = mask_ $ do
   cause <- withMVar control $ \case
@@ -87,6 +102,7 @@ rethrowCallbackException (CallbackControl control) = mask_ $ do
       pure current
   maybe (pure ()) throwIO cause
 
+-- | Preserve the first exception without overwriting it during later cleanup.
 rememberCallbackException :: CallbackControl -> SomeException -> IO ()
 rememberCallbackException (CallbackControl control) cause =
   withMVar control $ \case
@@ -123,7 +139,7 @@ confirmationCallback stable hash size timeout confirmed diagnostic capacity =
       )
       `catch` failed
 
--- The user worker's entire lifetime is enclosed by the ABI callback. Even an
+-- | The user worker's entire lifetime is enclosed by the ABI callback. Even an
 -- unexpected asynchronous exception in the ABI thread cancels and joins this
 -- worker before the callback's outer catch can return to C.
 runCallbackWorker :: forall a. CallbackControl -> IO a -> IO a
@@ -134,6 +150,7 @@ runCallbackWorker (CallbackControl control) action = mask $ \restore -> do
       maybe (pure ()) throwIO previous
       pure state
     Nothing -> throwIO (userError "confirmation callback outside its operation")
+
   start <- newEmptyMVar
   finished <- newEmptyMVar :: IO (MVar (Either SomeException a))
   worker <- forkIOWithUnmask $ \unmask -> do
@@ -144,15 +161,18 @@ runCallbackWorker (CallbackControl control) action = mask $ \restore -> do
         MaskedInterruptible -> mask_ action
         MaskedUninterruptible -> uninterruptibleMask_ action
     putMVar finished outcome
+
   let cancelAndJoin (cause :: SomeException) = uninterruptibleMask_ $ do
         throwTo worker cause
         _ <- readMVar finished
         throwIO cause
+
   ( do
       pending <- modifyMVar control $ \case
         Just (Operation state exception cause _) -> pure (Just (Operation state exception cause (Just worker)), cause)
         Nothing -> pure (Nothing, Nothing)
       maybe (putMVar start ()) (throwTo worker) pending
+
       outcome <- restore (readMVar finished)
       modifyMVar_ control $ \current -> pure $ case current of
         Just (Operation state exception cause _) -> Just (Operation state exception cause Nothing)
@@ -161,6 +181,9 @@ runCallbackWorker (CallbackControl control) action = mask $ \restore -> do
     )
     `catch` cancelAndJoin
 
+-- | Copy UTF-8 bytes into a borrowed C buffer, reserving a trailing NUL.
+-- Truncation is by byte capacity and may split a multibyte UTF-8 sequence.
+-- A null destination or zero capacity leaves the buffer untouched.
 writeDiagnostic :: CString -> CSize -> Text -> IO ()
 writeDiagnostic target capacity message = do
   let bytes = Text.encodeUtf8 message

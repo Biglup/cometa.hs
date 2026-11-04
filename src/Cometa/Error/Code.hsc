@@ -1,14 +1,16 @@
 -- | Named cardano-c status codes, including success. Unknown numeric codes are
--- preserved exactly, allowing applications to retain diagnostics from a newer
--- native library. Numeric values come from the installed @cardano/error.h@.
+-- preserved exactly for logging and interchange. A code can be named even when
+-- this package does not expose operations from the corresponding domain.
 --
 -- @
 -- import qualified Cometa.Error.Code as Code
 --
--- Code.fromNumber (Code.toNumber Code.InvalidArgument) == Code.InvalidArgument
+-- main :: IO ()
+-- main = print (Code.fromNumber (Code.toNumber Code.InvalidArgument) == Code.InvalidArgument)
 -- @
 module Cometa.Error.Code
-  ( ErrorCode
+  ( -- * Status codes
+    ErrorCode
       ( Success,
         GenericFailure,
         InsufficientBufferSize,
@@ -71,8 +73,12 @@ module Cometa.Error.Code
         MissingRedeemer,
         ScriptEvaluationFailure
       ),
+
+    -- * Numeric conversion
     fromNumber,
     toNumber,
+
+    -- * Inspection
     isKnown,
     knownCodes,
   )
@@ -83,8 +89,8 @@ where
 {- ORMOLU_ENABLE -}
 
 -- | A native status code. 'Success' represents a successful operation; all other
--- named constructors represent failures. The unknown representation is private:
--- use 'fromNumber' to construct any numeric code, including unrecognized values.
+-- named constructors represent failures. Use 'fromNumber' to construct a code
+-- from any integer, and 'isKnown' to distinguish named and unrecognized codes.
 -- Equality distinguishes exact numeric codes. 'Show' is diagnostic only.
 data ErrorCode
   = -- | Successful operation.
@@ -157,7 +163,7 @@ data ErrorCode
     InvalidBip32DerivationIndex
   | -- | The CBOR type is unexpected.
     UnexpectedCborType
-  | -- | The CBOR value is of the right type, but the value is invalid (I.E out of range).
+  | -- | The CBOR type is expected, but its value is invalid or out of range.
     InvalidCborValue
   | -- | The CBOR array size is invalid.
     InvalidCborArraySize
@@ -213,7 +219,7 @@ data ErrorCode
   deriving (Eq, Show)
 
 -- | Interpret a numeric status code. Every integer is accepted, including
--- negative values and values outside the native ABI range, without truncation.
+-- negative values and values outside machine integer ranges, without truncation.
 -- A recognized number becomes its named constructor; all others remain unknown.
 --
 -- @toNumber (fromNumber number) == number@
@@ -291,15 +297,15 @@ toNumber code = case code of
   UnknownCode number -> number
 {- ORMOLU_ENABLE -}
 
--- | Whether a code has a name in the headers used to build this package.
+-- | Whether a code has a name in this build of the package.
 -- This does not indicate success: use equality with 'Success' for that purpose.
 isKnown :: ErrorCode -> Bool
 isKnown (UnknownCode _) = False
 isKnown _ = True
 
--- | Every named code, including 'Success', once each, in native header order.
--- Unknown numeric codes are excluded. This list is not an 'Enum' enumeration:
--- native values have gaps and no arithmetic relationship is promised.
+-- | Every named code, including 'Success', once each, in numeric order.
+-- Unknown numeric codes are excluded. Values have gaps; do not infer a code
+-- by adding to or subtracting from another code.
 knownCodes :: [ErrorCode]
 knownCodes =
   [ Success,

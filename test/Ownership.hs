@@ -23,6 +23,8 @@ import System.Timeout (timeout)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
+-- These imports stay test-only: they make a second ownership obligation visible
+-- without exposing reference-count operations through the public Haskell API.
 foreign import capi unsafe "cardano/crypto/blake2b_hash.h cardano_blake2b_hash_ref"
   cRef :: Ptr Native.NativeHash -> IO ()
 
@@ -39,6 +41,7 @@ tests =
           _ <- copyHashResult "ownership.churn" allocateHash
           pure ()
         performGC
+
         result @?= Right expectedHash,
       testCase "success releases exactly once after the action" $ do
         releases <- newIORef 0
@@ -81,11 +84,13 @@ tests =
               putMVar ready ()
               _ <- takeMVar blocked
               pure code
+
         worker <- forkFinally (withOwnedOutput "ownership.cancel" (countedRelease releases) acquire unexpectedAction) (putMVar finished)
         started <- timeout 5000000 (takeMVar ready)
         case started of
           Nothing -> killThread worker >> assertFailure "allocation did not finish"
           Just () -> killThread worker
+
         completed <- timeout 5000000 (takeMVar finished)
         case completed of
           Just (Left exception) -> fromException exception @?= Just ThreadKilled
@@ -106,6 +111,7 @@ tests =
                   countedRelease releases slot
                   pointer <- peek slot
                   writeIORef leftNonNull (pointer /= nullPtr)
+
             result <- withOwnedOutput "ownership.retained" release acquire (const (pure (Right ())))
             result @?= Right ()
             readIORef releases >>= (@?= 1)
@@ -127,6 +133,8 @@ tests =
         readIORef releases >>= (@?= 0)
     ]
 
+-- Allocate a real native digest only after checking the helper initialized its
+-- output slot. Assertions distinguish fixture setup failures from cleanup bugs.
 allocateHash :: Ptr (Ptr Native.NativeHash) -> IO Native.NativeCode
 allocateHash slot = do
   peek slot >>= (@?= nullPtr)
@@ -135,14 +143,17 @@ allocateHash slot = do
     code @?= Native.success
     pure code
 
+-- Count release attempts independently of whether native unref nulls the slot.
 countedRelease :: IORef Int -> Ptr (Ptr Native.NativeHash) -> IO ()
 countedRelease releases slot = do
   modifyIORef' releases (+ 1)
   Native.cUnref slot
 
+-- Failed acquisition must never hand a pointer to the borrowed action.
 unexpectedAction :: Ptr Native.NativeHash -> IO (Either NativeFailure ())
 unexpectedAction _ = assertFailure "action ran without successful acquisition" >> pure (Right ())
 
+-- Catch only the injected IO exception; assertion failures must still escape.
 expectException :: IO (Either NativeFailure ()) -> IO ()
 expectException action = do
   result <- try action :: IO (Either IOException (Either NativeFailure ()))

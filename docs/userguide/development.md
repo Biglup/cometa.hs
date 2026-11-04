@@ -16,9 +16,9 @@ cabal haddock all
 cabal check
 ```
 
-Use Ormolu 0.8.0.2 and HLint 3.8 with the repository's HLint configuration. New pure validation and
-conversion code needs boundary and invalid-input tests. Native code also needs
-ownership and failure-path checks. Document the native revision and test-vector
+Use Ormolu 0.8.0.2 and HLint 3.8 with the repository's HLint configuration.
+New pure validation and conversion code needs boundary and invalid-input tests.
+Native code also needs ownership and failure-path checks. Document the native revision and test-vector
 provenance with the tests. Keep live network tests separate from deterministic
 checks; executing funded transactions requires explicit authorization.
 

@@ -1,12 +1,17 @@
--- | The experimental Cometa foundation. Domain operations are intended to be
--- imported qualified, for example @Cometa.Crypto.Blake2b@ as @Blake2b@.
+-- | Version information and shared operation errors. Import domain modules
+-- qualified, for example @Cometa.Crypto.Blake2b@ as @Blake2b@.
 --
 -- @
--- version <- nativeVersion
--- print version
+-- import qualified Cometa
+--
+-- main :: IO ()
+-- main = Cometa.nativeVersion >>= print
 -- @
 module Cometa
-  ( nativeVersion,
+  ( -- * Version information
+    nativeVersion,
+
+    -- * Errors
     Error (..),
   )
 where
@@ -16,7 +21,7 @@ import qualified Cometa.Internal.FFI.Native as Native
 import Cometa.Internal.Ownership (copyStaticText)
 import Data.Text (Text)
 
--- | Version reported by the linked cardano-c library. This is independent of
--- the Haskell package version and does not establish ABI compatibility by itself.
+-- | Return the version of cardano-c used by the running application. This is
+-- independent of the Cometa.hs package version.
 nativeVersion :: IO Text
 nativeVersion = Native.cVersion >>= copyStaticText
