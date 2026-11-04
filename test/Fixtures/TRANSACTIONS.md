@@ -7,8 +7,8 @@ The ordinary test suite needs no Python packages and no network access.
 ## Native baseline and notices
 
 Native source: `Biglup/cardano-c`, revision
-`8dc0c55f4132fcaa2e7961b6cfbfea96a6d93b5d`, as recorded in
-`native/cardano-c.ref`. Imported transaction bytes are from
+`8dc0c55f4132fcaa2e7961b6cfbfea96a6d93b5d`, the original fixture baseline.
+The current build revision is recorded in `native/cardano-c.ref`. Imported transaction bytes are from
 `lib/tests/transaction/transaction.cpp`, symbol `CBOR_NULLIFY_ENTROPY`, and its
 exported counterpart in
 `lib/tests/vectors/bindings/v1/serialization.json`, case

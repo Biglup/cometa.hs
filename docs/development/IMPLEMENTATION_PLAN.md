@@ -857,6 +857,192 @@ Compiler probes confirm private keys have no `Show`/`Eq`, public constructors ar
 hidden and shared Ed25519 signing-key representation module cannot be imported by consumers.
 Hosted CI for this slice remains to be reviewed in its pull request.
 
+### P04 third slice: English BIP39 mnemonics
+
+This slice adds `Cometa.Crypto.Bip39`: opaque validated English mnemonics,
+supplied-entropy conversion, phrase/word-list parsing, word-count inspection and
+explicit secret text/entropy export. Software key handlers, derivation-path
+records, other crypto primitives and transaction/CIP-8 signing remain later P04
+work. No random generation or BIP39 sentence/passphrase seed KDF is invented:
+the pinned BIP39 header exposes only the two entropy/word conversion operations.
+Exported entropy composes with Cardano BIP32 `withEntropy`, whose root KDF remains
+distinct from the 64-byte BIP39 seed KDF.
+
+Mnemonics are ordinary Haskell secret values with hidden constructors and no
+`Show` or equality instance. Text parsing splits Unicode whitespace; export uses
+single ASCII spaces. Words must be exact lowercase English dictionary entries.
+No case folding, spelling correction, other language dictionary or normalization
+is applied to words. Count, lexical-position, dictionary and checksum failures
+have explicit constructors without supplied words. Native unknown-word status
+has no position, so `UnknownBip39Word` deliberately carries none. `Text` inputs
+cannot contain invalid UTF-8 byte sequences; non-ASCII/replacement characters
+are rejected rather than introducing an unnecessary byte-text API.
+
+Native audit: word outputs borrow static dictionary strings and are copied;
+no native owner is acquired by either conversion. Input buffers/arrays live
+through each safe foreign call. Output sizes are initialized and checked;
+word slots start at NULL. The native checksum failure writes entropy before
+returning failure: the wrapper never exports it and wipes its 32-byte scratch
+on every exit, including cancellation after foreign unwind. Checksum validation
+makes no hidden host entropy copy. The wipe uses public `cardano_memzero`, not a
+vendored dependency symbol. Its scoped adaptation is tracked separately in the
+ledger. No allocation/retention-failure injection applies to these owner-free
+native functions. Native stack intermediates are not wiped, and no comprehensive
+erasure guarantee is made for native temporaries or ordinary host secret copies.
+
+Validation: all 115 tests pass with warnings as errors, including 13 BIP39 tests
+and 300 new Hedgehog roundtrip cases (4,800 property cases overall). All 24 native
+entropy/phrase vectors were crosschecked against independently pinned Trezor
+vectors; two independent Python SHA256/checksum cases add 20/28-byte coverage.
+Exact source revisions, generation recipe, native attribution and Trezor MIT
+notice are retained in `test/Fixtures/BIP39.md` and its companion license.
+Tests cover every standard size, invalid counts/lengths, dictionary/checksum,
+NUL/case/non-ASCII/word separators, normalized whitespace, wipe extent, GC,
+repeated success/failure, cancellation and scoped BIP32 root integration.
+Full Valgrind passes all 115 tests in 57.19 seconds with zero errors, zero lost
+allocations and no suppressions. Compiler probes reject `Show`, `Eq` and direct
+mnemonic construction. No new compiler/platform matrix is claimed.
+
+The complete build, five examples, extracted BIP39 guide example, Haddock (100%
+public BIP39 coverage), Cabal check, source-distribution consumer build, strict
+Sphinx HTML/linkcheck, ClangFormat 18, Ormolu 0.8.0.2, HLint 3.8 and native inventory
+checks pass locally. The optional `ExceptT` example prints only a public key and
+exits unsuccessfully on error; it uses a public deterministic test phrase.
+Hosted CI remains to be reviewed in the new pull request.
+
+### BIP39 purity spike
+
+Reviewed 2026-11-04 after the initial P04 mnemonic slice. The experiment below
+led to the production native-backed pure boundary documented in the next section.
+Two isolated prototypes were built against the same native pin and public fixtures;
+neither prototype nor an additional cryptographic dependency is part of the package.
+
+| Approach | Evidence | Ongoing cost |
+| --- | --- | --- |
+| Initial explicit `IO` | Original 115-test suite and Valgrind pass | Correct, but deterministic mnemonic conversion remains effectful to callers |
+| Audited pure facade over cardano-c | 26 vectors, exact error parity, GC, concurrent/shared-thunk evaluation and cancellation smoke checks pass | Small private unsafe boundary; native dependency changes require a fresh purity review |
+| Pure Haskell conversion | 26 vectors and 1,280 varied cases agree with native and an independent Python SHA256 oracle | Own the conversion algorithm and dictionary, plus a hash dependency |
+
+The experiment recommended the native-backed pure facade. It preserves one
+BIP39 implementation and dictionary while allowing ordinary `Either` composition.
+This recommendation is specific to the audited BIP39 functions; it does not
+justify hiding arbitrary native calls, key scopes, callbacks or providers in
+pure functions.
+
+Adopted minimal API, preserving the words-only representation and error reporting:
+
+```haskell
+fromEntropy :: ByteString -> Either Error Mnemonic
+fromText :: Text -> Either Error Mnemonic
+fromWords :: [Text] -> Either Error Mnemonic
+exportEntropy :: Mnemonic -> Either Error ByteString
+```
+
+`exportText` and `wordCount` are already pure. Keeping `Either` on entropy export
+preserves unexpected native/contract failures without a partial getter. A total
+`exportEntropy :: Mnemonic -> ByteString` would be a separate representation
+choice: cache validated entropy alongside words, retaining another secret value,
+or store a representation that supports total pure decoding. The native spike
+keeps the words-only representation. The pure Haskell spike stores both words
+and entropy and therefore demonstrates a total accessor with that retention cost.
+
+Native audit at the pinned revision: both conversions use bounded stack scratch,
+static English strings, byte/string operations and the bundled SHA256 routine.
+There is no logger, configured allocator, RNG, callback, reference counting,
+initialization dependency or mutable error state on this path. The selected
+SHA256 implementation uses local state and constant tables and always returns
+success. The wordlist pointer slots are translation-unit-private and never
+modified. Existing wrappers copy outputs before buffers expire and wipe entropy
+scratch even after checksum failure. Expected errors remain values; cancellation
+propagates after safe foreign unwind and cleanup.
+
+The prototype uses concrete `NOINLINE` entry points, `unsafePerformIO`, and local
+`-fno-cse`/`-fno-full-laziness` safeguards. Success and failure results are forced
+before returning; it does not use `unsafeDupablePerformIO`, lazy foreign reads,
+or a public arbitrary-IO runner. See the [base unsafe-IO contract](https://hackage-content.haskell.org/package/base-4.18.3.0/docs/System-IO-Unsafe.html).
+These safeguards alone are not a purity proof: independence from external state
+and absence of observable effects are the essential requirements. Production
+code should force the internal words directly; the temporary facade forces via
+`exportText`, which creates an avoidable transient phrase copy.
+
+The pure Haskell prototype adds 113 lines of conversion logic and a formatted
+28 KB dictionary module (13,116 bytes of canonical wordlist data). All 2,048 words
+match the pinned Trezor English dictionary. Direct additions are `SHA-1.6.4.4`
+and `containers`; the SHA package also uses `array`, `binary`, `base` and
+`bytestring`. The selected SHA source was inspected: its hashing algorithm is
+Haskell arithmetic, with no foreign imports or C sources. A standalone consumer
+builds without cardano-c. This establishes feasibility, not endorsement of that
+hash dependency or a maintenance audit of it. Duplication of protocol logic and
+wordlist provenance remains a cost even with conformance tests.
+
+Experiment coverage is GHC 9.6.7 on Linux x86-64. The native facade was tested
+with `-O2` and `-N4`: 26 fixtures, invalid-input error parity, 100 varied-input GC
+round trips, eight workers running ten fixture rounds each, shared-thunk
+forcing, and cancellation followed by reuse. Cancellation is a smoke test; it
+does not prove an exception arrived during the short C call. The Haskell
+prototype additionally passed 1,280 cases spanning all five entropy sizes,
+validation precedence/whitespace checks, and formatting/lint checks. No timing
+benchmark was performed. Neither approach guarantees comprehensive erasure of
+host secrets or native stack temporaries.
+
+The optimized native spike also ran under Valgrind. Functional checks passed,
+but Valgrind reported 16 bytes in four definitely-lost blocks from GHC's
+`initCapabilityIOManager` startup path. A standalone `main = pure ()` executable
+built with the same GHC/options and `-N4`, without Cometa or cardano-c, reproduced
+the identical allocation stack and counts. This is a runtime baseline finding,
+not evidence of a BIP39 allocation leak; the spike must not be described as a
+zero-error Valgrind run. A full-spike `-N1` rerun reported zero errors and lost
+blocks, as did a runtime-only concurrency control. An earlier `-N1` run reported
+an unreproduced 288-byte possible loss without its allocation stack captured;
+that observation remains unclassified. No suppressions were used.
+
+### Production BIP39 pure boundary
+
+Adopted 2026-11-04 following explicit maintainer approval. Public `fromEntropy`,
+`fromText`, `fromWords` and `exportEntropy` now return pure `Either` values;
+`wordCount` and `exportText` are unchanged. `Mnemonic` remains words-only, opaque
+and without `Show`/`Eq`. Native and contract failures remain explicit, including
+on entropy export. No hidden retained entropy, partial getter or new crypto/hash
+dependency is introduced.
+
+`Cometa.Internal.Bip39Pure` is a private implementation module with three concrete
+monomorphic `NOINLINE` unsafe boundaries and local optimizer safeguards. It
+forces complete word lists directly, copied entropy and public error payloads
+before returning from IO; lower marshaling scopes also force decoded/copied
+outputs. It creates no extra phrase just to force evaluation. The sole purity
+exception and source/build/platform re-audit obligations are documented in
+[BIP39_PURITY.md](BIP39_PURITY.md), the conventions and repository instructions.
+The native API ledger records the pure public adaptation. The example and guide
+use ordinary `Either` composition lifted with `except` into the scoped key flow.
+
+Regression coverage is 116 tests, including 14 BIP39 tests and 300 BIP39 property
+cases (4,800 property cases overall). Optimized GHC 9.6.7 Linux x86-64 `-O2`/`-N4`
+passes the full suite. New cases force independent varied inputs, perform GC
+between conversion/export, repeat distinct native failures, contend concurrently
+on a shared result, and cancel repeated evaluation before fresh later conversion.
+Cancellation remains a smoke test, with no claim of guaranteed interruption
+inside these brief foreign calls. Sharing can extend secret retention; erasure
+and evaluation-count guarantees are not added.
+
+The existing compiler matrix is GHC 9.6.7 across Linux x86-64/ARM, macOS ARM/Intel
+and Windows, plus GHC 9.10.3 on Linux x86-64. The boundary uses base's existing
+monomorphic unsafe-IO/NOINLINE optimizer controls supported across those compilers;
+no new GHC feature or dependency bound is required. Each matrix job now additionally
+runs the BIP39 group at `-O2`/`-N2`. Native platform branches were source-reviewed
+in the audit; only local Linux x86-64 execution has completed at this point.
+Hosted matrix results must still be reviewed before claiming cross-platform
+validation of this change.
+
+Local production checks pass: warnings-as-errors optimized build, all five
+examples, extracted guide example compiled at `-O2 -Wall -Werror`, Haddock all
+(100% BIP39 coverage), Cabal check, strict Sphinx HTML/linkcheck, Ormolu 0.8.0.2,
+HLint 3.8 (no hints), ClangFormat 18 and native inventory. Full optimized-suite
+Valgrind at both `-N1` and the existing CI `-N2` configuration passes all 116
+tests (55.96s and 58.33s) with zero errors, zero definite/indirect/possible losses,
+and no suppressions. A targeted optimized BIP39 `-N2` run also passes. The historical spike's independently
+reproduced `-N4` RTS startup finding and unclassified transient possible loss
+remain recorded above; this passing production run does not erase those findings.
+
 ## 19. Haskell engineering standards and reference libraries
 
 Added 2026-11-04 following the request for a professional, idiomatic Haskell
@@ -1022,3 +1208,70 @@ properties that benefit from integrated shrinking/state machines. Test selector
 invariants, not identical random choices. Save minimized failures as regression
 fixtures. Agreement with cardano-c detects binding errors but is not independent
 proof of native correctness; use external vectors/oracles where appropriate.
+
+### P04 fourth slice: password derivation and EMIP3 storage
+
+This slice adds `Cometa.Crypto.Pbkdf2.deriveBytes`, explicitly exporting derived
+secret bytes from raw password/salt bytes, iteration count and output byte count,
+and `Cometa.Crypto.Emip3.encrypt` / `decryptBytes` for password-encrypted storage.
+Software key handlers, derivation-path records and transaction/CIP-8 signing
+remain later P04 work. No password normalization or application cost default is
+invented. EMIP3 retains its native fixed 19162-iteration format and empty AAD.
+
+PBKDF2 has a separately audited concrete pure boundary, documented in
+`PBKDF2_PURITY.md`. Its native call graph reaches only caller buffers, stack
+HMAC/SHA512 state and constant tables; no native allocation configuration, RNG,
+logger, callback or mutable error slot. Haskell heap scratch is bracketed and
+wiped before release. The monomorphic boundary forces owned bytes and complete
+error payloads, with NOINLINE and local optimizer safeguards. This exception does
+not generalize the BIP39 helper or authorize pure EMIP3 operations.
+
+EMIP3 remains in IO for random salt/nonce generation and native allocation.
+Public sizes are validated before FFI, including the ChaCha20 counter limit that
+would otherwise reach sodium_misuse. Inputs are borrowed without mutation; native
+header claims that encryption erases caller inputs are not repeated. Returned
+native plaintext is copied only on authentication success and wiped before
+unref on success, partial failure, exceptions and cancellation after safe foreign
+unwind. The native authentication-failure path authenticates before decrypting
+and zeros its output before internal release (vendored libsodium
+`crypto_aead/chacha20poly1305/aead_chacha20poly1305.c`). Native PBKDF failure is
+unreachable for validated internal fixed salt/key arguments; size/allocation
+failures precede plaintext output. Explicit host secret bytes retain ordinary
+application-managed lifetime and may be logged/copied by callers; no erasure or
+controlled secret-handle lifetime is claimed for them.
+
+Native audit exposed uninitialized process-global RNG/runtime state and
+malloc(0)-dependent empty decryption. The pinned dependency fix initializes
+EMIP3 and the other direct randombytes caller, enables the vendored POSIX
+initialization lock on native Unix, validates null/overflow/counter limits, and
+allocates one byte of capacity for authenticated empty plaintext. PBKDF2 now
+rejects zero iterations and uses a nonwrapping uint32 iteration loop. Full uint32
+iterations are accepted by the binding; the upper encoding is tested without
+performing billions of HMACs. The exact native revision is `7811fe94dad90f30478ed4b61d96677f188abaa8`.
+Cabal propagates pthread when directly linking the native static archive on the
+existing Linux/macOS targets; nonthreaded example and source-distribution
+consumer links are verified.
+
+Tests use a pinned native PBKDF known answer and EMIP decrypt vector plus an
+independent Python hashlib / cryptography binary multi-block derivation and
+EMIP3 envelope. Recipes, source paths and licenses are recorded in
+`test/Fixtures/PASSWORD_CRYPTO.md`. Tests cover parameter bounds, NUL bytes,
+empty passwords, prefix properties across SHA512 blocks, all envelope regions,
+wrong passwords, roundtrips, copied plaintext GC survival, observed native wipe
+through a retained test-only alias, partial failure, copy exceptions and
+cancellation. Shared PBKDF evaluation and cancellation/reuse exercise the pure
+boundary. Cancellation is a scheduling smoke test, not evidence that an
+exception arrived at a particular native instruction. CI adds an optimized
+PBKDF2 group with two capabilities and a compiled example that prints only a
+recovered byte count. No compiler/platform matrix beyond existing CI is claimed.
+
+Validation: all 132 tests pass against the updated static native archive with
+warnings as errors, including 16 password-crypto scenarios and 100 new Hedgehog
+prefix cases. Optimized PBKDF2 and BIP39 evaluation/concurrency groups pass
+with two capabilities. Full Valgrind passes all 132 tests in 102.61 seconds with zero
+errors and zero definite, indirect or possible losses, without suppressions.
+The full build, six examples, exactly matching compiled password-guide example,
+Haddock (100% new public module coverage), Cabal check, source-distribution
+consumer build, strict Sphinx HTML/linkcheck, ClangFormat 18, Ormolu 0.8.0.2,
+HLint 3.8 and native inventory checks pass locally. Hosted CI results remain to
+be reviewed; no new compiler/platform execution coverage is claimed.
