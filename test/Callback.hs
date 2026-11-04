@@ -195,12 +195,13 @@ waitFor label action = do
 checkRegistrationRelease :: IO ()
 checkRegistrationRelease = do
   finalized <- newEmptyMVar
-  weak <- withMarkedProvider (putMVar finalized ()) $ \provider marker -> do
+  (closed, weak) <- withMarkedProvider (putMVar finalized ()) $ \provider marker -> do
     performGC
     deRefWeak marker >>= assertBool "native registration roots captured state" . isJust
     Provider.confirmTransaction provider transactionId 0 >>= (@?= Right True)
-    pure marker
+    pure (provider, marker)
   performGC
+  Provider.confirmTransaction closed transactionId 0 >>= (@?= Left Provider.ProviderClosed)
   waitFor "callback registration finalization" (takeMVar finalized)
   deRefWeak weak >>= assertBool "final native release frees the StablePtr root" . isNothing
 
