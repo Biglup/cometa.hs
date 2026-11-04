@@ -10,8 +10,8 @@ when the corresponding CI build has passed.
 Install the cardano-c headers and library from the revision recorded in
 `native/cardano-c.ref`. The manifest in
 `docs/development/native-baseline.json` records the header and corpus baseline.
-Headers and the linked library must come from the same compatible installation. Follow cardano-c's build instructions
-for your platform.
+Headers and the linked library must come from the same compatible installation.
+Follow cardano-c's build instructions for your platform.
 
 When cardano-c is outside the compiler's default search paths, pass its installed
 include and library directories to Cabal:

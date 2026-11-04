@@ -3,12 +3,14 @@
 These rules apply to Cometa.hs. They turn the engineering requirements in
 `docs/development/IMPLEMENTATION_PLAN.md`, section 19, into review criteria.
 Use the checked-in formatter and HLint settings as the mechanical source of truth.
+Before editing, inspect nearby modules and match their organization and vocabulary.
 
 ## Modules, layout, and imports
 
 Use Ormolu 0.8.0.2 and HLint 3.8 with the repository's HLint configuration. Prefer readable
 named arguments and pattern matching over dense point-free expressions. Use
-normal Haskell layout, not Allman braces or C++ region markers.
+normal Haskell layout, not Allman braces. Use ordinary comment section banners
+to separate imports, types, and related operations, as described below.
 
 Every module has an explicit export list and a Haddock introduction explaining
 its domain. Group public exports by construction, inspection, transformation,
@@ -151,7 +153,20 @@ export must be explicit and explain the loss of controlled lifetime after copyin
 
 Public Haddock describes observable behavior: meaning, parameter units and bounds,
 return values, errors, defaults, ordering, and effects. Each public module explains
-its purpose and has a small valid example. Keep raw ownership mechanics internal.
+its purpose and has a small valid example. Keep raw ownership mechanics internal. Do not put implementation status, future
+roadmaps, pointer ownership, copying strategies, or ABI details in public API
+contracts. Document observable restrictions honestly, including unsupported inputs.
+
+Use Haddock section headings to group related exports. Document constructor
+payloads and arguments when their meaning, units, or bounds are not clear from
+the type. Internal modules should document ownership, synchronization, and exception
+contracts at the declarations that enforce them; ordinary comments explain local
+invariants. Avoid comments that merely repeat a name or narrate a line of code.
+
+Separate acquisition, computation, and result handling with blank lines where they
+form distinct steps. Keep related bindings together. Let Ormolu determine indentation
+and wrapping. Use section banners for substantial logical groups, not individual
+functions. Keep banners outside Haddock comments so they do not enter API prose.
 Use the Microsoft Writing Style Guide as an editorial reference and established
 Haddock syntax for declarations. Narrative pages teach tasks; proposed interfaces
 stay in developer plans and must be labeled as proposals.
@@ -174,6 +189,18 @@ licenses. Test through public values, not only opaque CBOR forwarding. Native
 agreement detects binding errors; use independent vectors or oracles where
 possible. Keep authorized live-network evidence separate from fixture evidence.
 
+## Native adapters
+
+Keep C adapters in `cbits` limited to ABI layout, ownership, and marshaling.
+Use the checked-in `.clang-format` with ClangFormat 18, matching cardano-c's
+formatting. Haskell keeps its own Ormolu conventions. Document adoption, borrowing,
+callback lifetime, and failure ownership at each boundary. Match the section
+banners, Doxygen `\brief`/`\param`/`\return` comments, header guards, and logical
+spacing in cardano-c provider headers and sources. A formatter alone does not
+establish this organization. Document declarations in headers and local helpers
+next to their definitions; avoid duplicating the same contract in both. Native callbacks must
+never unwind a Haskell exception through C.
+
 ## Compatibility and review
 
 Follow the Haskell Package Versioning Policy for exposed types, declarations,
@@ -192,3 +219,43 @@ The reference set and rationale are maintained in implementation-plan section 19
 containers, text, async, Hasql, Megaparsec, optics, Hedgehog, the Kowainik naming
 guide, Google Haskell style guide, and the Haskell PVP. Adopt the specific contracts
 that fit this library rather than copying historical partial APIs or dependencies.
+
+## File headers, sections, and function size
+
+Start every Haskell source file with the Apache-2.0 copyright and license
+notice used by neighboring modules, before language pragmas. Keep the module's
+Haddock introduction immediately before its declaration. License notices are
+ordinary comments, not API documentation.
+
+Use consistent comment banners, similar to the C sources, for meaningful groups:
+
+```haskell
+-- IMPORTS --------------------------------------------------------------------
+
+-- TYPES ----------------------------------------------------------------------
+
+-- DEFINITIONS ---------------------------------------------------------------
+
+-- FOREIGN IMPORTS ------------------------------------------------------------
+```
+
+Use these general names consistently: `IMPORTS` for module imports, `TYPES` for
+data and type declarations and their instances, `DEFINITIONS` for functions and
+other value bindings, and `FOREIGN IMPORTS` for FFI declarations. Do not add
+domain-specific banners, empty sections, or a banner per declaration. Small
+modules need only the sections they use. Export-list Haddock headings may remain
+domain-oriented for navigation in generated API documentation.
+
+Keep functions focused on one responsibility. Prefer short orchestration functions
+and named helpers for distinct validation, acquisition, execution, and conversion
+steps. Roughly 20–30 lines is a review prompt, not a hard limit: never split a
+resource scope or cancellation protocol merely to meet a line count. Helpers must
+clarify intent and retain the same exception masking, cleanup, evaluation order,
+and resource lifetime. Keep closely related local helpers local when that makes
+their scope clearer. Name test scenarios instead of embedding long sequences in
+the test tree; preserve lifecycle-test ordering where global counters require it.
+
+Keep C headers out of Haskell source. Write native constants explicitly and record
+their source in internal comments; verify them against the pinned headers in tests.
+Keep ABI-dependent representation conversions in small C adapters. Do not replace
+header-derived types with guessed platform sizes or signedness.

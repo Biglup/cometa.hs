@@ -1,10 +1,8 @@
 # Cometa.hs
 
-Cometa.hs provides Haskell values and operations backed by
-[cardano-c](https://github.com/Biglup/cardano-c). It is an unpublished library in
-initial development. This guide describes the implemented foundation: Blake2b
-hashes and native version information. Transaction building, signing, providers,
-and other planned domains are not available yet.
+Cometa.hs provides immutable Blake2b hashes, structured errors, and native
+version information backed by [cardano-c](https://github.com/Biglup/cardano-c).
+The library is unpublished; build it from a checked-out source revision.
 
 Start with [installation](installation.md), then read the
 [hash guide](hashes.md). The [API reference](api-reference.md) explains how to

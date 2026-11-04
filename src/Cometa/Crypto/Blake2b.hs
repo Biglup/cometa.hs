@@ -1,20 +1,38 @@
+-- Copyright 2026 Biglup Labs
+-- SPDX-License-Identifier: Apache-2.0
+--
+-- Licensed under the Apache License, Version 2.0 (the "License");
+-- you may not use this file except in compliance with the License.
+-- You may obtain a copy of the License at
+--
+--     https://www.apache.org/licenses/LICENSE-2.0
+--
+-- Unless required by applicable law or agreed to in writing, software
+-- distributed under the License is distributed on an "AS IS" BASIS,
+-- WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-- See the License for the specific language governing permissions and
+-- limitations under the License.
 {-# LANGUAGE OverloadedStrings #-}
 
--- | BLAKE2b digests as immutable Haskell-owned bytes. This general digest type
--- does not identify a payment, stake, or script role. It must not be used as a
--- substitute for future role-specific hash types.
+-- | BLAKE2b digests as immutable byte sequences. This general digest type does
+-- not distinguish payment, stake, or script hashes.
 --
 -- @
 -- import qualified Cometa.Crypto.Blake2b as Blake2b
+-- import qualified Data.ByteString.Char8 as ByteString
 --
--- result <- Blake2b.compute 32 messageBytes
--- print (Blake2b.toHex <$> result)
+-- main :: IO ()
+-- main = do
+--   result <- Blake2b.compute 32 (ByteString.pack "abc")
+--   print (Blake2b.toHex <$> result)
 -- @
 module Cometa.Crypto.Blake2b
   ( Blake2bHash,
 
-    -- * Construction
+    -- * Hashing
     compute,
+
+    -- * Importing digests
     fromBytes,
     fromHex,
 
@@ -24,8 +42,12 @@ module Cometa.Crypto.Blake2b
   )
 where
 
+-- IMPORTS --------------------------------------------------------------------
+
 import Cometa.Error (Error (..))
+import qualified Cometa.Error.Code as Code
 import qualified Cometa.Internal.FFI.Native as Native
+import Cometa.Internal.Failure (NativeFailure (..))
 import Cometa.Internal.Ownership (copyHashResult)
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as ByteString
@@ -35,21 +57,32 @@ import qualified Data.Text as Text
 import Data.Word (Word8)
 import Foreign.Ptr (castPtr)
 
+-- TYPES ----------------------------------------------------------------------
+
 -- | A nonempty digest byte sequence. Equality compares bytes; ordering is
 -- lexicographic byte ordering.
 -- 'Show' is diagnostic; use 'toHex' for a stable textual encoding.
 newtype Blake2bHash = Blake2bHash ByteString
   deriving (Eq, Ord, Show)
 
+-- DEFINITIONS ----------------------------------------------------------------
+
 -- | Compute an unkeyed digest with an output length of 16 through 64 bytes.
 -- Invalid output lengths return 'InvalidHashLength'. Empty messages are currently
--- unsupported and return 'NativeError'.
-compute :: Int -> ByteString -> IO (Either Error Blake2bHash)
+-- unsupported and return 'NativeError' with code 'Code.OutOfBoundsMemoryRead'.
+-- Other cardano-c failures also return 'NativeError'.
+compute ::
+  -- | Digest length in bytes, from 16 through 64 inclusive.
+  Int ->
+  -- | Nonempty message to hash.
+  ByteString ->
+  -- | Digest with the requested length, or a validation or operation failure.
+  IO (Either Error Blake2bHash)
 compute hashLength bytes
   | hashLength < 16 || hashLength > 64 = pure (Left (InvalidHashLength hashLength))
   | otherwise =
       ByteString.useAsCStringLen bytes $ \(input, size) ->
-        fmap Blake2bHash
+        either (Left . fromNativeFailure) (Right . Blake2bHash)
           <$> copyHashResult "blake2b.compute" (Native.cCompute (castPtr input) (fromIntegral size) (fromIntegral hashLength))
 
 -- | Import digest bytes without hashing them. Any nonempty length is accepted;
@@ -100,3 +133,9 @@ hexDigit character
   | otherwise = Nothing
   where
     offset start = fromIntegral (fromEnum character - fromEnum start)
+
+-- | Translate a private native snapshot at the public domain boundary.
+fromNativeFailure :: NativeFailure -> Error
+fromNativeFailure failure = case failure of
+  NativeFailure operation code message -> NativeError operation (Code.fromNumber code) message
+  NativeContractFailure operation -> NativeContractViolation operation

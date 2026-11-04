@@ -16,7 +16,9 @@ extra-source-files:
   CODING_CONVENTIONS.md
   AGENTS.md
   tools/*.py
+  cbits/*.h
   .hlint.yaml
+  .clang-format
   .readthedocs.yaml
   assets/*.png
   native/cardano-c.ref
@@ -35,14 +37,15 @@ common language
   default-language: Haskell2010
   ghc-options: -Wall -Wcompat -Wincomplete-uni-patterns -Wincomplete-record-updates
 
-library
+library core
   import: language
-  hs-source-dirs: src
+  visibility: private
+  hs-source-dirs: internal
   exposed-modules:
-    Cometa
-    Cometa.Crypto.Blake2b
-    Cometa.Error
-  other-modules:
+    Cometa.Internal.Failure
+    Cometa.Internal.Callback
+    Cometa.Internal.Provider
+    Cometa.Internal.FFI.Provider
     Cometa.Internal.FFI.Native
     Cometa.Internal.Ownership
   build-depends:
@@ -50,6 +53,24 @@ library
     bytestring >=0.11 && <0.13,
     text >=2.0 && <2.2
   extra-libraries: cardano-c
+  c-sources: cbits/cometa_provider.c
+  include-dirs: cbits
+  includes: cometa_provider.h
+  cc-options: -std=c11 -Wall -Wextra
+
+library
+  import: language
+  hs-source-dirs: src
+  exposed-modules:
+    Cometa
+    Cometa.Crypto.Blake2b
+    Cometa.Error
+    Cometa.Error.Code
+  build-depends:
+    base >=4.18 && <4.22,
+    bytestring >=0.11 && <0.13,
+    text >=2.0 && <2.2,
+    cometa:core
 
 executable cometa-hash
   import: language
@@ -66,12 +87,19 @@ test-suite cometa-test
   type: exitcode-stdio-1.0
   hs-source-dirs: test
   main-is: Main.hs
+  c-sources: cbits/cometa_error_codes_test.c
+  cc-options: -std=c11 -Wall -Wextra
+  other-modules:
+    ErrorCode
+    Ownership
+    Callback
   ghc-options: -threaded
   build-depends:
     base >=4.18 && <4.22,
     bytestring >=0.11 && <0.13,
     text >=2.0 && <2.2,
     cometa,
+    cometa:core,
     tasty >=1.4 && <1.6,
     tasty-hunit >=0.10 && <0.11,
     tasty-hedgehog >=1.4 && <1.5,
