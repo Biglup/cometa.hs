@@ -62,7 +62,7 @@ main =
             finished <- newEmptyMVar
             worker <-
               forkFinally
-                (putMVar started () >> forever (Blake2b.compute 64 (ByteString.replicate (16 * 1024 * 1024) 42) >> yield))
+                (putMVar started () >> forever (Blake2b.compute 64 (ByteString.replicate (1024 * 1024) 42) >> yield))
                 (putMVar finished)
             takeMVar started
             threadDelay 1000

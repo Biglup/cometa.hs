@@ -650,8 +650,8 @@ Workflow:
 
 Apply the engineering standards and reference set in section 19 during P00/P01.
 
-The repository now contains the first P00/P01 foundation and a small P02/P04
-hashing slice. Read `AGENTS.md`, `CODING_CONVENTIONS.md`, the current CI results,
+The first foundation is under review in [PR #1](https://github.com/Biglup/cometa.hs/pull/1).
+It covers the initial P00/P01 foundation and a small P02/P04 hashing slice. Read `AGENTS.md`, `CODING_CONVENTIONS.md`, the current CI results,
 and `native-api.csv` before continuing. The ledger inventories 3,881 declarations
 from 231 public headers; presence in that inventory does not mean implemented.
 `native/cardano-c.ref` pins the native source and `native-baseline.json` records
@@ -668,6 +668,14 @@ callback retention, and the full platform matrix remain acceptance gates.
 Documentation uses Haddock for API contracts and Sphinx/MyST for the narrative
 guide. Read the Docs needs project import; Hackage publication is a release task.
 Neither hosted service is advertised as already published.
+
+Local foundation evidence: GHC 9.6.7 builds with warnings as errors; ten tests
+include 200 Hedgehog cases; Ormolu and HLint pass; all three public modules have
+complete Haddock coverage; strict Sphinx and link checking pass. A clean extracted
+sdist builds against the pinned native library, and the README example compiles
+and runs. Full Valgrind checks, including cancellation, pass with zero errors and no lost
+allocations using fair thread scheduling and two RTS capabilities. Hosted platform
+results remain under review. No full phase completion or release readiness is implied by these checks.
 
 Update this plan with decisions, PR links, tested revisions, results and remaining
 work as implementation proceeds. Keep release-specific pins in implementation
