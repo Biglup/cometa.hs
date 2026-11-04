@@ -61,7 +61,7 @@ where
 -- IMPORTS --------------------------------------------------------------------
 
 import Cometa.Error (Error (..))
-import qualified Cometa.Error.Code as Code
+import Cometa.Internal.Error (fromNativeFailure)
 import qualified Cometa.Internal.FFI.Cbor as Native
 import qualified Cometa.Internal.FFI.Native as Status
 import Cometa.Internal.Failure (NativeFailure (..))
@@ -340,10 +340,10 @@ withDiagnostic action = allocaBytes 1024 $ \diagnostic -> do
   result <- action diagnostic 1024
   case result of
     Right value -> pure (Right value)
-    Left (NativeContractFailure operation) -> pure (Left (NativeContractViolation operation))
+    Left failure@(NativeContractFailure _) -> pure (Left (fromNativeFailure failure))
     Left (NativeFailure operation code fallback) -> do
       message <- copyStaticText diagnostic
-      pure (Left (NativeError operation (Code.fromNumber code) (if Text.null message then fallback else message)))
+      pure (Left (fromNativeFailure (NativeFailure operation code (if Text.null message then fallback else message))))
 
 -- | Borrow immutable Haskell bytes for one synchronous native scope. C must
 -- finish using the pointer before this continuation returns.

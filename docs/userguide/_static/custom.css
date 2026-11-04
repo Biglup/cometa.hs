@@ -1,0 +1,8 @@
+/* Keep purple links alongside the white header in both color schemes. */
+[data-md-color-scheme="default"][data-md-color-primary="white"] {
+  --md-typeset-a-color: #673ab7;
+}
+
+[data-md-color-scheme="slate"][data-md-color-primary="white"] {
+  --md-typeset-a-color: #b39ddb;
+}

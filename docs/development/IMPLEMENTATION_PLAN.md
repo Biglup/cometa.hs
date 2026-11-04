@@ -720,7 +720,7 @@ metadata and test provenance, not in the general binding architecture guide.
 
 ### P03 encoding and transaction-identity prototype
 
-This slice adds `Cometa.Encoding.Cbor`: exact encoded values, hexadecimal
+Merged [PR #3](https://github.com/Biglup/cometa.hs/pull/3) adds `Cometa.Encoding.Cbor`: exact encoded values, hexadecimal
 conversion, primitive integer/byte/text/Boolean codecs, and compositional arrays
 and ordered maps. Integer codecs cover the complete primitive CBOR integer range;
 tagged bignums, floating-point codecs, and the complete streaming reader/writer
@@ -748,13 +748,56 @@ with independent body-hash/signature provenance in
 together with the earlier foundation, all 55 tests and 2,400 property cases pass
 locally with warnings as errors. Full Valgrind reports zero errors and zero lost
 allocations without suppressions. The build, CBOR example, Haddock, strict guide,
-and native inventory checks pass. Hosted results are recorded in the PR.
+and native inventory checks pass. All eight hosted CI jobs passed before the next slice began.
 
 Full P03/P08 coverage is not implied: streaming interfaces, JSON/other encodings,
 tagged bignum/float construction, public complete transaction fields, broader
 mutation laws, and deterministic native allocation-failure injection remain
 pending. Text decoding validates UTF-8 per indefinite chunk, while raw CBOR
 import preserves native-reader-accepted structures without schema/tag validation.
+
+### P04 first slice: Ed25519 values and scoped signing
+
+This slice covers normal and extended Ed25519 keys, signatures, verification,
+public-key hashing, explicit secret export and independent scoped cloning.
+BIP32/BIP39, software key handlers, other crypto primitives, and transaction/CIP-8
+signing remain later P04 work; generic byte signing does not complete those APIs.
+
+Public keys and signatures are abstract immutable Haskell byte values. Import
+validates encoded length; equality/order compare bytes. Native clone semantics
+adapt to ordinary immutable value reuse. Verification and public-key hashing use
+scoped native calls, and all returned public data is copied before cleanup.
+
+Signing keys have no `Show` or equality instance. Scoped acquisition takes a
+callback returning `IO (Either Error a)`, keeping expected acquisition and action
+failures in one result channel. Exceptions propagate after cleanup. A private
+lock protects each native key through operations and closure; user-supplied bytes
+are evaluated and borrowed before taking that lock. No user callback executes
+under it. Closed handles reject operations, and clones own independent scopes.
+
+Native secret-storage audit at the pinned revision: final private-key destruction
+calls `sodium_memzero` on its key-material buffer, but the allocation is ordinary
+heap storage, not locked memory. The normal-signing helper's temporary stack
+`sk[64]` is not explicitly wiped on every path. This is a native follow-up, not a
+promise the binding can make about erasing all secret copies. Input and exported
+Haskell byte/text values remain caller-managed; public documentation describes
+that observable lifetime boundary without claiming comprehensive erasure.
+
+The native Boolean verification function also maps initialization failure to
+false. The Haskell API therefore promises `Right True` only for successful
+verification and `Right False` when it did not succeed; it cannot recover a
+separate diagnostic the native interface does not provide.
+
+Validation: all 79 tests pass, including 24 Ed25519 tests and 3,600 property
+cases overall. Eight fixed signing vectors include four RFC 8032 cases and
+independently checked normal/extended cases; provenance is recorded in
+`test/Fixtures/ED25519.md`. Tests cover operation failures, callback errors,
+exceptions, cancellation, escaped handles, retained native references, cloning,
+concurrent close/sign, and input evaluation before locking. Full Valgrind reports
+zero errors and zero lost allocations without suppressions. Compiler probes
+confirm that signing keys expose neither `Show` nor `Eq`. The build, example,
+guide example, public Haddock, strict Sphinx, formatting/lint, and native inventory
+checks pass locally; source-package and hosted CI results are recorded in the PR.
 
 ## 19. Haskell engineering standards and reference libraries
 

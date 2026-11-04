@@ -14,6 +14,8 @@ highlight_language = "haskell"
 html_theme = "sphinx_immaterial"
 html_title = "Cometa.hs"
 html_logo = "../../assets/cometa_hs.png"
+html_static_path = ["_static"]
+html_css_files = ["custom.css"]
 html_theme_options = {
     "repo_url": "https://github.com/Biglup/cometa.hs",
     "repo_name": "cometa.hs",
@@ -25,15 +27,15 @@ html_theme_options = {
         {
             "media": "(prefers-color-scheme: light)",
             "scheme": "default",
-            "primary": "black",
-            "accent": "pink",
+            "primary": "white",
+            "accent": "deep-purple",
             "toggle": {"icon": "material/lightbulb-outline", "name": "Switch to dark mode"},
         },
         {
             "media": "(prefers-color-scheme: dark)",
             "scheme": "slate",
-            "primary": "black",
-            "accent": "light-blue",
+            "primary": "white",
+            "accent": "purple",
             "toggle": {"icon": "material/lightbulb", "name": "Switch to light mode"},
         },
     ],

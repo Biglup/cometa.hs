@@ -1,12 +1,13 @@
 # Cometa.hs
 
-Cometa.hs provides CBOR encoding, immutable Blake2b hashes, structured errors,
-and native version information backed by [cardano-c](https://github.com/Biglup/cardano-c).
+Cometa.hs provides Ed25519 signing, CBOR encoding, and immutable Blake2b hashes,
+backed by [cardano-c](https://github.com/Biglup/cardano-c). Operations report
+structured errors.
 The library is unpublished; build it from a checked-out source revision.
 
 Start with [installation](installation.md), then read the
-[hash guide](hashes.md) and [CBOR guide](cbor.md). The [API reference](api-reference.md) explains how to
-browse the declarations for the revision you build.
+[hash guide](hashes.md), [CBOR guide](cbor.md), and [signing guide](signing.md).
+The [API reference](api-reference.md) explains how to browse the declarations for the revision you build.
 
 ```{toctree}
 :maxdepth: 2
@@ -15,6 +16,7 @@ browse the declarations for the revision you build.
 installation
 hashes
 cbor
+signing
 api-reference
 ```
 

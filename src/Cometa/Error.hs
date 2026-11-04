@@ -58,6 +58,22 @@ data Error
   | -- | Hexadecimal input is empty, has an odd number of digits, or contains
     -- characters other than ASCII hexadecimal digits. Both cases are accepted.
     InvalidHex
+  | -- | An Ed25519 signing-key operation used a handle that has been closed.
+    SigningKeyClosed
+  | -- | An Ed25519 signing-key input has the wrong byte length for its format.
+    InvalidEd25519SigningKeyLength
+      -- | Expected byte length: 32 for normal keys, or 64 for extended keys.
+      !Int
+      -- | Actual input byte length.
+      !Int
+  | -- | An Ed25519 public key does not contain exactly 32 bytes.
+    InvalidEd25519PublicKeyLength
+      -- | Actual encoded byte length.
+      !Int
+  | -- | An Ed25519 signature does not contain exactly 64 bytes.
+    InvalidEd25519SignatureLength
+      -- | Actual encoded byte length.
+      !Int
   | -- | A CBOR integer is outside the supported primitive range, from
     -- @-2^64@ through @2^64 - 1@ inclusive. Tagged bignums are not encoded here.
     InvalidCborInteger

@@ -45,9 +45,8 @@ where
 -- IMPORTS --------------------------------------------------------------------
 
 import Cometa.Error (Error (..))
-import qualified Cometa.Error.Code as Code
+import Cometa.Internal.Error (fromNativeFailure)
 import qualified Cometa.Internal.FFI.Native as Native
-import Cometa.Internal.Failure (NativeFailure (..))
 import Cometa.Internal.Ownership (copyHashResult)
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as ByteString
@@ -69,7 +68,7 @@ newtype Blake2bHash = Blake2bHash ByteString
 
 -- | Compute an unkeyed digest with an output length of 16 through 64 bytes.
 -- Invalid output lengths return 'InvalidHashLength'. Empty messages are currently
--- unsupported and return 'NativeError' with code 'Code.OutOfBoundsMemoryRead'.
+-- unsupported and return 'NativeError' with code @OutOfBoundsMemoryRead@.
 -- Other cardano-c failures also return 'NativeError'.
 compute ::
   -- | Digest length in bytes, from 16 through 64 inclusive.
@@ -133,9 +132,3 @@ hexDigit character
   | otherwise = Nothing
   where
     offset start = fromIntegral (fromEnum character - fromEnum start)
-
--- | Translate a private native snapshot at the public domain boundary.
-fromNativeFailure :: NativeFailure -> Error
-fromNativeFailure failure = case failure of
-  NativeFailure operation code message -> NativeError operation (Code.fromNumber code) message
-  NativeContractFailure operation -> NativeContractViolation operation
