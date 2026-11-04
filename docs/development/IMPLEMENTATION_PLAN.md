@@ -1275,3 +1275,48 @@ Haddock (100% new public module coverage), Cabal check, source-distribution
 consumer build, strict Sphinx HTML/linkcheck, ClangFormat 18, Ormolu 0.8.0.2,
 HLint 3.8 and native inventory checks pass locally. Hosted CI results remain to
 be reviewed; no new compiler/platform execution coverage is claimed.
+
+
+### P04 fifth slice: validated wallet derivation paths
+
+`Cometa.Crypto.DerivationPath` provides pure abstract `Index`, `AccountPath`, and
+`DerivationPath` values, inspection, and encoded BIP32 index lists.
+The same module names all nine pinned constants, including multisignature
+purpose and governance roles. Custom purpose, coin type and role numbers remain
+representable. Constructors validate arbitrary `Integer` component inputs before
+conversion: every raw component is 0..2^31-1. Account encoding sets the hardening
+bit for purpose, coin type and account; suffix encoding preserves soft role/index.
+
+Audited native `key_handlers/{derivation_path,account_derivation_path}.h` and
+`software_secure_key_handler.c` at revision
+`7811fe94dad90f30478ed4b61d96677f188abaa8`. Native storage uses uint64 fields but
+its consumers cast to uint32, harden the first three and use role/index directly.
+The public values deliberately reject silent truncation, hardened-prefix aliases,
+and hardened role/index inputs. This is a safe domain representation, not an ABI
+mirror. Constants use explicit Haskell values; no new production FFI or native
+resources are needed.
+
+Tests compare all constants with native headers; derive full public keys with
+standard, multisignature, all six roles, custom distinct components and maximum
+components; and compare account public keys with the actual software-handler
+account getter plus a pinned native expected xpub. Public account-suffix
+commutation and shrinking encoding/inspection properties cover conversion laws.
+Provenance and oracle limitations are in `test/Fixtures/DERIVATION_PATHS.md`.
+The compiled `cometa-derivation-paths` example and BIP32 guide teach raw components
+and root versus account-relative encoding. Software key handlers, transaction
+signing and CIP-8 message signing remain pending; this does not complete P04.
+
+The previous password-crypto hosted Linux/GHC 9.6.7 Valgrind job reached its
+120-second limit during PBKDF2 cancellation and exited 124. Its forced-termination
+summary reported zero definite/indirect losses and zero errors, with 288 possible
+bytes, but cannot establish a normal-exit memory result. The full-suite CI limit
+is now 240 seconds, allowing for measured local runtime and added path tests;
+no suppressions were added. Hosted rerun results must be reviewed separately.
+
+The consolidated API passes all 138 tests, the warnings-as-errors build,
+format/lint checks, Haddock and strict Sphinx HTML locally. Public type and
+instance links were inspected after consolidating the path module. The fresh source-distribution consumer builds and passes all 138 tests.
+The final binary completes the full Valgrind suite normally in 132.75 seconds:
+138 tests pass, with zero errors and zero definite, indirect or possible losses;
+no suppressions are used. Hosted quality and documentation checks passed on the
+implementation commit; the platform matrix remains in progress.
