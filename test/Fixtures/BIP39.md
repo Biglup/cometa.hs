@@ -7,7 +7,8 @@ these fixtures for a real wallet. Tests need no credentials or live network.
 
 `Fixtures.Bip39` contains all 24 entropy/English phrase pairs from cardano-c
 `lib/tests/bip39.cpp`, revision
-`8dc0c55f4132fcaa2e7961b6cfbfea96a6d93b5d` (`native/cardano-c.ref`). That file is
+`8dc0c55f4132fcaa2e7961b6cfbfea96a6d93b5d`. The current build revision is
+recorded separately in `native/cardano-c.ref`. That file is
 Copyright 2024 Biglup Labs, licensed Apache-2.0; only vector data was transcribed.
 Every pair was crosschecked byte-for-byte against the 24 English cases in
 [Trezor python-mnemonic vectors.json](https://github.com/trezor/python-mnemonic/blob/b57a5ad77a981e743f4167ab2f7927a55c1e82a8/vectors.json),

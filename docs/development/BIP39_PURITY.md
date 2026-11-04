@@ -1,12 +1,17 @@
 # Audited BIP39 purity exception
 
 Reviewed 2026-11-04 for native pin
-`8dc0c55f4132fcaa2e7961b6cfbfea96a6d93b5d`. This exception covers only
+`7811fe94dad90f30478ed4b61d96677f188abaa8`. This exception covers only
 `Cometa.Internal.Bip39Pure`'s three concrete monomorphic native boundaries:
 `fromEntropy`, `fromWords`, and `exportEntropy`. `fromText` is pure splitting
 followed by `fromWords`. It authorizes no other native operation or generic
 `IO a -> a` helper. Keep providers, callbacks, key lifetimes and arbitrary
 allocation/mutation in `IO`.
+
+The pin update adds initialization locking and password-crypto validation.
+The BIP39, SHA256 and wipe-helper sources are unchanged from the original
+`8dc0c55f4132fcaa2e7961b6cfbfea96a6d93b5d` review; the threading build change is
+reviewed below.
 
 ## Reachable native code
 
@@ -37,9 +42,12 @@ or logger reference on this path.
 ## Native build and platform review
 
 `tools/build-native.py` builds the pinned static target with IPO disabled.
-The native CMake configuration defines `SODIUM_STATIC` but no sodium `HAVE_*`
+The native CMake configuration defines `SODIUM_STATIC` and, on native Unix,
+`HAVE_PTHREAD=1` for initialization locking. It defines no wipe-selection sodium
 feature macros. On the reviewed Unix configuration `sodium_memzero` therefore
 uses bounded volatile stores; disassembly confirmed that branch locally.
+The threading flag changes `sodium_init`, which this BIP39 call graph never
+reaches; it does not change SHA256 or the selected wipe implementation.
 Linux ARM and macOS ARM/Intel select the same source fallback under this build.
 Windows selects the Windows-header `SecureZeroMemory` bounded wipe when `_WIN32`
 and not `__CRT_INLINE`, otherwise the same fallback. These are source reviews;
