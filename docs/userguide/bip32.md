@@ -11,7 +11,8 @@ A private key contains 96 bytes; a public key contains 64 bytes. Use
 must contain 16, 20, 24, 28, or 32 bytes. Passwords can be empty and can contain
 NUL bytes. Supply already normalized bytes if your application uses a text
 password: this function performs no text normalization. It does not accept a
-mnemonic sentence or the 64-byte BIP39 seed produced from one.
+mnemonic sentence or the 64-byte BIP39 seed produced from one. Use the
+[BIP39 recovery guide](bip39.md) to validate a phrase and export its entropy.
 
 The example derives the CIP-1852 path `1852'/1815'/0'/0/0`. An apostrophe denotes
 a hardened index. `harden` sets the high bit of the encoded 32-bit index and is

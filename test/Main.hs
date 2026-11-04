@@ -19,6 +19,7 @@ module Main (main) where
 -- IMPORTS --------------------------------------------------------------------
 
 import qualified Bip32
+import qualified Bip39
 import qualified Callback
 import qualified Cbor
 import qualified Cometa
@@ -49,7 +50,7 @@ main :: IO ()
 main =
   defaultMain $
     testGroup "Cometa foundation" $
-      [ErrorCode.tests, Callback.tests, Ownership.tests, Cbor.tests, Transaction.tests, Ed25519.tests, Bip32.tests] ++ foundationTests
+      [ErrorCode.tests, Callback.tests, Ownership.tests, Cbor.tests, Transaction.tests, Ed25519.tests, Bip32.tests, Bip39.tests] ++ foundationTests
 
 foundationTests :: [TestTree]
 foundationTests =

@@ -89,6 +89,18 @@ data Error
     InvalidBip39EntropyLength
       -- | Actual byte count.
       !Int
+  | -- | A mnemonic requires 12, 15, 18, 21 or 24 words.
+    InvalidBip39WordCount
+      -- | Actual number of words.
+      !Int
+  | -- | A mnemonic word is empty or contains characters outside lowercase ASCII.
+    InvalidBip39Word
+      -- | One-based word position; excludes the word itself.
+      !Int
+  | -- | At least one word is absent from the English BIP39 dictionary.
+    UnknownBip39Word
+  | -- | The mnemonic checksum does not agree with its entropy.
+    InvalidBip39Checksum
   | -- | Public derivation requires soft indices below 2^31.
     HardenedPublicDerivation
       -- | First hardened encoded index encountered.

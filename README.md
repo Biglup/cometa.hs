@@ -9,7 +9,7 @@
 <div align="center">
 
 ![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)
-[![Documentation](https://readthedocs.org/projects/cometahs/badge/?version=latest)](https://cometahs.readthedocs.io/en/latest/)
+[![Documentation](https://img.shields.io/readthedocs/cometahs/latest?label=docs)](https://cometahs.readthedocs.io/en/latest/)
 [![Twitter Follow](https://img.shields.io/twitter/follow/BiglupLabs?style=social)](https://x.com/BiglupLabs)
 
 </div>

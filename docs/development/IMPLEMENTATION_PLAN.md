@@ -857,6 +857,59 @@ Compiler probes confirm private keys have no `Show`/`Eq`, public constructors ar
 hidden and shared Ed25519 signing-key representation module cannot be imported by consumers.
 Hosted CI for this slice remains to be reviewed in its pull request.
 
+### P04 third slice: English BIP39 mnemonics
+
+This slice adds `Cometa.Crypto.Bip39`: opaque validated English mnemonics,
+supplied-entropy conversion, phrase/word-list parsing, word-count inspection and
+explicit secret text/entropy export. Software key handlers, derivation-path
+records, other crypto primitives and transaction/CIP-8 signing remain later P04
+work. No random generation or BIP39 sentence/passphrase seed KDF is invented:
+the pinned BIP39 header exposes only the two entropy/word conversion operations.
+Exported entropy composes with Cardano BIP32 `withEntropy`, whose root KDF remains
+distinct from the 64-byte BIP39 seed KDF.
+
+Mnemonics are ordinary Haskell secret values with hidden constructors and no
+`Show` or equality instance. Text parsing splits Unicode whitespace; export uses
+single ASCII spaces. Words must be exact lowercase English dictionary entries.
+No case folding, spelling correction, other language dictionary or normalization
+is applied to words. Count, lexical-position, dictionary and checksum failures
+have explicit constructors without supplied words. Native unknown-word status
+has no position, so `UnknownBip39Word` deliberately carries none. `Text` inputs
+cannot contain invalid UTF-8 byte sequences; non-ASCII/replacement characters
+are rejected rather than introducing an unnecessary byte-text API.
+
+Native audit: word outputs borrow static dictionary strings and are copied;
+no native owner is acquired by either conversion. Input buffers/arrays live
+through each safe foreign call. Output sizes are initialized and checked;
+word slots start at NULL. The native checksum failure writes entropy before
+returning failure: the wrapper never exports it and wipes its 32-byte scratch
+on every exit, including cancellation after foreign unwind. Checksum validation
+makes no hidden host entropy copy. The wipe uses public `cardano_memzero`, not a
+vendored dependency symbol. Its scoped adaptation is tracked separately in the
+ledger. No allocation/retention-failure injection applies to these owner-free
+native functions. Native stack intermediates are not wiped, and no comprehensive
+erasure guarantee is made for native temporaries or ordinary host secret copies.
+
+Validation: all 115 tests pass with warnings as errors, including 13 BIP39 tests
+and 300 new Hedgehog roundtrip cases (4,800 property cases overall). All 24 native
+entropy/phrase vectors were crosschecked against independently pinned Trezor
+vectors; two independent Python SHA256/checksum cases add 20/28-byte coverage.
+Exact source revisions, generation recipe, native attribution and Trezor MIT
+notice are retained in `test/Fixtures/BIP39.md` and its companion license.
+Tests cover every standard size, invalid counts/lengths, dictionary/checksum,
+NUL/case/non-ASCII/word separators, normalized whitespace, wipe extent, GC,
+repeated success/failure, cancellation and scoped BIP32 root integration.
+Full Valgrind passes all 115 tests in 57.19 seconds with zero errors, zero lost
+allocations and no suppressions. Compiler probes reject `Show`, `Eq` and direct
+mnemonic construction. No new compiler/platform matrix is claimed.
+
+The complete build, five examples, extracted BIP39 guide example, Haddock (100%
+public BIP39 coverage), Cabal check, source-distribution consumer build, strict
+Sphinx HTML/linkcheck, ClangFormat 18, Ormolu 0.8.0.2, HLint 3.8 and native inventory
+checks pass locally. The optional `ExceptT` example prints only a public key and
+exits unsuccessfully on error; it uses a public deterministic test phrase.
+Hosted CI remains to be reviewed in the new pull request.
+
 ## 19. Haskell engineering standards and reference libraries
 
 Added 2026-11-04 following the request for a professional, idiomatic Haskell

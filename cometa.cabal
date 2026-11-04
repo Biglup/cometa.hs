@@ -58,6 +58,8 @@ library core
     Cometa.Internal.FFI.SigningKey
     Cometa.Internal.FFI.Ed25519Values
     Cometa.Internal.FFI.Bip32
+    Cometa.Internal.FFI.Bip39
+    Cometa.Internal.Bip39
     Cometa.Internal.Bip32PrivateKey
   build-depends:
     base >=4.18 && <4.22,
@@ -71,6 +73,7 @@ library core
     cbits/cometa_signing_key.c
     cbits/cometa_ed25519_values.c
     cbits/cometa_bip32.c
+    cbits/cometa_bip39.c
   include-dirs: cbits
   includes: cometa_provider.h
   cc-options: -std=c11 -Wall -Wextra
@@ -86,6 +89,7 @@ library
     Cometa.Crypto.Ed25519.SigningKey
     Cometa.Crypto.Bip32.PublicKey
     Cometa.Crypto.Bip32.PrivateKey
+    Cometa.Crypto.Bip39
     Cometa.Error
     Cometa.Error.Code
     Cometa.Encoding.Cbor
@@ -137,6 +141,17 @@ executable cometa-bip32
     text >=2.0 && <2.2,
     cometa
 
+executable cometa-bip39
+  import: language
+  hs-source-dirs: examples
+  main-is: Bip39.hs
+  build-depends:
+    base >=4.18 && <4.22,
+    bytestring >=0.11 && <0.13,
+    text >=2.0 && <2.2,
+    transformers >=0.6 && <0.7,
+    cometa
+
 test-suite cometa-test
   import: language
   type: exitcode-stdio-1.0
@@ -157,6 +172,8 @@ test-suite cometa-test
     Ed25519
     Bip32
     Fixtures.Bip32
+    Bip39
+    Fixtures.Bip39
   ghc-options: -threaded
   build-depends:
     base >=4.18 && <4.22,

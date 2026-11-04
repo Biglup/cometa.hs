@@ -1,0 +1,134 @@
+-- Copyright 2026 Biglup Labs
+-- SPDX-License-Identifier: Apache-2.0
+--
+-- Licensed under the Apache License, Version 2.0 (the "License");
+-- you may not use this file except in compliance with the License.
+-- You may obtain a copy of the License at
+--
+--     https://www.apache.org/licenses/LICENSE-2.0
+--
+-- Unless required by applicable law or agreed to in writing, software
+-- distributed under the License is distributed on an "AS IS" BASIS,
+-- WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-- See the License for the specific language governing permissions and
+-- limitations under the License.
+
+-- | English BIP39 recovery phrases with validated word counts and checksums.
+--
+-- Mnemonics contain wallet secrets. They have no 'Show' or equality instance.
+-- Import and export create ordinary Haskell text/byte values whose lifetimes
+-- are managed by the caller; this API does not guarantee their erasure. Never
+-- log exported phrases or use deterministic examples for real wallets.
+--
+-- @
+-- import qualified Cometa.Crypto.Bip39 as Bip39
+-- import qualified Data.ByteString as ByteString
+--
+-- main :: IO ()
+-- main = do
+--   result <- Bip39.fromEntropy (ByteString.replicate 16 0) -- test only
+--   case result of
+--     Left err -> print err
+--     Right mnemonic -> print (Bip39.wordCount mnemonic)
+-- @
+module Cometa.Crypto.Bip39
+  ( Mnemonic,
+
+    -- * Construction
+    fromEntropy,
+    fromText,
+    fromWords,
+
+    -- * Inspection
+    wordCount,
+
+    -- * Explicit secret export
+    exportText,
+    exportEntropy,
+  )
+where
+
+-- IMPORTS --------------------------------------------------------------------
+
+import Cometa.Error (Error (..))
+import qualified Cometa.Error.Code as Code
+import qualified Cometa.Internal.Bip39 as Internal
+import Cometa.Internal.Error (fromNativeFailure)
+import Cometa.Internal.Failure (NativeFailure (..))
+import Data.ByteString (ByteString)
+import qualified Data.ByteString as ByteString
+import Data.Char (isAsciiLower)
+import Data.Text (Text)
+import qualified Data.Text as Text
+
+-- TYPES ----------------------------------------------------------------------
+
+-- | A checksum-validated sequence of 12, 15, 18, 21 or 24 lowercase English
+-- BIP39 words. Constructors are hidden; secret export is explicit.
+newtype Mnemonic = Mnemonic [Text]
+
+-- DEFINITIONS ----------------------------------------------------------------
+
+-- | Convert supplied entropy into a phrase. Exactly 16, 20, 24, 28 or 32 bytes
+-- are accepted; other sizes return 'InvalidBip39EntropyLength'. This operation
+-- does not generate randomness. The caller must supply securely generated
+-- entropy for a real wallet. Native failures return 'NativeError'.
+fromEntropy :: ByteString -> IO (Either Error Mnemonic)
+fromEntropy entropy
+  | size `notElem` [16, 20, 24, 28, 32] = pure (Left (InvalidBip39EntropyLength size))
+  | otherwise = fmap (either (Left . fromNativeFailure) (Right . Mnemonic)) (Internal.fromEntropy entropy)
+  where
+    size = ByteString.length entropy
+
+-- | Parse a phrase, splitting on Unicode whitespace and discarding leading and
+-- trailing whitespace. Words are case sensitive: only lowercase ASCII English
+-- BIP39 words are accepted, without spelling correction or normalization.
+-- Returns 'InvalidBip39WordCount', 'InvalidBip39Word' (one-based position),
+-- 'UnknownBip39Word', or 'InvalidBip39Checksum'. Error values never include the
+-- supplied words. Unexpected native failures return 'NativeError'; a violated
+-- result invariant returns 'NativeContractViolation'.
+fromText :: Text -> IO (Either Error Mnemonic)
+fromText = fromWords . Text.words
+
+-- | Validate individual words and their checksum. Each list element must be
+-- one lowercase ASCII word; embedded whitespace, NUL, upper case and non-ASCII
+-- characters return 'InvalidBip39Word'. Failures match 'fromText'.
+fromWords :: [Text] -> IO (Either Error Mnemonic)
+fromWords words' = case validateWords words' of
+  Left err -> pure (Left err)
+  Right () -> fmap (either (Left . mnemonicError) (const (Right (Mnemonic words')))) (Internal.validate words')
+
+-- | Number of words in the validated phrase.
+wordCount :: Mnemonic -> Int
+wordCount (Mnemonic words') = length words'
+
+-- | Export the secret phrase as lowercase words separated by single ASCII
+-- spaces. The returned text is ordinary caller-managed secret material.
+exportText :: Mnemonic -> Text
+exportText (Mnemonic words') = Text.unwords words'
+
+-- | Export the secret entropy bytes (16, 20, 24, 28 or 32 bytes). This is the
+-- entropy accepted by @Cometa.Crypto.Bip32.PrivateKey.withEntropy@,
+-- not the 64-byte seed produced by BIP39's separate passphrase KDF.
+-- The returned bytes are ordinary caller-managed secret material. Native
+-- failures return 'NativeError'; a violated result invariant returns
+-- 'NativeContractViolation'.
+exportEntropy :: Mnemonic -> IO (Either Error ByteString)
+exportEntropy (Mnemonic words') = fmap (either (Left . fromNativeFailure) Right) (Internal.exportEntropy words')
+
+validateWords :: [Text] -> Either Error ()
+validateWords words'
+  | count `notElem` [12, 15, 18, 21, 24] = Left (InvalidBip39WordCount count)
+  | otherwise = mapM_ validate (zip [1 ..] words')
+  where
+    count = length words'
+    validate (position, word)
+      | Text.null word || not (Text.all isAsciiLower word) = Left (InvalidBip39Word position)
+      | otherwise = Right ()
+
+mnemonicError :: NativeFailure -> Error
+mnemonicError failure = case failure of
+  NativeFailure _ status _
+    | Code.fromNumber status == Code.InvalidChecksum -> InvalidBip39Checksum
+    | Code.fromNumber status == Code.InvalidArgument -> UnknownBip39Word
+  _ -> fromNativeFailure failure
