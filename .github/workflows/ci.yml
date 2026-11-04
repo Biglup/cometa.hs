@@ -1,0 +1,138 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  haskell:
+    name: GHC ${{ matrix.ghc }} / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            ghc: '9.6.7'
+          - os: ubuntu-24.04
+            ghc: '9.10.3'
+          - os: macos-14
+            ghc: '9.6.7'
+          - os: windows-2022
+            ghc: '9.6.7'
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: haskell-actions/setup@v2
+        with:
+          ghc-version: ${{ matrix.ghc }}
+          cabal-version: '3.12.1.0'
+      - name: Read native source pin
+        id: pin
+        run: echo "revision=$(cat native/cardano-c.ref)" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v4
+        with:
+          repository: Biglup/cardano-c
+          ref: ${{ steps.pin.outputs.revision }}
+          path: .native/cardano-c
+          persist-credentials: false
+      - name: Build pinned native static library
+        id: native
+        run: python tools/build-native.py .native/cardano-c .native/build --configure-cabal
+      - name: Update package index
+        run: cabal update
+      - name: Build with warnings as errors
+        run: cabal build all
+      - name: Run tests and example
+        run: |
+          cabal test all --test-show-details=direct
+          cabal run cometa-hash
+      - name: Build Haddock
+        run: cabal haddock all --haddock-hyperlink-source --haddock-html
+      - uses: actions/upload-artifact@v4
+        with:
+          name: haddock-${{ matrix.os }}-ghc-${{ matrix.ghc }}
+          path: dist-newstyle/**/doc/html/cometa/
+          if-no-files-found: error
+      - name: Check package and build source distribution consumer
+        env:
+          NATIVE_INCLUDE_DIR: ${{ steps.native.outputs.include-dir }}
+          NATIVE_LIBRARY_DIR: ${{ steps.native.outputs.library-dir }}
+        run: |
+          cabal check
+          cabal sdist --output-directory=.sdist
+          mkdir -p "$RUNNER_TEMP/cometa-consumer"
+          tar -xzf .sdist/cometa-*.tar.gz -C "$RUNNER_TEMP/cometa-consumer"
+          cd "$RUNNER_TEMP"/cometa-consumer/cometa-*
+          cabal build all --extra-include-dirs="$NATIVE_INCLUDE_DIR" --extra-lib-dirs="$NATIVE_LIBRARY_DIR"
+      - name: Check native allocations with Valgrind
+        if: runner.os == 'Linux' && matrix.ghc == '9.6.7'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y valgrind
+          valgrind --leak-check=full --show-leak-kinds=definite,indirect --errors-for-leak-kinds=definite,indirect --error-exitcode=1 "$(cabal list-bin cometa-test)"
+
+  quality:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install pinned style tools from official releases
+        run: |
+          mkdir -p "$RUNNER_TEMP/style-bin"
+          curl --fail --location https://github.com/tweag/ormolu/releases/download/0.8.0.2/ormolu-x86_64-linux.zip -o "$RUNNER_TEMP/ormolu.zip"
+          echo "f737b11835537d020d83a497903a392f19d4943aea03b75f76f1c5719d70f9f8  $RUNNER_TEMP/ormolu.zip" | sha256sum --check
+          unzip -j "$RUNNER_TEMP/ormolu.zip" -d "$RUNNER_TEMP/style-bin"
+          curl --fail --location https://github.com/ndmitchell/hlint/releases/download/v3.8/hlint-3.8-x86_64-linux.tar.gz -o "$RUNNER_TEMP/hlint.tar.gz"
+          echo "882363872064c70801858b4e9fa17468531fc30b91ed5b8d260eb48fc90b3e61  $RUNNER_TEMP/hlint.tar.gz" | sha256sum --check
+          tar -xzf "$RUNNER_TEMP/hlint.tar.gz" -C "$RUNNER_TEMP/style-bin" --strip-components=1
+      - name: Check formatting and lint
+        run: |
+          find src test examples \( -name '*.hs' -o -name '*.hsc' \) -print0 | xargs -0 "$RUNNER_TEMP/style-bin/ormolu" --mode check
+          "$RUNNER_TEMP/style-bin/hlint" src test examples
+
+  documentation:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install documentation dependencies
+        run: python -m pip install -r docs/requirements.txt
+      - name: Build strict guide and check links
+        run: |
+          python -m sphinx -n -W --keep-going -b html docs/userguide docs/_build/html
+          python -m sphinx -n -W --keep-going -b linkcheck docs/userguide docs/_build/linkcheck
+      - uses: actions/upload-artifact@v4
+        with:
+          name: user-guide
+          path: docs/_build/html/
+          if-no-files-found: error
+      - name: Read native source pin
+        id: pin
+        run: echo "revision=$(cat native/cardano-c.ref)" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v4
+        with:
+          repository: Biglup/cardano-c
+          ref: ${{ steps.pin.outputs.revision }}
+          path: .native/cardano-c
+          persist-credentials: false
+      - name: Verify public API inventory and source manifests
+        run: python tools/native-inventory.py .native/cardano-c
