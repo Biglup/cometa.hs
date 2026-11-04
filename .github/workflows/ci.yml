@@ -73,6 +73,8 @@ jobs:
           cabal run cometa-bip39
           cabal run cometa-password-crypto
           cabal run cometa-derivation-paths
+          cabal run cometa-software-key-handler
+          python tools/check-key-handler-roles.py
       - name: Exercise optimized pure crypto evaluation and concurrency
         run: |
           cabal test cometa-test --enable-optimization=2 --test-show-details=direct --test-options="-p BIP39 +RTS -N2 -RTS"

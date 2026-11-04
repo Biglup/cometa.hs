@@ -35,6 +35,10 @@ module Cometa.Internal.Callback
 
     -- * Native entry point
     confirmationCallback,
+
+    -- * Callback execution
+    runCallbackWorker,
+    rememberCallbackException,
   )
 where
 
@@ -195,7 +199,7 @@ callbackMaskingState control = withMVar control $ \case
     previous <- readIORef exception
     maybe (pure ()) throwIO previous
     pure state
-  Nothing -> throwIO (userError "confirmation callback outside its operation")
+  Nothing -> throwIO (userError "callback outside its operation")
 
 -- | Publish the worker before opening its gate. Pending cancellation is delivered
 -- instead of starting the user action. The caller keeps the ABI thread masked.

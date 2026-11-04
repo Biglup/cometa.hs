@@ -67,6 +67,14 @@ data Error
       !Int
       -- | Actual input byte length.
       !Int
+  | -- | A software key handler has closed.
+    KeyHandlerClosed
+  | -- | A software key handler already has an active operation.
+    KeyHandlerBusy
+  | -- | A software handler password is outside 1 through 128 bytes.
+    InvalidKeyHandlerPasswordLength !Int
+  | -- | Software storage framing, type or secret length is invalid.
+    InvalidKeyHandlerStorage
   | -- | An Ed25519 public key does not contain exactly 32 bytes.
     InvalidEd25519PublicKeyLength
       -- | Actual encoded byte length.

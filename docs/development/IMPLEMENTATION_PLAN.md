@@ -1320,3 +1320,89 @@ The final binary completes the full Valgrind suite normally in 132.75 seconds:
 138 tests pass, with zero errors and zero definite, indirect or possible losses;
 no suppressions are used. Hosted quality and documentation checks passed on the
 implementation commit; the platform matrix remains in progress.
+
+### P04 sixth slice: scoped software key handlers
+
+`Cometa.KeyHandler.Software` supplies abstract `Handler Bip32` and
+`Handler Ed25519` capabilities, construction from BIP39 entropy or a scoped
+Ed25519 signing key, encrypted binary serialization/deserialization, diagnostic
+name, account extended public-key derivation and Ed25519 public-key recovery.
+`LoadedHandler` restores the serialized kind as a typed sum. A nominal parameter
+role and hidden constructor prevent coercing an Ed25519 handler into a BIP32
+handler; external-client positive and compile-fail checks establish this boundary.
+Transaction/subtransaction signing requires typed transaction and witness-set
+surfaces and remains later P08/P12 work. Custom key-handler implementation records
+and CIP-8 also remain pending; this does not complete P04.
+
+The native prerequisite is pinned to
+`7a65f2c7309bbba9e86f6aa73214b003fab88aee` ([native PR #221](https://github.com/Biglup/cardano-c/pull/221)).
+That change clears the BIP32 root PBKDF2 stack buffer on success/failure and
+replaces the software handler's unchecked 96-byte signing-key scratch with a
+bounded, deterministically cleared native allocation. Existing BIP39/PBKDF2 pure
+boundaries were re-audited for this pin; that narrow review does not make handler
+operations pure or establish comprehensive secret erasure throughout the native
+crypto implementation. This Haskell slice makes no native-source changes.
+
+Each handler scope roots its own Haskell callback `FunPtr`: native's password
+callback has no context argument. A scoped closure captures its callback control,
+not a global router. Native constructors copy/encrypt borrowed entropy or signing
+key data; they do not retain the source key. Password and entropy marshaling
+scopes end after acquisition, before the application continuation. Native
+handlers own one reference until close; the callback wrapper is freed only after
+native release and all operation/callback workers have joined. The exported
+handle retains closed state after scope exit, without a usable native pointer.
+Inputs, callback actions and results are ordinary application-owned Haskell values;
+this does not promise to wipe ByteString marshaling copies, arbitrary callback
+captures, application copies, registers or crash memory.
+
+One state lock spans each native operation and its output copying. Overlap and
+callback reentry fail immediately with `KeyHandlerBusy`; independent handlers can
+run concurrently. Public close returns busy during an operation, while scope
+cleanup waits for it and closes afterward. The existing audited callback-worker
+protocol is reused: the caller's masking state controls the password action,
+exceptions are caught before returning to C, cancellation targets the user worker,
+and both workers join before the lock or wrapper can be released. A private
+password-length exception is translated to a structured error only after native
+unwind; other exceptions, including cancellation, rethrow normally. Each operation
+starts fresh callback exception state. A callback that masks cancellation or waits
+for its own operation can delay cleanup; the public contract documents that limit.
+
+Passwords are binary 1..128 bytes, matching the native callback buffer and signed
+length result. The native prerequisite corrects the earlier header prose that
+incorrectly described a status return.
+Constructor passwords use the same limit so every created handler can be opened
+through its callback. BIP32 derivation uses an empty BIP39 password; storage
+passwords only encrypt the entropy. Raw account components are validated domain
+values marshaled to the by-value native struct by a small C adapter. Owned public
+results are copied and released on every exit; serialized native buffers are
+copied and then cleared/released. Status diagnostics are static sanitized native
+messages; mutable custom-handler diagnostics remain deferred in the ledger.
+
+Storage is the native version-1 binary envelope, not CBOR. Before native
+allocation, the binding checks magic/version/kind, canonical encrypted sizes
+(76/80/84/88/92 bytes for BIP39 entropy, 92/124 for Ed25519), and exact framing;
+Integer accumulation prevents length overflow. Native then checks CRC. Loading
+neither invokes the password callback nor authenticates the encrypted payload.
+Metadata is CRC-protected, not cryptographically authenticated: an attacker can
+rewrite compatible kinds and recompute CRC. The guide states the trusted-storage
+requirement. Only a subsequent public-key operation authenticates/decrypts the
+inner payload; wrong passwords fail there.
+
+`test/SoftwareKeyHandler.hs` adds 20 scenarios, covering pinned native binary and
+public-key vectors, normal/extended signing-key import, all entropy lengths,
+maximum account components, deferred password use, storage/CRC/input bounds,
+wrong passwords, NUL/128-byte passwords, callback exceptions and invalid length
+recovery on the same handler, close/escape, source independence, busy reentry,
+concurrency, cancellation finalizer joins, scope-exit joins and independent
+callback registrations through GC. Fixture provenance is in
+`test/Fixtures/SOFTWARE_KEY_HANDLERS.md`; comparison with the existing BIP32 API
+is binding conformance rather than a separate cryptographic oracle. Source
+inspection and worker/barrier tests establish callback lifetime ordering; no
+native wrapper-allocation counter is claimed. The guide example is compiled as
+`cometa-software-key-handler` and prints only a public key.
+
+Local GHC 9.6.7 verification against the new isolated static native archive:
+all 158 tests pass, public handler Haddock coverage is 100%, strict Sphinx HTML
+build passes, HLint is clean, and external-consumer role/capability checks pass.
+Additional package/style/Valgrind evidence follows when those checks finish;
+hosted platform/compiler evidence remains separate.

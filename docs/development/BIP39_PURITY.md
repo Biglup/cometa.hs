@@ -1,7 +1,7 @@
 # Audited BIP39 purity exception
 
-Reviewed 2026-11-04 for native pin
-`7811fe94dad90f30478ed4b61d96677f188abaa8`. This exception covers only
+Reviewed 2026-11-05 for native pin
+`7a65f2c7309bbba9e86f6aa73214b003fab88aee`. This exception covers only
 `Cometa.Internal.Bip39Pure`'s three concrete monomorphic native boundaries:
 `fromEntropy`, `fromWords`, and `exportEntropy`. `fromText` is pure splitting
 followed by `fromWords`. It authorizes no other native operation or generic
@@ -12,6 +12,12 @@ The pin update adds initialization locking and password-crypto validation.
 The BIP39, SHA256 and wipe-helper sources are unchanged from the original
 `8dc0c55f4132fcaa2e7961b6cfbfea96a6d93b5d` review; the threading build change is
 reviewed below.
+
+The latest pin adds secret-buffer wiping in BIP32 root derivation and Ed25519
+signing, plus key-handler storage validation. Those operations are outside this
+pure boundary. The reachable hashing, PBKDF2, BIP39, error and wipe-helper sources
+and native build configuration are unchanged from the prior
+`7811fe94dad90f30478ed4b61d96677f188abaa8` audit.
 
 ## Reachable native code
 
