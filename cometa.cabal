@@ -25,6 +25,7 @@ extra-source-files:
   docs/requirements.txt
   docs/userguide/*.md
   docs/userguide/conf.py
+  docs/userguide/_static/*.css
   docs/development/*.md
   docs/development/*.json
   docs/development/*.csv
