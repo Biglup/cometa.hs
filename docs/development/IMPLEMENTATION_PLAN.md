@@ -658,7 +658,8 @@ from 231 public headers; presence in that inventory does not mean implemented.
 header/corpus provenance.
 
 The initial public surface is `Cometa.nativeVersion`, structured errors, and
-`Cometa.Crypto.Blake2b` construction, hashing, and byte/hex inspection. Native
+`Cometa.Crypto.Blake2b` construction, hashing, and byte/hex inspection. Construction
+from bytes/hex is pure validation returning `Either`; it does not enter C. Native
 operations use `IO (Either Error a)` and return copied Haskell values. This does
 not yet establish the callback, secret-resource, or transaction ownership model.
 Continue with the remaining ABI/ownership/cancellation prototypes before broad
@@ -669,7 +670,7 @@ Documentation uses Haddock for API contracts and Sphinx/MyST for the narrative
 guide. Read the Docs needs project import; Hackage publication is a release task.
 Neither hosted service is advertised as already published.
 
-Local foundation evidence: GHC 9.6.7 builds with warnings as errors; ten tests
+Local foundation evidence: GHC 9.6.7 builds with warnings as errors; eleven tests
 include 200 Hedgehog cases; Ormolu and HLint pass; all three public modules have
 complete Haddock coverage; strict Sphinx and link checking pass. A clean extracted
 sdist builds against the pinned native library, and the README example compiles

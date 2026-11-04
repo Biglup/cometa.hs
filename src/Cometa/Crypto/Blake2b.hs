@@ -54,20 +54,19 @@ compute hashLength bytes
 
 -- | Import digest bytes without hashing them. Any nonempty length is accepted;
 -- this operation does not assert a particular digest role or algorithm variant.
--- Empty input returns 'NativeError'.
-fromBytes :: ByteString -> IO (Either Error Blake2bHash)
-fromBytes bytes =
-  ByteString.useAsCStringLen bytes $ \(input, size) ->
-    fmap Blake2bHash
-      <$> copyHashResult "blake2b.fromBytes" (Native.cFromBytes (castPtr input) (fromIntegral size))
+-- Empty input returns 'EmptyHash'.
+fromBytes :: ByteString -> Either Error Blake2bHash
+fromBytes bytes
+  | ByteString.null bytes = Left EmptyHash
+  | otherwise = Right (Blake2bHash bytes)
 
 -- | Import nonempty, even-length ASCII hexadecimal text, accepting both cases.
 -- Malformed text returns 'InvalidHex'. No whitespace or prefix is accepted.
-fromHex :: Text -> IO (Either Error Blake2bHash)
+fromHex :: Text -> Either Error Blake2bHash
 fromHex text =
   case decodeHex (Text.unpack text) of
-    Nothing -> pure (Left InvalidHex)
-    Just [] -> pure (Left InvalidHex)
+    Nothing -> Left InvalidHex
+    Just [] -> Left InvalidHex
     Just bytes -> fromBytes (ByteString.pack bytes)
 
 -- | Observe the immutable digest bytes.

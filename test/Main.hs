@@ -10,7 +10,7 @@ import Control.Exception (AsyncException (ThreadKilled), fromException)
 import Control.Monad (forever, replicateM_)
 import qualified Data.ByteString as ByteString
 import qualified Data.Text as Text
-import Hedgehog (Property, assert, evalIO, forAll, property, (===))
+import Hedgehog (Property, evalEither, evalIO, forAll, property, (===))
 import qualified Hedgehog.Gen as Gen
 import qualified Hedgehog.Range as Range
 import System.Mem (performGC)
@@ -32,22 +32,18 @@ main =
         testCase "BLAKE2b-256 abc known answer" $ do
           result <- Blake2b.compute 32 "abc"
           fmap Blake2b.toHex result @?= Right "bddd813c634239723171ef3fee98579b94964e3bb1cb3e427262c8c068d52319",
-        testCase "uppercase hex normalizes to lowercase" $ do
-          result <- Blake2b.fromHex "00AbFF"
-          fmap Blake2b.toHex result @?= Right "00abff",
+        testCase "uppercase hex normalizes to lowercase" $
+          fmap Blake2b.toHex (Blake2b.fromHex "00AbFF") @?= Right "00abff",
         testCase "malformed hex is rejected" $
           mapM_
-            ( \input -> do
-                result <- Blake2b.fromHex input
-                result @?= Left InvalidHex
-            )
+            (\input -> Blake2b.fromHex input @?= Left InvalidHex)
             ["", "a", "xx", " 00", "0x00", "１２"],
         testCase "invalid digest sizes never enter C" $
           mapM_ (\size -> Blake2b.compute size "abc" >>= (@?= Left (InvalidHashLength size))) [minBound, -1, 0, 15, 65, maxBound],
+        testCase "empty digest bytes return a validation error" $
+          Blake2b.fromBytes ByteString.empty @?= Left EmptyHash,
         testCase "native errors preserve exact code and operation" $ do
-          imported <- Blake2b.fromBytes ByteString.empty
           computed <- Blake2b.compute 32 ByteString.empty
-          checkNativeFailure "blake2b.fromBytes" 5 imported
           checkNativeFailure "blake2b.compute" 5 computed,
         testCase "copied bytes survive native cleanup and GC" $ do
           original <- Blake2b.compute 32 "abc"
@@ -89,15 +85,10 @@ checkNativeFailure operation code result = case result of
 propRoundTrip :: Property
 propRoundTrip = property $ do
   bytes <- forAll (Gen.bytes (Range.linear 1 512))
-  imported <- evalIO (Blake2b.fromBytes bytes)
-  case imported of
-    Left _ -> assert False
-    Right digest -> do
-      Blake2b.toBytes digest === bytes
-      decoded <- evalIO (Blake2b.fromHex (Blake2b.toHex digest))
-      decoded === Right digest
-      upper <- evalIO (Blake2b.fromHex (Text.toUpper (Blake2b.toHex digest)))
-      upper === Right digest
+  digest <- evalEither (Blake2b.fromBytes bytes)
+  Blake2b.toBytes digest === bytes
+  Blake2b.fromHex (Blake2b.toHex digest) === Right digest
+  Blake2b.fromHex (Text.toUpper (Blake2b.toHex digest)) === Right digest
 
 propDigestLength :: Property
 propDigestLength = property $ do

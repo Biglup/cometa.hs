@@ -22,6 +22,8 @@ data Error
     NativeError !Text !Integer !Text
   | -- | BLAKE2b computation requires a digest length from 16 through 64 bytes.
     InvalidHashLength !Int
+  | -- | A digest byte sequence must be nonempty.
+    EmptyHash
   | -- | A hash's hexadecimal input must have a nonzero, even number of ASCII
     -- hexadecimal digits. Both uppercase and lowercase digits are accepted.
     InvalidHex

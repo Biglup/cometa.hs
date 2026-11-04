@@ -13,7 +13,8 @@ objects.
 ## Construct and inspect
 
 `fromBytes` imports a nonempty byte sequence; `fromHex` imports nonempty,
-even-length hexadecimal text. Both run in `IO` and return `Either`. Hex input
+even-length hexadecimal text. Both are pure functions returning `Either`. Empty
+bytes return `EmptyHash`; malformed or empty hex returns `InvalidHex`. Hex input
 accepts uppercase and lowercase ASCII digits, without whitespace or a prefix.
 These operations import an existing digest rather than hash a message. They do
 not enforce a role-specific hash length. This general digest type is not a

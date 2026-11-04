@@ -12,7 +12,6 @@ module Cometa.Internal.FFI.Native
     NativeCode,
     success,
     cCompute,
-    cFromBytes,
     cUnref,
     cData,
     cSize,
@@ -45,9 +44,6 @@ success = #{const CARDANO_SUCCESS}
 -- | Safe because hashing can take time proportional to unbounded input length.
 foreign import capi safe "cardano/crypto/blake2b_hash.h cardano_blake2b_compute_hash"
   cCompute :: Ptr Word8 -> CSize -> CSize -> Ptr (Ptr NativeHash) -> IO NativeCode
-
-foreign import capi safe "cardano/crypto/blake2b_hash.h cardano_blake2b_hash_from_bytes"
-  cFromBytes :: Ptr Word8 -> CSize -> Ptr (Ptr NativeHash) -> IO NativeCode
 
 -- | Nonblocking bounded destructor. Decrements the reference in the slot and
 -- clears it when that reference was the final one. Our acquisition scopes own
