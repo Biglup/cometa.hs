@@ -33,6 +33,7 @@ module Cometa.Internal.SigningKey
     exportBytes,
     byteLength,
     withKey,
+    withAcquiredKey,
   )
 where
 

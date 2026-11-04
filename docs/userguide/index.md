@@ -6,7 +6,7 @@ structured errors.
 The library is unpublished; build it from a checked-out source revision.
 
 Start with [installation](installation.md), then read the
-[hash guide](hashes.md), [CBOR guide](cbor.md), and [signing guide](signing.md).
+[hash guide](hashes.md), [CBOR guide](cbor.md), and [signing guide](signing.md), and [BIP32 derivation guide](bip32.md).
 The [API reference](api-reference.md) explains how to browse the declarations for the revision you build.
 
 ```{toctree}
@@ -17,6 +17,7 @@ installation
 hashes
 cbor
 signing
+bip32
 api-reference
 ```
 
