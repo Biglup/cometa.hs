@@ -47,6 +47,7 @@ import Test.Tasty (TestTree, defaultMain, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 import Test.Tasty.Hedgehog (testProperty)
 import qualified Transaction
+import qualified Value
 
 -- DEFINITIONS ----------------------------------------------------------------
 
@@ -54,7 +55,7 @@ main :: IO ()
 main =
   defaultMain $
     testGroup "Cometa foundation" $
-      [Address.tests, ErrorCode.tests, Callback.tests, Ownership.tests, Cbor.tests, Transaction.tests, Ed25519.tests, Bip32.tests, Bip39.tests, PasswordCrypto.tests, DerivationPath.tests, SoftwareKeyHandler.tests] ++ foundationTests
+      [Value.tests, Address.tests, ErrorCode.tests, Callback.tests, Ownership.tests, Cbor.tests, Transaction.tests, Ed25519.tests, Bip32.tests, Bip39.tests, PasswordCrypto.tests, DerivationPath.tests, SoftwareKeyHandler.tests] ++ foundationTests
 
 foundationTests :: [TestTree]
 foundationTests =

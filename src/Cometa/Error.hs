@@ -142,6 +142,10 @@ data Error
       !Integer
   | -- | A decoded CBOR text string contains invalid UTF-8.
     InvalidCborUtf8
+  | -- | A native-asset name exceeds 32 bytes.
+    InvalidAssetNameLength !Int
+  | -- | A native-asset policy identifier does not contain exactly 28 bytes.
+    InvalidPolicyIdLength !Int
   | -- | A credential hash does not contain exactly 28 bytes.
     InvalidCredentialHashLength !Int
   | -- | A Shelley network tag is outside 0 through 15 inclusive.

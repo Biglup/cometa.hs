@@ -1,1 +1,5 @@
 - warn: {name: Use explicit module export list}
+
+# Identity expressions are the behavior under test in the Value law property.
+- ignore: {name: "Monoid law, left identity", within: Value.propLaws}
+- ignore: {name: "Monoid law, right identity", within: Value.propLaws}

@@ -1590,5 +1590,78 @@ The full normal-runtime Valgrind run (`--num-threads=1 +RTS -N2`) completes all
 173 tests in 208.08 seconds with zero errors and zero definite, indirect or
 possible losses, without suppressions. This uses a fresh static native build
 from the merged pin with the repository's CI recipe (`CARDANO_DISABLE_IPO=ON`),
-rather than the earlier local LTO archive. Hosted compiler/platform results
-remain a separate gate to review on the new PR.
+rather than the earlier local LTO archive. PR #10 subsequently completed hosted
+run `41954406634` with all checks successful.
+
+### P05 next slice: asset identities and signed values
+
+The approved slice adds pure, Haskell-owned `Cometa.AssetName`, `Cometa.PolicyId`,
+`Cometa.AssetId` and `Cometa.Value`. Asset names contain arbitrary 0..32 bytes;
+UTF-8 text import checks encoded byte length and text inspection is optional.
+Hex is explicit (`fromHex`/`toHex`). Policy IDs contain exactly 28 bytes and
+convert to/from validated `ScriptHash` values without revalidation.
+`AssetId` distinguishes `Ada` from `Native PolicyId AssetName`, including an empty
+native name. These constructors cannot bypass either component's invariants.
+
+`Value` is a normalized map of asset IDs to signed, arbitrary-precision `Integer`
+quantities: duplicates add, cancellation removes zero, missing quantities are zero,
+and lists use Ada-first then policy/name byte order. `Semigroup`/`Monoid` add values;
+`difference available required`, `negate` and `scale` retain negative results.
+There is no `Num` or `Ord Value`. `isNonNegative` is inspection, not proof of ledger
+output validity. The compiled `cometa-assets-values` example teaches import,
+assembly and balance inspection with one error boundary.
+
+#### Established-library API review (before design, 2026-11-05)
+
+- **cardano-api**, `5e63165a4bb7481a03d2e50464dc9c4f106c9fa5`:
+  [Value implementation](https://github.com/IntersectMBO/cardano-api/blob/5e63165a4bb7481a03d2e50464dc9c4f106c9fa5/cardano-api/src/Cardano/Api/Value/Internal.hs)
+  uses `Integer`, Ada/native alternatives, duplicate summation and missing-as-zero
+  selection. [Parser workflow](https://github.com/IntersectMBO/cardano-api/blob/5e63165a4bb7481a03d2e50464dc9c4f106c9fa5/cardano-api/src/Cardano/Api/Value/Internal/Parser.hs)
+  first evaluates signed additions/negations, then checks output nonnegativity or
+  mint's zero-Ada rule. Cometa adopts that separation. Qualified `Value.fromList`
+  keeps ordinary list assembly explicit; upstream now prefers `IsList.fromList`.
+- **Atlas**, `c3adfb416242ea25a244bfaa1614213eecdc55d9`:
+  [Value source and doctests](https://github.com/geniusyield/atlas/blob/c3adfb416242ea25a244bfaa1614213eecdc55d9/src/GeniusYield/Types/Value.hs)
+  normalize all zeros and use signed subtraction and a separate nonnegative check.
+  [Gift caller](https://github.com/geniusyield/atlas/blob/c3adfb416242ea25a244bfaa1614213eecdc55d9/src/GeniusYield/Test/Privnet/Examples/Gift.hs)
+  builds/signs/submits token payments, then compares queried balances with -10/+10
+  token deltas; [mint caller](https://github.com/geniusyield/atlas/blob/c3adfb416242ea25a244bfaa1614213eecdc55d9/src/GeniusYield/Test/Privnet/Examples/Misc.hs)
+  composes input and mint requirements, submits, and selects the minted balance
+  delta. These motivate signed reusable values. Cometa omits partial `IsString`
+  token parsing and lexicographic `Ord Value`; UTF-8 and hex imports are explicit.
+- **plutus-ledger-api**, `4f878f6226a0cb554ce2e9b901ecf96555760770`:
+  [Value source](https://github.com/IntersectMBO/plutus/blob/4f878f6226a0cb554ce2e9b901ecf96555760770/plutus-ledger-api/src/PlutusLedgerApi/V1/Value.hs)
+  documents unchecked currency/name wrappers, signed pointwise algebra and no
+  total quantity order. `flattenValue` drops zero but is unsorted and assumes no
+  duplicates. Cometa validates identities and normalizes an off-chain map; this
+  does not justify normalizing future raw Plutus Data maps or losing their order.
+
+The native pin remains `eadb95cd3ca7f711c203d7f2f4ee21c150d4d7f1`.
+Its `transaction_body/value.c` stores coin in `int64_t`, casts unsigned CBOR coin
+without a bound check, and performs unchecked signed arithmetic; asset maps also
+store `int64_t`. Native map operations have different duplicate/zero semantics.
+Production values therefore use no C casts or arithmetic; native tests compare
+only a safe signed-64-bit subset. Future boundaries must check their actual
+per-use bounds before marshaling. This slice adds no value CBOR, fingerprint,
+output wrapper, mint builder or general native collection API. Pointer/Byron
+addresses and remaining collections still belong to later P05 work.
+
+#### Verification
+
+All 183 tests pass with warnings treated as errors, including a fresh source
+package consumer. The packaged assets/value example prints the expected remaining
+8,000,000 lovelace and 17 token units. Ormolu, HLint, ClangFormat 18, Cabal checks,
+native inventory and strict Sphinx HTML pass; all four new public modules have
+100% Haddock declaration coverage. The clean-package check caught unsupported
+HLint pragmas in the law tests; these were replaced with narrowly scoped
+`Value.propLaws` exceptions in `.hlint.yaml`, leaving compiler warnings enabled.
+
+The normal-runtime full Valgrind run completes all 183 tests in 194.44 seconds,
+but exits with one 2-byte definite loss allocated by GHC 9.6.7's
+`stgMallocBytes -> scheduleDoGC -> scheduleWorker`, matching the earlier P04
+runtime finding. Indirect and possible losses are zero. A targeted run of all
+10 new asset/value tests, including their native oracle and 400 generated
+property cases, passes in 2.52 seconds with zero errors and zero definite,
+indirect or possible losses. Both runs use `+RTS -N2`, with no suppressions or
+runtime-option workaround. The focused result does not replace or establish a
+clean full-suite result; hosted full-suite validation remains a separate gate.
