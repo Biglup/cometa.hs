@@ -76,6 +76,9 @@ jobs:
           cabal run cometa-software-key-handler
           cabal run cometa-addresses
           cabal run cometa-assets-values
+          cabal run cometa-plutus-data
+          cabal run cometa-metadata
+          cabal run cometa-scripts
           python tools/check-key-handler-roles.py
           python tools/check-credential-roles.py
       - name: Exercise optimized pure crypto evaluation and concurrency
@@ -103,8 +106,8 @@ jobs:
           mkdir -p "$consumer_dir"
           tar -xzf .sdist/cometa-*.tar.gz -C "$consumer_dir"
           cd "$consumer_dir"/cometa-*
-          cabal build all --extra-include-dirs="$NATIVE_INCLUDE_DIR" --extra-lib-dirs="$NATIVE_LIBRARY_DIR"
-          cabal test all --test-show-details=direct --extra-include-dirs="$NATIVE_INCLUDE_DIR" --extra-lib-dirs="$NATIVE_LIBRARY_DIR"
+          cabal build all --enable-tests --extra-include-dirs="$NATIVE_INCLUDE_DIR" --extra-lib-dirs="$NATIVE_LIBRARY_DIR"
+          cabal test all --enable-tests --test-show-details=direct --extra-include-dirs="$NATIVE_INCLUDE_DIR" --extra-lib-dirs="$NATIVE_LIBRARY_DIR"
       - name: Check native allocations with Valgrind
         if: matrix.os == 'ubuntu-24.04' && matrix.ghc == '9.6.7'
         run: |
