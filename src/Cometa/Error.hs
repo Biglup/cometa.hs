@@ -200,8 +200,12 @@ data Error
     InvalidPoolIpLength !Int !Int
   | -- | An IP address text representation is malformed.
     InvalidPoolIpText !Text
-  | -- | A BLS key or proof has an incorrect byte count: expected, then actual.
-    InvalidPoolBlsKeyLength !Int !Int
+  | -- | A BLS key or possession proof has an incorrect byte count.
+    InvalidPoolBlsKeyLength
+      -- | Actual public-key byte count; 96 is required.
+      !Int
+      -- | Actual possession-proof byte count; 48 is required.
+      !Int
   | -- | A certificate has malformed CBOR or invalid fields.
     InvalidCertificateCbor !Text
   | -- | A governance proposal has malformed CBOR or invalid fields.
