@@ -79,6 +79,9 @@ jobs:
           cabal run cometa-plutus-data
           cabal run cometa-metadata
           cabal run cometa-scripts
+          cabal run cometa-protocol-values
+          cabal run cometa-protocol-parameters
+          cabal run cometa-governance
           python tools/check-key-handler-roles.py
           python tools/check-credential-roles.py
       - name: Exercise optimized pure crypto evaluation and concurrency

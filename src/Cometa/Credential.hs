@@ -14,7 +14,7 @@
 -- limitations under the License.
 {-# LANGUAGE RoleAnnotations #-}
 
--- | Role-specific credentials for payment, staking, and transaction guards.
+-- | Role-specific credentials for payments, staking, governance and guards.
 -- Hashes contain exactly 28 bytes. Equality and ordering compare kind and bytes;
 -- diagnostic 'Show' output is not an interchange encoding.
 --
@@ -30,6 +30,9 @@ module Cometa.Credential
   ( Payment,
     Stake,
     Guard,
+    DRep,
+    CommitteeHot,
+    StakePool,
     KeyHash,
     keyHashFromBytes,
     keyHashBytes,
@@ -59,6 +62,15 @@ data Stake
 
 -- | Role of a Dijkstra transaction guard credential.
 data Guard
+
+-- | Role of a delegated representative's voting credential.
+data DRep
+
+-- | Role of a constitutional committee member's voting credential.
+data CommitteeHot
+
+-- | Role of a stake pool operator's key hash.
+data StakePool
 
 -- | A 28-byte key hash. Hashes in different roles are distinct types;
 -- importing bytes assigns their role.
