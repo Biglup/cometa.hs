@@ -1688,4 +1688,174 @@ Valgrind job's GHC version.
 The rebuilt executable passes all 183 ordinary tests with default idle-GC
 behavior. The complete local Valgrind run with `-N2 -I0` passes all 183 tests in
 188.32 seconds with zero errors and zero definite, indirect or possible losses,
-without suppressions. Hosted validation remains pending for this follow-up.
+without suppressions. Hosted run `41963426422` subsequently completed successfully across all eight
+workflow jobs, including Linux/GHC 9.6.7 Valgrind and Intel macOS.
+
+
+### P06: data, metadata and scripts
+
+This batch groups related domain APIs into one PR, following the maintainer's
+request for larger coherent reviews. Public data values and codecs remain pure;
+native hashing and script parameter application remain explicit effects. The
+established `cborg` package supplies CBOR parsing and encoding, while `aeson`
+supplies detailed metadata JSON. Neither requires cardano-api or the Plutus
+Haskell dependency graph. Original bytes and semantic values are kept distinct
+where encoding changes could alter identity.
+
+The API decisions below were reviewed before bulk implementation. This batch
+also brings forward transaction metadata from P08 and guard scripts from P12;
+the ledger retains original planned phases so those dependencies stay visible.
+
+### P06 Plutus Data API review (before implementation, 2026-11-05)
+
+Primary source reviewed:
+
+- cardano-api `5e63165a4bb7481a03d2e50464dc9c4f106c9fa5`, [ScriptData source](https://github.com/IntersectMBO/cardano-api/blob/5e63165a4bb7481a03d2e50464dc9c4f106c9fa5/cardano-api/src/Cardano/Api/Plutus/Internal/ScriptData.hs): the five semantic alternatives use arbitrary `Integer`, bytes, lists and association-list maps. `HashableScriptData` keeps original bytes alongside semantics; its CBOR decoder consumes the complete input and hashing uses preserved original bytes. Its explicit warning forbids treating reserialization as preservation of hash identity.
+- plutus-core / plutus-ledger-api `4f878f6226a0cb554ce2e9b901ecf96555760770`, [PlutusCore.Data implementation](https://github.com/IntersectMBO/plutus/blob/4f878f6226a0cb554ce2e9b901ecf96555760770/plutus-core/plutus-core/src/PlutusCore/Data.hs): five alternatives, ordered duplicate-preserving map pairs, arbitrary integers, definite and indefinite collections, constructor tags 121..127 / 1280..1400 / 102. Byte leaves and big integer payloads are chunked into at most 64 bytes. Decoding a definite byte leaf longer than 64 bytes is rejected. Extended constructor alternatives decode as unsigned `Word64`; the upstream semantic `Integer` constructor can produce encodings that cannot decode if outside that range.
+- Atlas `c3adfb416242ea25a244bfaa1614213eecdc55d9`, [Datum source and doctests](https://github.com/geniusyield/atlas/blob/c3adfb416242ea25a244bfaa1614213eecdc55d9/src/GeniusYield/Types/Datum.hs), [Gift caller](https://github.com/geniusyield/atlas/blob/c3adfb416242ea25a244bfaa1614213eecdc55d9/src/GeniusYield/Test/Privnet/Examples/Gift.hs): build a semantic datum using `datumFromPlutusData`, attach to outputs, optionally select inline datum. The source warns that round-tripping its semantic datum through the API loses original CBOR. Its documented constructor/number/list/bytes example supplies a useful complete nested assembly case.
+
+Caller workflow: assemble semantic Haskell values without native scopes; serialize new datum once; decode external datum into a protected exact-byte wrapper; inspect semantics without changing that wrapper; hash preserved bytes through an explicit native `IO` boundary. Constructing a fresh value from inspected semantics deliberately creates fresh encoding identity. Invalid CBOR has one `Either Error` boundary and no native allocation.
+
+Adopted differences: constrain constructor alternatives to `Word64`, matching the actual ledger decoder, to guarantee all assembled values round trip. Keep arbitrary signed `Integer` for integer leaves. Expose semantic constructors since every combination is valid; hide encoded-wrapper constructors because independently replaceable bytes/semantics would violate identity. Map equality and ordering retain entry order and duplicate keys. Encoded equality compares exact bytes; semantic equality is available explicitly through inspection. No `Read`, `Num`, `IsString`, unrestricted native handles or hidden native purity.
+
+Native audit: pinned cardano-c `eadb95cd3ca7f711c203d7f2f4ee21c150d4d7f1`, `lib/src/plutus_data/plutus_data.c`, `plutus_list.c`, `plutus_map.c`, `constr_plutus_data.c`. The native data layer caches original bytes. `cardano_plutus_map_insert` appends retained key/value pairs even when keys duplicate; keyed lookup alone cannot snapshot duplicate-preserving maps. `cardano_plutus_data_clear_cbor_cache` recursively clears caches. There is no dedicated datum hash entry point, so the existing explicit native BLAKE2b boundary over exact original bytes supplies the 32-byte datum digest.
+
+Approved implementation choices: `Cometa.PlutusData` exposes the semantic ADT and opaque `EncodedPlutusData`; `decodeCbor`, `toCbor`, `toData`, `fromData`, `encodeCbor`, and explicit `hash`. The public codec uses established `cborg >=0.2.10 && <0.3`; domain-specific traversal checks 64-byte chunk limits and constructor forms without a generic hand-written CBOR parser. Encoded equality/ordering compare exact bytes. Semantic equality/ordering compare tree structure including map order and duplicates. There is no extra datum-hash type in this batch.
+
+Native conformance oracle traverses every node through typed getters, snapshots duplicate maps through separate indexed key/value lists, records kind counts / alternative sums / bigint bit lengths / byte sizes, then recursively invalidates native caches and reserializes. The Haskell test compares that independently emitted semantic tree and statistics to public values. Getter results are released deterministically, including failed partial outputs; integer extraction returns a clone. No native owner escapes the synchronous test-only boundary, and no global allocator is replaced. Production datum hashing uses the existing audited explicit native Blake2b boundary with operation-scoped ownership.
+
+Validation includes typed native traversal, pinned integer encodings and hashes,
+encoding-identity checks, arbitrary-precision properties and cancellation cleanup.
+
+
+# P06 metadata review (2026-11-05)
+
+Before API design reviewed actual source at:
+
+* cardano-api `5e63165a4bb7481a03d2e50464dc9c4f106c9fa5`, `cardano-api/src/Cardano/Api/Tx/Internal/TxMetadata.hs`: https://github.com/IntersectMBO/cardano-api/blob/5e63165a4bb7481a03d2e50464dc9c4f106c9fa5/cardano-api/src/Cardano/Api/Tx/Internal/TxMetadata.hs
+* Atlas `c3adfb416242ea25a244bfaa1614213eecdc55d9`, `src/GeniusYield/Types/TxMetadata.hs` and `TxMetadata/Internal.hs`: https://github.com/geniusyield/atlas/blob/c3adfb416242ea25a244bfaa1614213eecdc55d9/src/GeniusYield/Types/TxMetadata.hs
+
+cardano-api stores transaction labels in `Map Word64`, nested maps in ordered pair lists, lists as lists, and numbers as Integer. Its Semigroup gives left precedence. It validates lengths after raw construction; Atlas hides its value constructors and validates number/bytes/text once with Maybe, then supports total lists/maps and splitting long UTF8 messages into chunks. Atlas's `metadataMsgs` caller uses label 674 and a map containing a `msg` list. Cometa adopts validated hidden values and total composition, with structured errors rather than Maybe. Both upstream validated number APIs use symmetric `-(2^64-1)..2^64-1`, while their source comments differ. Cometa must explicitly state its chosen primitive CBOR boundary rather than copying inconsistent comments. cardano-api detailed JSON uses one-field objects `int`, `bytes`, `string`, `list`, `map`; maps are arrays of objects with k and v fields. This preserves nested map duplicates and order. Arbitrary natural JSON cannot preserve all metadata constructors.
+
+Native audited pin: `eadb95cd3ca7f711c203d7f2f4ee21c150d4d7f1`, sources in `lib/src/auxiliary_data`.
+
+`metadatum.c` constructors retain list/map/byte-buffer inputs, clone bigint inputs, and own allocated strings. Conversions return retained maps/lists/buffers, cloned bigints, or copied strings. `from_cbor` owns recursive children and frees them on each failure. It accepts tagged bignums and oversize byte/text strings that its encoder later refuses. Cometa's schema must validate before admitting Haskell values. Text decoding does not itself enforce valid UTF8. Native arbitrary JSON cannot encode bytes or nontext map keys; the detailed schema is independently preferable for lossless interchange.
+
+`metadatum_map.c` insertion and decoding append ordered pairs and preserve duplicates; get chooses first equal key. Indexed get retains key and value. `metadatum_list.c` insertion retains each child; indexed get returns a new reference. `transaction_metadata.c` insertion and CBOR decoding append entries then sort by numeric label. Duplicate labels remain; comparator returns 1 even for equal labels, and lookup chooses the first match. This is unsuitable for exact representation preservation and its duplicate winner is not an application contract. Cometa rejects duplicate transaction labels, uses a validated semantic Map, and keeps original CBOR in a separate abstract wrapper.
+
+No native metadata-specific hash exists. `auxiliary_data.c` computes BLAKE2b-256 of the original cached auxiliary-data CBOR, which includes script/era-dependent outer structure. A digest of an encoded transaction metadata map must never be presented as the full auxiliary-data hash. Imported metadata must retain its exact bytes; normalized re-encoding is explicit and may change hashes.
+
+Production metadata values use pure cborg codecs. Native domain objects appear
+only in tests, with scoped cleanup; constructing metadata requires no FFI call.
+
+## Implemented decisions
+
+Approved pure boundary uses cborg >=0.2.10 && <0.3 and Aeson >=2.2 && <2.3 with Scientific >=0.3.7 && <0.4. `Metadatum` is abstract with total inspection `View` and checked leaves; primitive integer range is deliberately -2^64..2^64-1 (one extra negative endpoint compared with upstream validation). `Metadata` hides a unique-label Map and rejects duplicate imports with `DuplicateMetadataLabel`; left-biased Semigroup/Monoid matches cardano-api. There is no arbitrary schema nesting cap, because total list/map construction must retain semantic encode/decode round trips. Leaf lengths remain bounded.
+
+`EncodedMetadata`/`EncodedMetadatum` retain exact ByteString bytes separately from semantic values; equality compares exact representation. Pure encoding is explicit normalization: minimal integers, definite collections/strings, ascending transaction labels, while nested map order/duplicates survive. This does not claim canonical arbitrary-map sorting. No metadata hash helper is exposed: callers deliberately hash exact bytes using Blake2b, without confusing the digest with auxiliary data identity.
+
+Detailed JSON uses exact Scientific coefficient/exponent conversion rather than floatingOrInteger/toBoundedInteger. Scientific 0.3.10.0 can throw on exponent minBound (negating Int overflows). Tests include direct Scientific and Aeson byte-parsed minBound/maxBound exponents plus zero. The conversion repeatedly divides a coefficient only while decimal trailing zeros allow exact integral conversion, uses Integer for negative exponent magnitude, and constructs powers only for nonnegative exponents <=19. The ordinary metadata smart constructor enforces final primitive bounds.
+
+Native oracle reconstructs every decoded scalar via typed getter and fresh constructor, every map/list recursively through indexed getter/insert/add, and every transaction label/value through fresh transaction metadata. Thus agreement is not cached opaque CBOR forwarding. During strengthening, a test-only duplicate unref defect was found: native unref leaves a pointer nonnull when another reference exists. All released loop obligations are now explicitly nulled before reuse/cleanup. Empty bytes use a nonnull dummy buffer because native new_bytes rejects null even at size zero. These are test-only boundaries; production metadata has no FFI ownership.
+
+The API ledger records all 93 metadatum, list, map, label and transaction
+metadata symbols. Native natural JSON and CIP-116 conversions remain pending;
+the detailed schema does not substitute for those contracts.
+
+
+## P06 scripts: primary-source review and native audit (2026-11-05)
+
+Review before API design:
+
+* cardano-api `5e63165a4bb7481a03d2e50464dc9c4f106c9fa5`, [script source](https://github.com/IntersectMBO/cardano-api/blob/5e63165a4bb7481a03d2e50464dc9c4f106c9fa5/cardano-api/src/Cardano/Api/Plutus/Internal/Script.hs): `SimpleScript` is an ordinary ADT of signature, slot, all/any/threshold and Dijkstra guard alternatives. Signature uses payment-key hash; guard uses a separate guard credential. `PlutusScriptSerialised` owns compiled bytes, selected by V1/V2/V3/V4 witnesses. `hashScript` dispatches by language. Native composition precedes hashing/address creation. The deserializer removes double wrapping; Cometa deliberately preserves exact imported encodings and never guesses/strips a CBOR layer.
+* Atlas `c3adfb416242ea25a244bfaa1614213eecdc55d9`, [script source](https://github.com/geniusyield/atlas/blob/c3adfb416242ea25a244bfaa1614213eecdc55d9/src/GeniusYield/Types/Script.hs), lines 456 onwards: `GYScript` owns version, bytes and cached API hash; `scriptFromSerialisedScript` imports compiled bytes; `scriptHash` obtains the identifier for addresses/policies; `applyParam` decodes UPLC, applies typed data as a constant and serializes again. It uses unchecked UPLC decoding; Cometa returns native VM errors in IO and takes the explicit Haskell PlutusData ADT, keeping failure at one Either boundary. Runtime versions avoid existential/typeclass ceremony in a library without era-indexed ledger transactions.
+* Atlas pinned [simple-script tests](https://github.com/geniusyield/atlas/blob/c3adfb416242ea25a244bfaa1614213eecdc55d9/tests/GeniusYield/Test/SimpleScript.hs): caller builds nested all/any/threshold/signature/time conditions and compares the retrieved script. No network tests are imported into Cometa; deterministic equivalent assembly is sufficient.
+
+Native audit against cardano-c `eadb95cd3ca7f711c203d7f2f4ee21c150d4d7f1`:
+
+* `lib/src/scripts/native_scripts/native_script.c`, all seven alternatives, hash prefix 0 plus exact script CBOR. Leaf script caches retain input CBOR; n-of-k required is size_t and native constructor does not check satisfiability. Thresholds above the number of children are valid, deliberately unsatisfiable conditions. Cometa retains the complete unsigned-64-bit range without a satisfiability restriction; native size_t conversion is confined to the test oracle on the verified 64-bit platform.
+* `script_require_guard.c` serializes tag 6 and a typed credential `[0/1, bytes28]`, allowing key and script authorities.
+* `lib/src/scripts/plutus_scripts/plutus_v{1,2,3,4}_script.c` stores nonempty compiled bytes, adds one bytestring layer for script CBOR, and hashes prefix 1/2/3/4 plus stored compiled bytes. It does not validate executable UPLC. A compiled payload generally already contains the single CBOR wrapper around Flat; outer script CBOR therefore has two wrappers. These are distinct contracts.
+* `lib/src/uplc/tx/uplc_apply_params.c`: VM accepts single-CBOR-wrapped Flat, decodes into arena, applies parameters in supplied order (first becomes innermost application), re-encodes to canonical single-CBOR-wrapped Flat, then frees arena before returning. Result buffer is separately owned. Empty params still decode/re-encode and may normalize. Caller owns result on success; private bridge initializes outputs and cleans partial results.
+* `lib/src/scripts/script.c`: combined representation is `[languageTag, payload]`, where native=0, V1..V4=1..4. Decoder fails to consume final array terminator; public pure decoder must enforce exact arity and complete input separately.
+
+All public values should remain Haskell-owned. Only hashing and VM parameter application need native effects. C adapters are limited to parsing marshaled parameters and copying outputs, with deterministic owner cleanup. Imported native conformance vectors retain their Apache-2.0 provenance.
+
+### Implemented public workflow and decisions
+
+`Cometa.Script.Native` has an abstract immutable script plus an inspectable
+`NativeScriptView` ADT covering all seven native alternatives. `signature` uses
+`KeyHash Payment` like cardano-api; `requireGuard` uses the added nominal
+`Credential Guard` role and permits either key or script credentials. `allOf`,
+`anyOf`, `atLeast`, and slot restrictions assemble values totally. Thresholds and
+slots are Word64; a count above child length retains the valid unsatisfiable
+condition. Import validates exact schema, field counts, hash lengths and full
+consumption. cborg decodes owned semantic values while byte spans preserve every
+original child encoding. New parents retain the exact imported bytes of children.
+`Eq`/`Ord` compare exact script encoding; no mutable native handle is public.
+
+`Cometa.Script.Plutus` owns a V1/V2/V3/V4 version, nonempty compiled bytes and exact
+outer script encoding. `fromBytes` is intentionally opaque and checks only
+nonemptiness; `decodeCbor` additionally checks one outer bytestring. Neither
+claims UPLC executability. The compiled payload and outer representation are
+separate: `450100002499` compiled code has script CBOR `46450100002499`.
+Equality/ordering compare version then exact outer representation. Hashing uses
+version prefix plus compiled bytes, so two outer encodings may differ in equality
+while sharing the same script hash. `Cometa.Script` supplies public `Native` and
+`Plutus` sum alternatives; its combined envelope is normalized on encoding, while
+the hash-bearing payload retains identity.
+
+`applyParams` takes `[Cometa.PlutusData.PlutusData]`, marshals its typed `List`
+encoding, and invokes native UPLC in explicit IO. VM decoding/reencoding may
+normalize code even for empty parameters; input scripts remain unchanged and the
+result retains the declared version. Data constants apply left to right. The
+private C bridge is limited to parameter decoding and owner cleanup; Haskell owns
+all inspection, construction, CBOR, language dispatch and exact hash preimages.
+`withOwnedOutput` installs cleanup before acquisition, scopes partial outputs and
+copies buffer bytes before release; all borrowed Haskell storage outlives the
+safe noninterruptible call. No finalizer, unsafePerformIO or application-managed
+native lifetime is introduced.
+
+Independent digest constants were computed with Python hashlib BLAKE2b-224 over
+explicit prefix/preimage bytes. Native conformance tests construct typed scripts,
+parse into C, inspect their alternative and recursively clear caches before
+native reserialization/hash, so cached forwarding alone cannot establish a pass.
+Generated script trees also run this native comparison. Pinned apply-parameter
+vectors cover no params, zero, above-uint64 integer and ordered mixed params;
+tests also compare sequential application to simultaneous application, all four
+versions, malformed input, encoding identity and original/result snapshots after
+repeated success/failure/GC. Started barriers with forkFinally, cancellation and
+bounded unwind checks exercise safe native cancellation, followed by independent
+successful reuse. These checks exercise deterministic local programs only.
+
+`examples/Scripts.hs` is the compiled task-oriented native-policy/typed-Plutus
+workflow documented in `docs/userguide/scripts.md`, with one ExceptT boundary.
+Script JSON/CIP-116 conversion remains explicitly pending; no unsupported JSON
+schema is advertised. Mutable setters/clones map to immutable reconstruction and
+sharing, rather than effectful wrappers. The per-symbol mapping and remaining work are recorded in `native-api.csv`.
+
+
+#### Integrated verification
+
+The warnings-as-errors GHC 9.6.7 build and all 214 tests pass, including a fresh
+source-distribution consumer. Consumer CI now explicitly enables test suites in
+both build and test commands: an extracted source package has no repository
+`cabal.project`, and Cabal otherwise selected a plan with tests disabled.
+The three new examples compile as ordinary executables. All five new public
+modules have 100% Haddock declaration coverage. Strict Sphinx HTML, Ormolu,
+HLint, ClangFormat 18, Cabal package checks and the native inventory pass.
+
+The complete 214-test Valgrind run finishes in 261.67 seconds with zero errors
+and zero definite, indirect or possible losses, without suppressions. It retains
+the existing pinned-GHC idle-GC workaround (`-N2 -I0`); ordinary tests retain
+normal idle-GC behavior. The final property-generator and semantic-assertion
+refinements also pass a focused 31-test domain Valgrind run with zero errors
+and zero definite, indirect or possible losses.
+
+The ledger now records 614 implemented/adapted entries across the binding,
+compared with 341 before this batch. This is symbol coverage, not an estimate of
+remaining engineering effort. Native lifetime plumbing retains internal
+visibility without being counted as implemented. Plutus/script JSON and native
+metadata natural/CIP-116 JSON remain pending; auxiliary-data transaction
+integration and full VM evaluation are separate work. Hosted compiler/platform
+validation is tracked on the PR and is not implied by the local Linux results.

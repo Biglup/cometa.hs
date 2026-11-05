@@ -14,7 +14,7 @@
 -- limitations under the License.
 {-# LANGUAGE RoleAnnotations #-}
 
--- | Payment and stake credentials with distinct key-hash roles.
+-- | Role-specific credentials for payment, staking, and transaction guards.
 -- Hashes contain exactly 28 bytes. Equality and ordering compare kind and bytes;
 -- diagnostic 'Show' output is not an interchange encoding.
 --
@@ -29,6 +29,7 @@
 module Cometa.Credential
   ( Payment,
     Stake,
+    Guard,
     KeyHash,
     keyHashFromBytes,
     keyHashBytes,
@@ -56,13 +57,16 @@ data Payment
 -- | Role of a staking key or credential.
 data Stake
 
--- | A 28-byte key hash. Payment and stake hashes are distinct types;
+-- | Role of a Dijkstra transaction guard credential.
+data Guard
+
+-- | A 28-byte key hash. Hashes in different roles are distinct types;
 -- importing bytes assigns their role.
 type role KeyHash nominal
 
 newtype KeyHash purpose = KeyHash ByteString deriving (Eq, Ord, Show)
 
--- | A 28-byte script hash, usable in either credential position.
+-- | A 28-byte script hash, usable in any credential role.
 newtype ScriptHash = ScriptHash ByteString deriving (Eq, Ord, Show)
 
 -- | A key or script controlling the role selected by the type parameter.
@@ -102,7 +106,7 @@ validateHash bytes
   | otherwise = Left (InvalidCredentialHashLength (ByteString.length bytes))
 
 -- | Hash a verification key using BLAKE2b-224 and assign the requested role.
--- The caller selects payment or stake through the result type. Native failures
+-- The caller selects the credential role through the result type. Native failures
 -- return 'Cometa.Error.NativeError'; unexpected digest lengths return
 -- 'Cometa.Error.NativeContractViolation'.
 fromPublicKey :: PublicKey.PublicKey -> IO (Either Error (Credential purpose))

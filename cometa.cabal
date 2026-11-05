@@ -65,6 +65,7 @@ library core
     Cometa.Internal.KeyHandler
     Cometa.Internal.FFI.KeyHandler
     Cometa.Internal.Bip32PrivateKey
+    Cometa.Internal.FFI.Script
   build-depends:
     base >=4.18 && <4.22,
     bytestring >=0.11 && <0.13,
@@ -84,6 +85,7 @@ library core
     cbits/cometa_bip32.c
     cbits/cometa_bip39.c
     cbits/cometa_password_crypto.c
+    cbits/cometa_script.c
   include-dirs: cbits
   includes: cometa_provider.h
   cc-options: -std=c11 -Wall -Wextra
@@ -102,6 +104,11 @@ library
     Cometa.PolicyId
     Cometa.AssetId
     Cometa.Value
+    Cometa.PlutusData
+    Cometa.Metadata
+    Cometa.Script
+    Cometa.Script.Native
+    Cometa.Script.Plutus
     Cometa.Crypto.Ed25519.PublicKey
     Cometa.Crypto.Ed25519.Signature
     Cometa.Crypto.Ed25519.SigningKey
@@ -125,6 +132,9 @@ library
   build-depends:
     base >=4.18 && <4.22,
     bech32 >=1.1.10 && <1.2,
+    cborg >=0.2.10 && <0.3,
+    aeson >=2.2 && <2.3,
+    scientific >=0.3.7 && <0.4,
     containers >=0.6.7 && <0.8,
     bytestring >=0.11 && <0.13,
     text >=2.0 && <2.2,
@@ -230,9 +240,17 @@ test-suite cometa-test
     test/cbits/derivation_path_oracle.c
     test/cbits/address_oracle.c
     test/cbits/value_oracle.c
+    test/cbits/plutus_data_oracle.c
+    test/cbits/metadata_oracle.c
+    test/cbits/script_oracle.c
   cc-options: -std=c11 -Wall -Wextra
   other-modules:
     Value
+    PlutusData
+    Metadata
+    Scripts
+    Fixtures.Scripts
+    Fixtures.PlutusData
     Address
     Fixtures.Address
     ErrorCode
@@ -253,6 +271,8 @@ test-suite cometa-test
   ghc-options: -threaded -rtsopts
   build-depends:
     base >=4.18 && <4.22,
+    aeson >=2.2 && <2.3,
+    scientific >=0.3.7 && <0.4,
     bech32 >=1.1.10 && <1.2,
     bytestring >=0.11 && <0.13,
     text >=2.0 && <2.2,
@@ -271,4 +291,33 @@ executable cometa-assets-values
     base >=4.18 && <4.22,
     bytestring >=0.11 && <0.13,
     text >=2.0 && <2.2,
+    cometa
+
+executable cometa-plutus-data
+  import: language
+  hs-source-dirs: examples
+  main-is: PlutusData.hs
+  build-depends:
+    base >=4.18 && <4.22,
+    bytestring >=0.11 && <0.13,
+    cometa
+
+executable cometa-metadata
+  import: language
+  hs-source-dirs: examples
+  main-is: Metadata.hs
+  build-depends:
+    base >=4.18 && <4.22,
+    transformers >=0.6 && <0.7,
+    cometa
+
+executable cometa-scripts
+  import: language
+  hs-source-dirs: examples
+  main-is: Scripts.hs
+  build-depends:
+    base >=4.18 && <4.22,
+    bytestring >=0.11 && <0.13,
+    text >=2.0 && <2.2,
+    transformers >=0.6 && <0.7,
     cometa

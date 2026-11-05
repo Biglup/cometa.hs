@@ -16,6 +16,8 @@ CASES = {
     "RewardDestination": (False, "invalid :: Reward.RewardAddress -> Address.Address\ninvalid = id\n"),
     "HashCoercion": (False, "invalid :: KeyHash Payment -> KeyHash Stake\ninvalid = coerce\n"),
     "CredentialCoercion": (False, "invalid :: Credential Payment -> Credential Stake\ninvalid = coerce\n"),
+    "GuardCoercion": (False, "invalid :: Credential Payment -> Credential Guard\ninvalid = coerce\n"),
+    "GuardHashCoercion": (False, "invalid :: KeyHash Stake -> KeyHash Guard\ninvalid = coerce\n"),
     "SwappedRoles": (False, "invalid :: Credential Stake -> Credential Payment -> Address.Address\ninvalid = Address.base Address.testnet\n"),
 }
 with tempfile.TemporaryDirectory(prefix="cometa-credential-roles-") as directory:
@@ -30,4 +32,4 @@ with tempfile.TemporaryDirectory(prefix="cometa-credential-roles-") as directory
             raise SystemExit(f"{name}: unexpected compiler result\n{result.stdout}{result.stderr}")
         if not should_compile and "Couldn't match type" not in result.stderr:
             raise SystemExit(f"{name}: failed for an unexpected reason\n{result.stderr}")
-print("Address role controls and four compile-fail checks passed")
+print("Address role controls and six compile-fail checks passed")

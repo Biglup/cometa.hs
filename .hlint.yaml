@@ -3,3 +3,7 @@
 # Identity expressions are the behavior under test in the Value law property.
 - ignore: {name: "Monoid law, left identity", within: Value.propLaws}
 - ignore: {name: "Monoid law, right identity", within: Value.propLaws}
+
+# Preserve explicit identities in the metadata composition law.
+- ignore: {name: "Monoid law, left identity", within: [Metadata.propComposition]}
+- ignore: {name: "Monoid law, right identity", within: [Metadata.propComposition]}

@@ -34,7 +34,7 @@ where
 
 import Cometa.Error.Code (ErrorCode)
 import Data.Text (Text)
-import Data.Word (Word32, Word8)
+import Data.Word (Word32, Word64, Word8)
 
 -- TYPES ----------------------------------------------------------------------
 
@@ -158,6 +158,24 @@ data Error
   | -- | Address text is malformed, mixed-case, has an invalid checksum or
     -- bit padding, or has a prefix inconsistent with its network/address form.
     InvalidShelleyAddressText
+  | -- | Plutus data CBOR is malformed or contains unsupported data forms.
+    InvalidPlutusDataCbor !Text
+  | -- | A metadata integer is outside -2^64 through 2^64 - 1 inclusive.
+    InvalidMetadataInteger !Integer
+  | -- | A metadata byte string exceeds 64 bytes.
+    InvalidMetadataBytesLength !Int
+  | -- | A metadata text string exceeds 64 UTF-8 bytes.
+    InvalidMetadataTextLength !Int
+  | -- | Metadata CBOR is malformed or violates metadata bounds.
+    InvalidMetadataCbor !Text
+  | -- | A transaction metadata label occurs more than once.
+    DuplicateMetadataLabel !Word64
+  | -- | Detailed metadata JSON is malformed or violates metadata bounds.
+    InvalidMetadataJson !Text
+  | -- | Script CBOR is malformed or has an unsupported script form.
+    InvalidScriptCbor !Text
+  | -- | Compiled Plutus script bytes are empty.
+    EmptyPlutusScript
   | -- | An operation reported success but did not produce a valid result.
     NativeContractViolation
       -- | Operation name; excludes user input.

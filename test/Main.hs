@@ -38,8 +38,11 @@ import qualified ErrorCode
 import Hedgehog (Property, evalEither, evalIO, forAll, property, (===))
 import qualified Hedgehog.Gen as Gen
 import qualified Hedgehog.Range as Range
+import qualified Metadata
 import qualified Ownership
 import qualified PasswordCrypto
+import qualified PlutusData
+import qualified Scripts
 import qualified SoftwareKeyHandler
 import System.Mem (performGC)
 import System.Timeout (timeout)
@@ -55,7 +58,7 @@ main :: IO ()
 main =
   defaultMain $
     testGroup "Cometa foundation" $
-      [Value.tests, Address.tests, ErrorCode.tests, Callback.tests, Ownership.tests, Cbor.tests, Transaction.tests, Ed25519.tests, Bip32.tests, Bip39.tests, PasswordCrypto.tests, DerivationPath.tests, SoftwareKeyHandler.tests] ++ foundationTests
+      [Scripts.tests, Metadata.tests, PlutusData.tests, Value.tests, Address.tests, ErrorCode.tests, Callback.tests, Ownership.tests, Cbor.tests, Transaction.tests, Ed25519.tests, Bip32.tests, Bip39.tests, PasswordCrypto.tests, DerivationPath.tests, SoftwareKeyHandler.tests] ++ foundationTests
 
 foundationTests :: [TestTree]
 foundationTests =
