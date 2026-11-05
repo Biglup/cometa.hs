@@ -22,6 +22,12 @@ and passing tests establish implemented behavior.
 
 ## Haskell changes
 
+- Start public API design with a complete caller workflow. Validate external inputs
+  once, use lawful defaults and total assembly, and keep one clear error boundary.
+  Apply the [workflow rules and API review checklist](CODING_CONVENTIONS.md#design-from-complete-workflows)
+  before adding primitives or abstractions; common secret operations should manage
+  intermediate scopes while advanced scoped composition remains available.
+
 - Follow `CODING_CONVENTIONS.md`, explicit exports, public signatures, and the
   configured formatter/HLint policy. Do not impose C/C++ formatting on Haskell.
 - Use abstract validated values, structured errors, and qualified domain modules.

@@ -73,6 +73,8 @@ jobs:
           cabal run cometa-bip39
           cabal run cometa-password-crypto
           cabal run cometa-derivation-paths
+          cabal run cometa-software-key-handler
+          python tools/check-key-handler-roles.py
       - name: Exercise optimized pure crypto evaluation and concurrency
         run: |
           cabal test cometa-test --enable-optimization=2 --test-show-details=direct --test-options="-p BIP39 +RTS -N2 -RTS"
@@ -105,7 +107,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y valgrind
-          timeout 240s valgrind --fair-sched=yes --leak-check=full --show-leak-kinds=definite,indirect --errors-for-leak-kinds=definite,indirect --error-exitcode=1 "$(cabal list-bin cometa-test)" --num-threads=1 +RTS -N2 -RTS
+          timeout 600s valgrind --fair-sched=yes --leak-check=full --show-leak-kinds=definite,indirect --errors-for-leak-kinds=definite,indirect --error-exitcode=1 "$(cabal list-bin cometa-test)" --num-threads=1 +RTS -N2 -RTS
 
   quality:
     runs-on: ubuntu-24.04

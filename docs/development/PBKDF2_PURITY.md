@@ -1,9 +1,15 @@
 # PBKDF2-HMAC-SHA512 purity audit
 
-Reviewed 2026-11-04 against native revision
-`7811fe94dad90f30478ed4b61d96677f188abaa8` and the existing pinned static native
+Reviewed 2026-11-05 against native revision
+`7a65f2c7309bbba9e86f6aa73214b003fab88aee` and the existing pinned static native
 build. This is a separate, narrow exception alongside BIP39; it does not authorize
 pure wrappers for arbitrary native operations or EMIP3.
+
+The latest pin adds secret-buffer wiping in BIP32 root derivation and Ed25519
+signing, plus key-handler storage validation. Those operations are outside this
+pure boundary. The reachable hashing, PBKDF2, BIP39, error and wipe-helper sources
+and native build configuration are unchanged from the prior
+`7811fe94dad90f30478ed4b61d96677f188abaa8` audit.
 
 ## Reachable native path
 

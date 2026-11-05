@@ -19,6 +19,7 @@ module DerivationPath (tests) where
 
 -- IMPORTS --------------------------------------------------------------------
 
+import qualified Cometa.Crypto.Bip32 as Bip32
 import qualified Cometa.Crypto.Bip32.PrivateKey as Private
 import qualified Cometa.Crypto.Bip32.PublicKey as Public
 import qualified Cometa.Crypto.DerivationPath as Path
@@ -27,15 +28,17 @@ import qualified Cometa.Internal.Hex as Hex
 import Control.Monad (when)
 import Data.Bits ((.|.))
 import qualified Data.ByteString as ByteString
+import qualified Data.Text as Text
 import Data.Word (Word32, Word64, Word8)
 import qualified Fixtures.Bip32 as Fixture
 import Foreign.C.Types (CInt (..), CUInt (..))
 import Foreign.Marshal.Alloc (allocaBytes)
 import Foreign.Marshal.Array (allocaArray, peekArray, withArray)
 import Foreign.Ptr (Ptr, castPtr)
-import Hedgehog (Property, evalEither, forAll, property, (===))
+import Hedgehog (Property, assert, evalEither, forAll, property, (===))
 import qualified Hedgehog.Gen as Gen
 import qualified Hedgehog.Range as Range
+import System.Mem (performGC)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 import Test.Tasty.Hedgehog (testProperty)
@@ -51,6 +54,9 @@ tests =
       testCase "component bounds preserve exact invalid input" checkBounds,
       testCase "maximum raw fields encode without wraparound" checkMaximumEncoding,
       testCase "standard, multisig, governance and custom paths match native keys" checkNativePaths,
+      testCase "public derivation helpers preserve vectors, passwords and snapshots" checkPublicHelpers,
+      testCase "public derivation helpers preserve invalid entropy errors" checkHelperErrors,
+      testProperty "bounded components agree with validated construction" propBounded,
       testProperty "encoding and inspection preserve arbitrary valid components" propEncoding
     ]
 
@@ -83,9 +89,9 @@ checkBounds = do
 
 checkMaximumEncoding :: IO ()
 checkMaximumEncoding = do
-  maximumIndex <- either (fail . show) pure (Path.mkIndex 2147483647)
-  let prefix = Path.mkAccountPath maximumIndex maximumIndex maximumIndex
-      path = Path.mkDerivationPath prefix maximumIndex maximumIndex
+  let maximumIndex = maxBound
+      prefix = Path.accountPath maximumIndex maximumIndex maximumIndex
+      path = Path.derivationPath prefix maximumIndex maximumIndex
 
   Path.toIndices path @?= [0xffffffff, 0xffffffff, 0xffffffff, 0x7fffffff, 0x7fffffff]
 
@@ -98,8 +104,8 @@ checkNativePaths =
 checkNativePath :: [Integer] -> IO ()
 checkNativePath components = case traverse Path.mkIndex components of
   Right [purpose, coin, account, role, index] -> do
-    let prefix = Path.mkAccountPath purpose coin account
-        path = Path.mkDerivationPath prefix role index
+    let prefix = Path.accountPath purpose coin account
+        path = Path.derivationPath prefix role index
     expected <- nativePublic components False
     expectedAccount <- nativePublic components True
     actual <- require $ Private.withKeyHex Fixture.privateHex $ \root ->
@@ -111,7 +117,7 @@ checkNativePath components = case traverse Path.mkIndex components of
     relative <- require (Public.derive accountPublic (Path.relativeIndices path))
     relative @?= actual
     when (purpose == Path.standardPurpose && coin == Path.cardanoCoinType) $
-      Path.mkStandardAccountPath account @?= prefix
+      Path.standardAccountPath account @?= prefix
   _ -> assertFailure "invalid test components"
 
 nativePublic :: [Integer] -> Bool -> IO ByteString.ByteString
@@ -135,7 +141,7 @@ checkHandlerPrefix entropy values = do
   components <- either (fail . show) pure (traverse Path.mkIndex values)
   case components of
     [purpose, coin, account] -> do
-      let prefix = Path.mkAccountPath purpose coin account
+      let prefix = Path.accountPath purpose coin account
       actual <- require $ Private.withEntropy ByteString.empty entropy $ \root ->
         Private.withDerived root (Path.accountIndices prefix) Private.publicKey
       expected <- ByteString.useAsCString entropy $ \input ->
@@ -144,9 +150,68 @@ checkHandlerPrefix entropy values = do
           status @?= 0
           ByteString.packCStringLen (castPtr output, 64)
       Public.toBytes actual @?= expected
+      helper <- require (Bip32.deriveAccountPublicKey ByteString.empty entropy prefix)
+      Public.toBytes helper @?= expected
       when (values == [1852, 1815, 0]) $
         Public.toHex actual @?= "1b39889a420374e41917cf420d88a84d9b40d7eeef533ac37f323076c5f7106a15ef170481a5c4333be2b4cf498525512ac4a3427e1a0e9c9f42cfcb42ba6deb"
     _ -> assertFailure "invalid account fixture length"
+
+checkPublicHelpers :: IO ()
+checkPublicHelpers = do
+  entropy <- maybe (fail "invalid fixture entropy") pure (Hex.decodeHex Fixture.entropyHex)
+  let prefix = Path.standardAccountPath minBound
+      path = Path.derivationPath prefix Path.externalRole minBound
+      vectors =
+        [ ("some_password_@#$%^&", entropy, Fixture.entropyRootHex),
+          (ByteString.empty, ByteString.replicate 16 0, Fixture.emptyPasswordRootHex),
+          ("a\0b", ByteString.pack [0 .. 31], Fixture.nulPasswordRootHex)
+        ]
+  mapM_ (checkHelperVector prefix path) vectors
+
+checkHelperVector :: Path.AccountPath -> Path.DerivationPath -> (ByteString.ByteString, ByteString.ByteString, Text.Text) -> IO ()
+checkHelperVector prefix path (password, entropy, rootHex) = do
+  expectedAccount <- require $ Private.withKeyHex rootHex $ \root ->
+    Private.withDerived root (Path.accountIndices prefix) Private.publicKey
+  expected <- require $ Private.withKeyHex rootHex $ \root ->
+    Private.withDerived root (Path.toIndices path) Private.publicKey
+  accountPublic <- require (Bip32.deriveAccountPublicKey password entropy prefix)
+  public <- require (Bip32.derivePublicKey password entropy path)
+  performGC
+  accountPublic @?= expectedAccount
+  public @?= expected
+  relative <- require (Public.derive accountPublic (Path.relativeIndices path))
+  relative @?= public
+  Public.fromBytes (Public.toBytes public) @?= Right expected
+
+checkHelperErrors :: IO ()
+checkHelperErrors = mapM_ check [0, 1, 15, 17, 19, 21, 23, 25, 27, 29, 31, 33, 64]
+  where
+    prefix = Path.standardAccountPath minBound
+    path = Path.derivationPath prefix Path.externalRole minBound
+    check size = do
+      let entropy = ByteString.replicate size 0
+          expected = Left (InvalidBip39EntropyLength size)
+      Bip32.deriveAccountPublicKey "password" entropy prefix >>= (@?= expected)
+      Bip32.derivePublicKey "password" entropy path >>= (@?= expected)
+
+propBounded :: Property
+propBounded = property $ do
+  value <- forAll (Gen.integral (Range.linear (-2147483648) 4294967295))
+  let lower = minBound :: Path.Index
+      upper = maxBound :: Path.Index
+      valid = value >= toInteger (Path.indexValue lower) && value <= toInteger (Path.indexValue upper)
+  Path.indexValue lower === 0
+  Path.indexValue upper === 2147483647
+  Path.mkIndex 0 === Right lower
+  Path.mkIndex 2147483647 === Right upper
+  case Path.mkIndex value of
+    Left err -> do
+      assert (not valid)
+      err === InvalidDerivationIndex value
+    Right component -> do
+      assert valid
+      assert (lower <= component && component <= upper)
+      toInteger (Path.indexValue component) === value
 
 propEncoding :: Property
 propEncoding = property $ do
@@ -154,11 +219,11 @@ propEncoding = property $ do
   components <- evalEither (traverse Path.mkIndex values)
   case components of
     [purpose, coin, account, role, index] -> do
-      let prefix = Path.mkAccountPath purpose coin account
-          path = Path.mkDerivationPath prefix role index
+      let prefix = Path.accountPath purpose coin account
+          path = Path.derivationPath prefix role index
       map Path.indexValue [Path.purpose prefix, Path.coinType prefix, Path.account prefix, Path.role path, Path.index path]
         === map fromInteger values
-      Path.accountPath path === prefix
+      Path.accountPrefix path === prefix
       Path.accountIndices prefix === map ((.|. 0x80000000) . fromInteger) (take 3 values)
       Path.relativeIndices path === map fromInteger (drop 3 values)
       Path.toIndices path === Path.accountIndices prefix ++ Path.relativeIndices path

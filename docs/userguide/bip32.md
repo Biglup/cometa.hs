@@ -2,48 +2,65 @@
 
 Cardano Ed25519-BIP32 keys combine an expanded Ed25519 key with a chain code.
 A private key contains 96 bytes; a public key contains 64 bytes. Use
-`Cometa.Crypto.Bip32.PrivateKey` for scoped secrets and
+`Cometa.Crypto.Bip32` for one-shot public-key derivation,
+`Cometa.Crypto.Bip32.PrivateKey` for scoped secrets, and
 `Cometa.Crypto.Bip32.PublicKey` for immutable public values.
 
 ## Derive a payment public key
 
-`withEntropy` takes raw password bytes followed by raw BIP39 entropy. Entropy
-must contain 16, 20, 24, 28, or 32 bytes. Passwords can be empty and can contain
+`Bip32.derivePublicKey` takes raw password bytes, raw BIP39 entropy, and a typed
+derivation path. Entropy must contain 16, 20, 24, 28, or 32 bytes. Passwords can be empty and can contain
 NUL bytes. Supply already normalized bytes if your application uses a text
 password: this function performs no text normalization. It does not accept a
 mnemonic sentence or the 64-byte BIP39 seed produced from one. Use the
 [BIP39 recovery guide](bip39.md) to validate a phrase and export its entropy.
 
-The example derives the CIP-1852 path `1852'/1815'/0'/0/0`. An apostrophe denotes
-a hardened index. `harden` sets the high bit of the encoded 32-bit index and is
-idempotent; ordinary indices below `2^31` select soft derivation. Path elements
-are applied in order. An empty path makes an independent private-key copy.
+The example derives the CIP-1852 path `1852'/1815'/0'/0/0`. The helper opens
+and closes all intermediate secret keys automatically and returns an immutable
+public key. `minBound :: Path.Index` denotes the first raw component, zero.
 
 ```haskell
 {-# LANGUAGE OverloadedStrings #-}
 
-import qualified Cometa.Crypto.Bip32.PrivateKey as PrivateKey
+module Main (main) where
+
+-- IMPORTS --------------------------------------------------------------------
+
+import qualified Cometa.Crypto.Bip32 as Bip32
 import qualified Cometa.Crypto.Bip32.PublicKey as PublicKey
+import qualified Cometa.Crypto.DerivationPath as Path
 import qualified Data.ByteString as ByteString
 import qualified Data.Text.IO as Text
+import System.Exit (die)
+
+-- DEFINITIONS ----------------------------------------------------------------
 
 main :: IO ()
 main = do
   -- Deterministic test entropy; never use this key for funds.
   let entropy = ByteString.replicate 16 0
-      accountPath = map PrivateKey.harden [1852, 1815, 0]
+      account = Path.standardAccountPath minBound
+      payment = Path.derivationPath account Path.externalRole minBound
 
-  result <- PrivateKey.withEntropy "" entropy $ \root ->
-    PrivateKey.withDerived root accountPath $ \account ->
-      PrivateKey.withDerived account [0, 0] PrivateKey.publicKey
+  result <- Bip32.derivePublicKey "" entropy payment
 
   case result of
-    Left failure -> print failure
+    Left failure -> die (show failure)
     Right public -> Text.putStrLn (PublicKey.toHex public)
 ```
 
 The complete example is built as `cometa-bip32`; run it with `cabal run cometa-bip32`.
 Its deterministic entropy is test data and must never secure an application wallet.
+
+For an account public key, call `Bip32.deriveAccountPublicKey password entropy
+account`. Both helpers manage secret scopes and return `IO (Either Error
+PublicKey)`. Their password is the BIP32 root-derivation password, not an
+[encrypted-storage password](software-key-handlers.md).
+
+The lower-level `PrivateKey.withEntropy` and `PrivateKey.withDerived` remain
+available when an application needs several operations within one key scope.
+Raw path elements are applied in order; `PrivateKey.harden` sets the high bit
+idempotently, and an empty private path makes an independent key copy.
 
 `withKey` imports an existing 96-byte key; `withKeyHex` accepts 192 hexadecimal
 digits. Imports validate length, not scalar validity. Callbacks return
@@ -94,11 +111,39 @@ Supply raw component numbers, without setting a hardening bit.
 ```haskell
 import qualified Cometa.Crypto.DerivationPath as Path
 
-firstPayment = do
-  zero <- Path.mkIndex 0
-  let account = Path.mkStandardAccountPath zero
-  pure (Path.mkDerivationPath account Path.externalRole zero)
+firstPayment :: Path.DerivationPath
+firstPayment =
+  Path.derivationPath (Path.standardAccountPath minBound) Path.externalRole minBound
 ```
+
+`Index` has lawful `Eq`, `Ord`, `Show`, and `Bounded` instances. Its bounds are raw
+0 and 2147483647, without hardening bits. It has no `Num` or `Enum` instance:
+arithmetic and unrestricted numeric literals must not bypass validation.
+
+Validate runtime input once at the boundary. Standard `ExceptT` and `except` can
+combine pure validation with effectful derivation, with one result for the caller:
+
+```haskell
+import qualified Cometa.Crypto.Bip32 as Bip32
+import qualified Cometa.Crypto.Bip32.PublicKey as PublicKey
+import qualified Cometa.Crypto.DerivationPath as Path
+import Cometa.Error (Error)
+import Control.Monad.Trans.Except (ExceptT (..), except, runExceptT)
+import Data.ByteString (ByteString)
+
+derivePayment :: ByteString -> ByteString -> Integer -> Integer -> IO (Either Error PublicKey.PublicKey)
+derivePayment password entropy accountNumber keyNumber = runExceptT $ do
+  account <- except (Path.mkIndex accountNumber)
+  index <- except (Path.mkIndex keyNumber)
+
+  let prefix = Path.standardAccountPath account
+      payment = Path.derivationPath prefix Path.externalRole index
+
+  ExceptT (Bip32.derivePublicKey password entropy payment)
+```
+
+No custom application monad is required. An ordinary `Either` composition or
+explicit result match is equally suitable for a smaller flow.
 
 For a root private key, pass `Path.toIndices payment` to `PrivateKey.withDerived`.
 It encodes `1852'/1815'/0'/0/0`: the purpose, coin type and account are hardened;
@@ -109,12 +154,16 @@ key derives a different descendant; choose the conversion for your starting key.
 
 `DerivationPath` names the standard purpose 1852, multisignature purpose 1854, Cardano
 coin type 1815 and roles for external, internal, staking, DRep, committee cold
-and committee hot keys. `Path.mkStandardAccountPath` selects purpose 1852 and coin type
+and committee hot keys. `Path.standardAccountPath` selects purpose 1852 and coin type
 1815. For multisignature or custom paths, construct a prefix with
-`Path.mkAccountPath purpose coinType account`. Any valid component can be a
+`Path.accountPath purpose coinType account`. Any valid component can be a
 custom purpose, coin type or role; naming a role does not validate its use by a
 particular wallet or protocol.
 
 The compiled `cometa-derivation-paths` example prints encoded paths without secret
 material. These values have component equality and lexicographic ordering in
 path order. Their `Show` output is diagnostic, not a serialized path format.
+
+`accountPrefix` inspects the account portion of a complete `DerivationPath`;
+`accountPath` assembles a prefix from already validated components. Total path
+assembly does not introduce another validation or failure branch.
