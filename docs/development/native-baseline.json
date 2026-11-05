@@ -2,7 +2,7 @@
   "schema_version": 1,
   "native_repository": "https://github.com/Biglup/cardano-c",
   "native_commit_ref": "native/cardano-c.ref",
-  "native_commit_ref_sha256": "2da0b26fb299bc2ff6ff16efb6872947c9281c72d595850f25d928d20664ed14",
+  "native_commit_ref_sha256": "77620d1db38f152a40356bf18a2cbe3451dc31bb5c10deb7a93efe819115ed5a",
   "native_version": "VERSION_MAJOR=2\nVERSION_MINOR=0\nVERSION_PATCH=0\nVERSION_PRERELEASE=rc.6",
   "source_provenance": "Source content at native/cardano-c.ref; verify using the manifests below",
   "content_verification": "Check mode compares the header/corpus SHA256 manifests; native/cardano-c.ref supplies revision provenance",

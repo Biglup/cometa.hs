@@ -22,6 +22,11 @@ and passing tests establish implemented behavior.
 
 ## Haskell changes
 
+- Before designing or extending a public API, inspect relevant established Haskell
+  libraries' actual documentation, source and usage examples. Record the reviewed
+  links, version or commit, caller workflow and justified differences in the
+  implementation plan. Use that evidence to inform the design; do not copy an API
+  without checking its contracts and fit for Cometa.
 - Start public API design with a complete caller workflow. Validate external inputs
   once, use lawful defaults and total assembly, and keep one clear error boundary.
   Apply the [workflow rules and API review checklist](CODING_CONVENTIONS.md#design-from-complete-workflows)

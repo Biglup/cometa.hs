@@ -1476,3 +1476,119 @@ reentry (exit 124). Its termination summary reports zero errors and zero definit
 indirect or possible losses, but cannot establish a normal-exit memory result.
 CI now allows 600 seconds for the same full Valgrind command and checks; hosted
 rerun results remain separate evidence to review.
+
+The merged P04 ergonomics follow-up (PR #9) completed hosted run
+`41940246921`: all nine jobs passed. The normal `-N2` Valgrind job completed
+all 161 tests in 161.44 seconds with zero errors and zero definite, indirect or
+possible losses, without suppressions. This resolves the pending hosted result;
+the separate local two-byte RTS finding above remains historical evidence.
+
+### P05 first slice: typed credentials and Shelley addresses
+
+`Cometa.Credential` provides abstract 28-byte `KeyHash Payment`, `KeyHash Stake`,
+and `ScriptHash` values with pure length validation. `Credential role`
+distinguishes key and script authority. Nominal roles protect payment/stake
+key hashes and credentials from coercion; importing bytes explicitly asserts
+the intended role. Script hashes can occur in either role. Hash import does not
+compute a key or script hash; `fromPublicKey` computes the Ed25519 public-key
+hash and returns a credential directly through `IO (Either Error ...)`.
+
+`Cometa.Address.Shelley.Address` supports base and enterprise payment forms;
+`Cometa.Address.Reward.RewardAddress` separately represents reward accounts.
+Both accept key/script credentials and support total assembly, credential
+inspection and exact pure byte conversion. Payment authority is total for
+`Address`; only its stake authority is optional. `RewardAddress` has a total
+stake credential observer. `Cometa.NetworkId` defines the shared abstract
+four-bit network tag, re-exported by Shelley for convenience. Byte parsing
+rejects unsupported forms and the other family's headers with
+`UnsupportedAddressType`, and requires exact lengths. Bech32 conversion is pure:
+`toText` returns `Text`, and `fromText` returns `Either Error ...`. Text parsing
+accepts lowercase or all-uppercase, rejects mixed case, and requires matching
+form/network prefixes, ASCII input
+and at most 120 characters. Text output is canonical lowercase. Network
+IDs are 0..15, with mainnet 1 and conventional testnet 0; they are not network
+magic values and do not identify preprod or preview.
+
+The native pin advances to the merged revision
+`eadb95cd3ca7f711c203d7f2f4ee21c150d4d7f1`, whose tree is identical to the
+previous `7a65f2c7309bbba9e86f6aa73214b003fab88aee` pin. The refreshed inventory
+still contains 231 headers and 3,881 symbols. The change records the merged
+upstream dependency without changing the native implementation.
+
+Pointer and Byron addresses are deliberately deferred. The pinned native pointer
+path has truncation/strictness issues, and Byron needs a separate strict import
+contract; the public API therefore makes no generic-address promise. Later P05
+work must revisit those forms, assets/values and collections. This slice does not
+complete P05. The guide teaches a public-key-to-base-address workflow through the
+compiled `cometa-addresses` example, and keeps native ownership details out of
+public instructions.
+
+#### Established-library API review
+
+The address workflow was reviewed against primary documentation and source on
+2026-11-05. Future public API design must perform this review before choosing
+interfaces, as required by `AGENTS.md` and `CODING_CONVENTIONS.md`.
+
+- **cardano-api**, revision `5e63165a4bb7481a03d2e50464dc9c4f106c9fa5`:
+  [address documentation](https://cardano-api.cardano.intersectmbo.org/cardano-api/Cardano-Api-Address.html)
+  and [address source](https://github.com/IntersectMBO/cardano-api/blob/5e63165a4bb7481a03d2e50464dc9c4f106c9fa5/cardano-api/src/Cardano/Api/Address.hs).
+  The caller supplies network, payment credential and stake reference to
+  `makeShelleyAddress`; reward accounts use the distinct `StakeAddress` type and
+  `makeStakeAddress`. Payment and stake credentials distinguish key and script
+  authority. Cometa adopts the payment/reward type boundary so a reward account
+  cannot later be supplied where a transaction destination is required. Cometa
+  does not reproduce cardano-api's era-indexed hierarchy or its broader native
+  ledger dependency graph.
+- **Atlas**, revision `c3adfb416242ea25a244bfaa1614213eecdc55d9`:
+  [address source and documented examples](https://github.com/geniusyield/atlas/blob/c3adfb416242ea25a244bfaa1614213eecdc55d9/src/GeniusYield/Types/Address.hs).
+  `addressFromCredential` takes network, payment credential and optional stake
+  credential. The distinct `GYStakeAddress` has its own credential construction,
+  parsing and encoding, with documented round-trip usage. Cometa follows this
+  separation. Its named `base` and `enterprise` constructors deliberately make
+  the two supported payment forms explicit rather than requiring a `Maybe` stake
+  argument. Expected failures remain structured errors; Cometa does not adopt
+  Atlas's partial convenience parsers.
+- **cardano-addresses**, revision `046ff9ccad4526c106e937c8e06a10af617f613a`:
+  [Shelley source and worked examples](https://github.com/IntersectMBO/cardano-addresses/blob/046ff9ccad4526c106e937c8e06a10af617f613a/lib/Cardano/Address/Style/Shelley.hs).
+  The examples derive keys, choose payment/delegation credentials, then construct
+  payment, delegation or stake addresses. Credential constructors accept public
+  keys, extended public keys, hashes and scripts. This supports Cometa's direct
+  `fromPublicKey` workflow, avoiding manual hash import in the common case.
+  That library shares an `Address` representation across these forms; the separate
+  reward-account type is therefore a deliberate Cometa safety decision, not a
+  universal Haskell convention.
+
+The reviewed workflow is public-key derivation, role-specific credential creation,
+address assembly, then text interchange with one error boundary. All three
+libraries provide pure address rendering; Cometa likewise keeps Haskell-owned
+address construction, inspection, byte conversion and text conversion pure.
+The established `bech32 >=1.1.10 && <1.2` package supplies the codec;
+`encodeLenient` supports Cardano addresses beyond Bech32's general 90-character
+limit. Strict address-family, payload-length and prefix validation remains in
+Cometa. Malformed text and checksum failures return
+`InvalidShelleyAddressText`; rendering validated values is total.
+
+Native address construction and encoding serve only as test oracles. Production
+address codecs have no FFI boundary and use no `unsafePerformIO`. The native
+encoder depends on mutable allocator callbacks, so hiding its effects would
+violate the library's purity contract. `Credential.fromPublicKey` remains an
+explicit native hash operation in `IO (Either Error ...)`. The compiled guide
+example exercises that workflow without application-managed native lifetimes.
+
+#### Verification
+
+The final GHC 9.6.7 build resolves `bech32-1.1.11`. All 173 tests pass locally
+and in a fresh source-distribution consumer, including 16 pinned vectors,
+128 native form/network comparisons and shrinking round-trip properties.
+The packaged example runs successfully. External-consumer checks compile two
+valid workflows and reject four invalid role/address-family uses.
+Warnings-as-errors build, Ormolu, HLint, ClangFormat 18, Cabal package checks,
+native inventory and strict Sphinx HTML checks pass. The four new public modules
+have 100% Haddock declaration coverage.
+
+The full normal-runtime Valgrind run (`--num-threads=1 +RTS -N2`) completes all
+173 tests in 208.08 seconds with zero errors and zero definite, indirect or
+possible losses, without suppressions. This uses a fresh static native build
+from the merged pin with the repository's CI recipe (`CARDANO_DISABLE_IPO=ON`),
+rather than the earlier local LTO archive. Hosted compiler/platform results
+remain a separate gate to review on the new PR.

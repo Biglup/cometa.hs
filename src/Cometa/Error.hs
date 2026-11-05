@@ -34,7 +34,7 @@ where
 
 import Cometa.Error.Code (ErrorCode)
 import Data.Text (Text)
-import Data.Word (Word32)
+import Data.Word (Word32, Word8)
 
 -- TYPES ----------------------------------------------------------------------
 
@@ -142,6 +142,18 @@ data Error
       !Integer
   | -- | A decoded CBOR text string contains invalid UTF-8.
     InvalidCborUtf8
+  | -- | A credential hash does not contain exactly 28 bytes.
+    InvalidCredentialHashLength !Int
+  | -- | A Shelley network tag is outside 0 through 15 inclusive.
+    InvalidNetworkId !Integer
+  | -- | The four-bit header selects an address form unsupported by the chosen
+    -- payment-address or reward-account decoder.
+    UnsupportedAddressType !Word8
+  | -- | Address bytes are empty or have an incorrect exact length.
+    InvalidShelleyAddress
+  | -- | Address text is malformed, mixed-case, has an invalid checksum or
+    -- bit padding, or has a prefix inconsistent with its network/address form.
+    InvalidShelleyAddressText
   | -- | An operation reported success but did not produce a valid result.
     NativeContractViolation
       -- | Operation name; excludes user input.
