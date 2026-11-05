@@ -30,6 +30,42 @@ are not obvious. Do not add package-wide extensions casually. Use ordinary recor
 selectors; do not introduce `DuplicateRecordFields` or `OverloadedRecordDot`
 without a repository-wide decision and compiler-matrix evidence.
 
+## Design from complete workflows
+
+Design a complete caller workflow before adding primitives. Write the code an
+application needs to validate input, assemble values, execute the operation, and
+handle the result. Review successful use, invalid input, and cleanup together.
+Use these examples to justify abstractions and discover avoidable ceremony.
+
+Validate external input once, then compose abstract validated values with total
+functions. Provide lawful standard instances and useful defaults when their
+semantics are clear: `Bounded Index` supplies raw zero and `2^31 - 1`, so a known
+first index can use `minBound` without an impossible error branch. Do not add
+`Num`, `Enum`, partial literals, or unsafe constructors merely to shorten examples.
+Keep `mkIndex` for integers supplied at runtime.
+
+Prefer pure, Haskell-owned values for validation, assembly, and inspection.
+Require effects only for observable effects, scoped resources, or unaudited
+native boundaries; follow the specific purity audits below. Offer a small
+workflow helper when the common task otherwise requires callers to manage
+intermediate secrets. For example, one-shot BIP32 public-key derivation manages
+private scopes internally while lower-level scoped operations remain available
+for several related operations. Convenience must preserve cancellation, cleanup,
+and error behavior.
+
+Expose expected errors once at the caller's natural boundary. Compose standard
+`Either` or optional `ExceptT`; use `except` for pure validation within an
+`ExceptT` sequence. Avoid nested error matches and mandatory custom monads or
+effects frameworks. A single fallible operation needs no transformer. Helpers
+should name actual workflow steps rather than disguise errors or ownership.
+
+Review signatures for ambiguous same-typed arguments, especially password,
+entropy, and storage `ByteString` values. Use descriptive argument documentation
+and examples; introduce an options record or another abstraction only when a
+complete workflow demonstrates its benefit. Compare the relevant contracts of
+idiomatic libraries in implementation-plan section 19; do not copy historical
+partial conveniences or claim one universal Haskell style.
+
 ## Naming
 
 - Modules, types, classes, and constructors use `UpperCamelCase`; functions,
@@ -40,6 +76,9 @@ without a repository-wide decision and compiler-matrix evidence.
   consistently. The type signature, not the name, determines effects.
 - Use `mk...` for validated construction from a more general value. Return an
   explicit error; do not shorten call sites with partial smart constructors.
+  Prefer plain names such as `accountPath` for total assembly from validated
+  values. This repository uses the distinction to make validation boundaries
+  visible; other Haskell libraries may use `mk...` more broadly.
 - `with...` scopes a resource. `run...` interprets an action. `eval...` and
   `exec...` follow the familiar distinction between returning a result or state.
 - Prefer observers such as `fee` or `networkId` in qualified modules.
@@ -224,6 +263,25 @@ The reference set and rationale are maintained in implementation-plan section 19
 containers, text, async, Hasql, Megaparsec, optics, Hedgehog, the Kowainik naming
 guide, Google Haskell style guide, and the Haskell PVP. Adopt the specific contracts
 that fit this library rather than copying historical partial APIs or dependencies.
+
+## API review checklist
+
+Before accepting a public API change, review concrete caller code:
+
+- Can the common task run from input to result with one clear error boundary?
+  Are runtime inputs validated once and valid values assembled without spurious
+  failure branches?
+- Do names distinguish validation, assembly, inspection, and scoped effects?
+  Are same-typed arguments, defaults, units, bounds, and byte encodings clear?
+- Are standard instances lawful and useful without bypassing invariants? Can
+  known defaults use existing total values instead of partial construction?
+- Does a workflow helper manage intermediate secrets automatically while keeping
+  advanced scoped composition available? Are cleanup and cancellation preserved?
+- Are pure values and native effects separated according to audited contracts?
+  Is each new abstraction justified by an actual caller workflow?
+- Do compiled examples show real derivation, signing, or storage/reload work,
+  with explicit imports, logical spacing, total matches, and one failure boundary?
+  Are the guide, Haddock, tests, and native ledger consistent?
 
 ## File headers, sections, and function size
 

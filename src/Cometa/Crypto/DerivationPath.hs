@@ -21,7 +21,8 @@
 -- @
 -- import qualified Cometa.Crypto.DerivationPath as Path
 --
--- firstIndex = Path.mkIndex 0
+-- firstAccount :: Path.AccountPath
+-- firstAccount = Path.standardAccountPath minBound
 -- @
 module Cometa.Crypto.DerivationPath
   ( -- * Components
@@ -31,7 +32,7 @@ module Cometa.Crypto.DerivationPath
 
     -- * Account paths
     AccountPath,
-    mkAccountPath,
+    accountPath,
     purpose,
     coinType,
     account,
@@ -39,8 +40,8 @@ module Cometa.Crypto.DerivationPath
 
     -- * Key paths
     DerivationPath,
-    mkDerivationPath,
-    accountPath,
+    derivationPath,
+    accountPrefix,
     role,
     index,
     toIndices,
@@ -56,7 +57,7 @@ module Cometa.Crypto.DerivationPath
     drepRole,
     committeeColdRole,
     committeeHotRole,
-    mkStandardAccountPath,
+    standardAccountPath,
   )
 where
 
@@ -69,8 +70,13 @@ import Data.Word (Word32)
 -- TYPES ----------------------------------------------------------------------
 
 -- | An unencoded component in @0..2147483647@. Equality and ordering compare
--- the component number; 'Show' is diagnostic.
+-- the component number; 'Show' is diagnostic. 'minBound' is zero and 'maxBound'
+-- is 2147483647.
 newtype Index = Index Word32 deriving (Eq, Ord, Show)
+
+instance Bounded Index where
+  minBound = Index 0
+  maxBound = Index 2147483647
 
 -- | Three unencoded components in purpose, coin type, account order.
 -- Equality and ordering compare components in that order; 'Show' is diagnostic.
@@ -96,8 +102,8 @@ indexValue (Index value) = value
 
 -- | Construct an account prefix from purpose, coin type and account number.
 -- All three components will be hardened by 'accountIndices'.
-mkAccountPath :: Index -> Index -> Index -> AccountPath
-mkAccountPath = AccountPath
+accountPath :: Index -> Index -> Index -> AccountPath
+accountPath = AccountPath
 
 -- | Unencoded purpose number, for example 1852 or 1854.
 purpose :: AccountPath -> Index
@@ -117,12 +123,12 @@ accountIndices :: AccountPath -> [Word32]
 accountIndices path = map ((.|. 0x80000000) . indexValue) [purpose path, coinType path, account path]
 
 -- | Extend an account prefix with an unhardened role and key index, in that order.
-mkDerivationPath :: AccountPath -> Index -> Index -> DerivationPath
-mkDerivationPath = DerivationPath
+derivationPath :: AccountPath -> Index -> Index -> DerivationPath
+derivationPath = DerivationPath
 
 -- | The three-component account prefix.
-accountPath :: DerivationPath -> AccountPath
-accountPath (DerivationPath value _ _) = value
+accountPrefix :: DerivationPath -> AccountPath
+accountPrefix (DerivationPath value _ _) = value
 
 -- | Unhardened role number. Standard roles are named in this module.
 role :: DerivationPath -> Index
@@ -135,7 +141,7 @@ index (DerivationPath _ _ value) = value
 -- | Five encoded indices in derivation order, suitable for private BIP32
 -- derivation from the root. Only the first three indices are hardened.
 toIndices :: DerivationPath -> [Word32]
-toIndices path = accountIndices (accountPath path) ++ relativeIndices path
+toIndices path = accountIndices (accountPrefix path) ++ relativeIndices path
 
 -- | The two unhardened indices, role then key index, relative to an already
 -- derived account key. Suitable for private or public BIP32 derivation.
@@ -183,6 +189,6 @@ committeeHotRole = Index 5
 
 -- | Standard Cardano account prefix for the supplied unencoded account number.
 -- Uses purpose 1852 and coin type 1815. For multisignature or custom purposes,
--- use 'mkAccountPath' with the desired components.
-mkStandardAccountPath :: Index -> AccountPath
-mkStandardAccountPath = mkAccountPath standardPurpose cardanoCoinType
+-- use 'accountPath' with the desired components.
+standardAccountPath :: Index -> AccountPath
+standardAccountPath = accountPath standardPurpose cardanoCoinType

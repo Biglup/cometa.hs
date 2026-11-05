@@ -1192,7 +1192,38 @@ P00/P01 should turn this section into the new repository's CODING_CONVENTIONS.md
 and AGENTS.md instructions. Later implementation must match those files and
 neighboring modules. Update conventions when the user resolves a design question.
 
-### 19.6 Test reuse follow-up
+### 19.6 Workflow and usability review
+
+Design complete caller workflows before primitive coverage. The operational
+rules and concrete API checklist are in [CODING_CONVENTIONS.md](../../CODING_CONVENTIONS.md).
+Validate external data once; use total composition over validated values and
+lawful standard instances/defaults. Keep pure owned values pure subject to the
+explicit FFI purity audits, and preserve explicit effects where required.
+
+This repository reserves `mk...` for validation and prefers plain names for
+valid-value assembly; this is a local consistency rule, not a universal Haskell
+naming law. `mkIndex` validates runtime integers, `minBound :: Index` names the
+known first component, and `accountPath`, `standardAccountPath`, and
+`derivationPath` assemble typed paths. `accountPrefix` inspects a complete path.
+Do not add unchecked constructors, partial convenience functions, `Num`, or `Enum`
+to simulate usability.
+
+Public-key derivation should require one public workflow call when the caller
+only wants a public key. `Cometa.Crypto.Bip32.deriveAccountPublicKey` and
+`derivePublicKey` manage intermediate secret scopes; lower-level private scopes
+remain useful for multiple related operations. Encrypted software-handler examples
+must teach serialization and reload rather than require handlers for simple
+derivation. Compose sequential errors with ordinary `Either` or optional standard
+`ExceptT`/`except`, and expose one result at the caller boundary. Do not require
+an application framework or introduce an abstraction without a workflow use case.
+
+Review signatures and document meanings/order for same-typed password, entropy,
+and storage arguments; use an options record only when its actual use improves
+clarity. Compile real examples with explicit imports and logical spacing, and
+check failure, scope closure, and cancellation. Use the reference set above for
+specific contracts and factual comparisons, not claims of stylistic superiority.
+
+### 19.7 Test reuse follow-up
 
 Record reuse provenance (source commit, path and license/notices) for imported
 vectors, tests and generator code. Priority sources beyond the native corpus:
@@ -1410,3 +1441,38 @@ The final binary completes all 158 tests under Valgrind in 177.57 seconds with
 zero errors and zero definite, indirect or possible losses, without suppressions.
 Hosted quality and documentation checks passed on the implementation commit;
 the platform/compiler matrix remains separate and is still running.
+
+### P04 ergonomics follow-up: public derivation workflows
+
+`Index` now has lawful `Bounded` values (0 and 2147483647), while `mkIndex`
+continues validating arbitrary integers. Total path assembly uses `accountPath`,
+`standardAccountPath` and `derivationPath`; `accountPrefix` is the observer.
+`Cometa.Crypto.Bip32` supplies the two public-key workflows described in section
+19.6 without exposing intermediate secrets. Tests reuse the existing pinned
+account oracle and root vectors, cover empty/binary passwords, invalid entropy,
+public results after GC, and the bounds/smart-constructor agreement law.
+
+Local GHC 9.6.7 verification against native revision
+`7a65f2c7309bbba9e86f6aa73214b003fab88aee`: all 161 tests pass, including the
+fresh source-distribution consumer. The warnings-as-errors build, eight compiled
+examples, external capability and hidden-internal-package checks, native inventory,
+Cabal check, Ormolu, HLint and ClangFormat checks pass. Haddock builds with 100%
+coverage for the new public module.
+
+The default full Valgrind run completes all 161 tests in 207.28 seconds, but
+reports one definitely lost 2-byte allocation in GHC RTS
+`stgMallocBytes -> scheduleDoGC -> scheduleWorker`; indirect and possible losses
+are zero. Disassembly identifies the capability-sized `idle_cap` allocation in
+pinned GHC 9.6.7 `rts/Schedule.c`; the loss stack contains no native crypto frame.
+A separate source-identical consumer build, relinked with `-rtsopts` to permit
+`+RTS -N2 -I0`, completes all 161 tests in 168.89 seconds with zero errors and
+zero definite, indirect or possible losses, without suppressions. Disabling idle
+GC supports a runtime shutdown/GC interaction hypothesis; this single controlled
+run does not prove the cause or establish a clean default-runtime result. No
+runtime-option workaround or suppression was added to CI.
+
+The previous hosted Linux/GHC 9.6.7 job timed out at 240 seconds during callback
+reentry (exit 124). Its termination summary reports zero errors and zero definite,
+indirect or possible losses, but cannot establish a normal-exit memory result.
+CI now allows 600 seconds for the same full Valgrind command and checks; hosted
+rerun results remain separate evidence to review.

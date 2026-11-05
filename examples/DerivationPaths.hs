@@ -21,12 +21,10 @@ import qualified Cometa.Crypto.DerivationPath as Path
 -- DEFINITIONS ----------------------------------------------------------------
 
 main :: IO ()
-main = case Path.mkIndex 0 of
-  Left err -> print err
-  Right zero -> do
-    let account = Path.mkStandardAccountPath zero
-        payment = Path.mkDerivationPath account Path.externalRole zero
+main = do
+  let account = Path.standardAccountPath minBound
+      payment = Path.derivationPath account Path.externalRole minBound
 
-    print (Path.accountIndices account)
-    print (Path.toIndices payment)
-    print (Path.relativeIndices payment)
+  print (Path.accountIndices account)
+  print (Path.toIndices payment)
+  print (Path.relativeIndices payment)

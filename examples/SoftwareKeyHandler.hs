@@ -20,8 +20,12 @@ module Main (main) where
 
 import qualified Cometa.Crypto.Bip32.PublicKey as Public
 import qualified Cometa.Crypto.DerivationPath as Path
+import qualified Cometa.Crypto.Ed25519.PublicKey as Ed25519
+import Cometa.Error (Error)
 import qualified Cometa.KeyHandler.Software as Software
+import Control.Monad.Trans.Except (ExceptT (..), runExceptT)
 import qualified Data.ByteString as ByteString
+import Data.Text (Text)
 import qualified Data.Text.IO as Text
 import System.Exit (die)
 
@@ -29,15 +33,22 @@ import System.Exit (die)
 
 -- Public deterministic demonstration material only; never use it for a wallet.
 main :: IO ()
-main = case Path.mkIndex 0 of
-  Left err -> die (show err)
-  Right account -> do
-    let path = Path.mkStandardAccountPath account
-        requestPassword = pure "public demonstration password"
+main = do
+  let entropy = ByteString.replicate 16 0
+      password = "public demonstration password"
+      requestPassword = pure password
+      path = Path.standardAccountPath minBound
 
-    result <- Software.withEntropy (ByteString.replicate 16 0) "public demonstration password" requestPassword $ \handler ->
-      Software.accountPublicKey handler path
+  result <- runExceptT $ do
+    stored <- ExceptT (Software.withEntropy entropy password requestPassword Software.serialize)
+    ExceptT (Software.withSerialized stored requestPassword (loadedPublicKeyHex path))
 
-    case result of
-      Left err -> die (show err)
-      Right key -> Text.putStrLn (Public.toHex key)
+  case result of
+    Left err -> die (show err)
+    Right keyHex -> Text.putStrLn keyHex
+
+-- The storage format identifies the public-key capability when reloaded.
+loadedPublicKeyHex :: Path.AccountPath -> Software.LoadedHandler -> IO (Either Error Text)
+loadedPublicKeyHex path loaded = case loaded of
+  Software.Bip32Handler handler -> fmap Public.toHex <$> Software.accountPublicKey handler path
+  Software.Ed25519Handler handler -> fmap Ed25519.toHex <$> Software.publicKey handler

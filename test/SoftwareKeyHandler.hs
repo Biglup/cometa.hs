@@ -80,7 +80,7 @@ withNormal :: IO ByteString -> (Software.Handler Software.Ed25519 -> IO (Either 
 withNormal request action = Signing.withNormalKey (ByteString.replicate 32 1) $ \key -> Software.withSigningKey key password request action
 
 accountPath :: IO Path.AccountPath
-accountPath = Path.mkStandardAccountPath <$> requirePure (Path.mkIndex 0)
+accountPath = Path.standardAccountPath <$> requirePure (Path.mkIndex 0)
 
 checkNativeFixture :: IO ()
 checkNativeFixture = do
@@ -106,7 +106,7 @@ checkEd25519 = forM_ cases $ \(importKey, keyHex, publicHex) -> do
 checkEntropy :: IO ()
 checkEntropy = do
   index <- requirePure (Path.mkIndex 2147483647)
-  let path = Path.mkAccountPath index Path.cardanoCoinType index
+  let path = Path.accountPath index Path.cardanoCoinType index
   forM_ [16, 20, 24, 28, 32] $ \size -> do
     let bytes = ByteString.take size entropy
     expected <- require $ Private.withEntropy ByteString.empty bytes $ \root -> Private.withDerived root (Path.accountIndices path) Private.publicKey

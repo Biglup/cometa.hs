@@ -18,10 +18,12 @@ module Main (main) where
 
 -- IMPORTS --------------------------------------------------------------------
 
-import qualified Cometa.Crypto.Bip32.PrivateKey as PrivateKey
+import qualified Cometa.Crypto.Bip32 as Bip32
 import qualified Cometa.Crypto.Bip32.PublicKey as PublicKey
+import qualified Cometa.Crypto.DerivationPath as Path
 import qualified Data.ByteString as ByteString
 import qualified Data.Text.IO as Text
+import System.Exit (die)
 
 -- DEFINITIONS ----------------------------------------------------------------
 
@@ -29,12 +31,11 @@ main :: IO ()
 main = do
   -- Deterministic test entropy; never use this key for funds.
   let entropy = ByteString.replicate 16 0
-      accountPath = map PrivateKey.harden [1852, 1815, 0]
+      account = Path.standardAccountPath minBound
+      payment = Path.derivationPath account Path.externalRole minBound
 
-  result <- PrivateKey.withEntropy "" entropy $ \root ->
-    PrivateKey.withDerived root accountPath $ \account ->
-      PrivateKey.withDerived account [0, 0] PrivateKey.publicKey
+  result <- Bip32.derivePublicKey "" entropy payment
 
   case result of
-    Left failure -> print failure
+    Left failure -> die (show failure)
     Right public -> Text.putStrLn (PublicKey.toHex public)

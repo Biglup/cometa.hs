@@ -97,6 +97,7 @@ library
     Cometa.Crypto.Ed25519.PublicKey
     Cometa.Crypto.Ed25519.Signature
     Cometa.Crypto.Ed25519.SigningKey
+    Cometa.Crypto.Bip32
     Cometa.Crypto.Bip32.PublicKey
     Cometa.Crypto.Bip32.PrivateKey
     Cometa.Crypto.Bip39
@@ -185,6 +186,7 @@ executable cometa-software-key-handler
     base >=4.18 && <4.22,
     bytestring >=0.11 && <0.13,
     text >=2.0 && <2.2,
+    transformers >=0.6 && <0.7,
     cometa
 
 executable cometa-derivation-paths

@@ -13,7 +13,10 @@ and callback passwords must each contain 1 through 128 bytes. Invalid lengths
 return `InvalidKeyHandlerPasswordLength`; there is no normalization or password
 policy. A wrong password returns a native authentication error.
 
-The following program uses deterministic public demonstration material. The
+For direct public-key derivation without encrypted storage, use the
+[one-shot BIP32 helpers](bip32.md). The following program encrypts deterministic
+public demonstration material, serializes the encrypted storage, closes the
+original handler, and reloads the bytes in a fresh scope. The
 password action supplies the application's password when a public key is
 requested. An application can replace it with its own credential acquisition;
 keep its results only as long as necessary.
@@ -27,8 +30,12 @@ module Main (main) where
 
 import qualified Cometa.Crypto.Bip32.PublicKey as Public
 import qualified Cometa.Crypto.DerivationPath as Path
+import qualified Cometa.Crypto.Ed25519.PublicKey as Ed25519
+import Cometa.Error (Error)
 import qualified Cometa.KeyHandler.Software as Software
+import Control.Monad.Trans.Except (ExceptT (..), runExceptT)
 import qualified Data.ByteString as ByteString
+import Data.Text (Text)
 import qualified Data.Text.IO as Text
 import System.Exit (die)
 
@@ -36,22 +43,32 @@ import System.Exit (die)
 
 -- Public deterministic demonstration material only; never use it for a wallet.
 main :: IO ()
-main = case Path.mkIndex 0 of
-  Left err -> die (show err)
-  Right account -> do
-    let path = Path.mkStandardAccountPath account
-        requestPassword = pure "public demonstration password"
+main = do
+  let entropy = ByteString.replicate 16 0
+      password = "public demonstration password"
+      requestPassword = pure password
+      path = Path.standardAccountPath minBound
 
-    result <- Software.withEntropy (ByteString.replicate 16 0) "public demonstration password" requestPassword $ \handler ->
-      Software.accountPublicKey handler path
+  result <- runExceptT $ do
+    stored <- ExceptT (Software.withEntropy entropy password requestPassword Software.serialize)
+    ExceptT (Software.withSerialized stored requestPassword (loadedPublicKeyHex path))
 
-    case result of
-      Left err -> die (show err)
-      Right key -> Text.putStrLn (Public.toHex key)
+  case result of
+    Left err -> die (show err)
+    Right keyHex -> Text.putStrLn keyHex
+
+-- The storage format identifies the public-key capability when reloaded.
+loadedPublicKeyHex :: Path.AccountPath -> Software.LoadedHandler -> IO (Either Error Text)
+loadedPublicKeyHex path loaded = case loaded of
+  Software.Bip32Handler handler -> fmap Public.toHex <$> Software.accountPublicKey handler path
+  Software.Ed25519Handler handler -> fmap Ed25519.toHex <$> Software.publicKey handler
 ```
 
 Run the compiled example with `cabal run cometa-software-key-handler`. It prints
-only a public account key. `serialize` returns encrypted binary storage, and
+only a public key. The `ExceptT` sequence has one failure boundary; the total
+helper handles both capabilities identified by serialized storage. In an
+application, persist the returned bytes exactly and load those same bytes later.
+`serialize` returns encrypted binary storage, and
 `withSerialized` loads it into a `LoadedHandler` sum without requesting a password.
 Loading checks framing, supported sizes and checksum. The next public-key
 operation checks the password and encrypted payload. Preserve storage bytes
