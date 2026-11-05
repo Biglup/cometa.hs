@@ -104,6 +104,21 @@ library
     Cometa.PolicyId
     Cometa.AssetId
     Cometa.Value
+    Cometa.UnitInterval
+    Cometa.Protocol.Rational
+    Cometa.Protocol.ExUnits
+    Cometa.Protocol.Version
+    Cometa.Protocol.ExUnitPrices
+    Cometa.Protocol.CostModels
+    Cometa.Protocol.PoolVotingThresholds
+    Cometa.Protocol.DRepVotingThresholds
+    Cometa.Protocol.Parameters
+    Cometa.Protocol.Parameters.Update
+    Cometa.TransactionId
+    Cometa.Governance.Anchor
+    Cometa.Governance.ActionId
+    Cometa.Governance.DRep
+    Cometa.Governance.Voting
     Cometa.PlutusData
     Cometa.Metadata
     Cometa.Script
@@ -125,6 +140,9 @@ library
     Cometa.Encoding.Cbor
   other-modules:
     Cometa.Internal.Error
+    Cometa.Internal.ProtocolValues
+    Cometa.Internal.CostModels
+    Cometa.Internal.Governance
     Cometa.Internal.AddressText
     Cometa.Internal.Bip39Pure
     Cometa.Internal.Pbkdf2Pure
@@ -243,11 +261,18 @@ test-suite cometa-test
     test/cbits/plutus_data_oracle.c
     test/cbits/metadata_oracle.c
     test/cbits/script_oracle.c
+    test/cbits/parameters_oracle.c
+    test/cbits/protocol_values_oracle.c
+    test/cbits/governance_oracle.c
   cc-options: -std=c11 -Wall -Wextra
   other-modules:
     Value
     PlutusData
     Metadata
+    Parameters
+    ProtocolValues
+    Governance
+    Fixtures.Governance
     Scripts
     Fixtures.Scripts
     Fixtures.PlutusData
@@ -272,6 +297,7 @@ test-suite cometa-test
   build-depends:
     base >=4.18 && <4.22,
     aeson >=2.2 && <2.3,
+    cborg >=0.2.10 && <0.3,
     scientific >=0.3.7 && <0.4,
     bech32 >=1.1.10 && <1.2,
     bytestring >=0.11 && <0.13,
@@ -319,5 +345,32 @@ executable cometa-scripts
     base >=4.18 && <4.22,
     bytestring >=0.11 && <0.13,
     text >=2.0 && <2.2,
+    transformers >=0.6 && <0.7,
+    cometa
+
+executable cometa-protocol-values
+  import: language
+  hs-source-dirs: examples
+  main-is: ProtocolValues.hs
+  build-depends:
+    base >=4.18 && <4.22,
+    cometa
+
+executable cometa-protocol-parameters
+  import: language
+  hs-source-dirs: examples
+  main-is: ProtocolParameters.hs
+  build-depends:
+    base >=4.18 && <4.22,
+    bytestring >=0.11 && <0.13,
+    cometa
+
+executable cometa-governance
+  import: language
+  hs-source-dirs: examples
+  main-is: Governance.hs
+  build-depends:
+    base >=4.18 && <4.22,
+    bytestring >=0.11 && <0.13,
     transformers >=0.6 && <0.7,
     cometa

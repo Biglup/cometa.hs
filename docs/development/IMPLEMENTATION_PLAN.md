@@ -1859,3 +1859,194 @@ visibility without being counted as implemented. Plutus/script JSON and native
 metadata natural/CIP-116 JSON remain pending; auxiliary-data transaction
 integration and full VM evaluation are separate work. Hosted compiler/platform
 validation is tracked on the PR and is not implied by the local Linux results.
+
+
+### P07: protocol snapshots, updates and governance voting
+
+PR #12 merged as `26d0b6a`; hosted run `41967142371` passed all checks before
+this batch began. This larger batch adds shared protocol values, snapshots and
+sparse updates, governance identities and voting collections. Certificates,
+pool registration and governance proposal actions remain separate P07 work.
+
+The following reviews informed the APIs before implementation. Public values
+stay pure, and optional fields preserve observed availability rather than
+inventing values for unsupported eras. Exact encoding wrappers protect imported
+updates and voting procedures whose bytes may contribute to transaction identity.
+
+#### Foundational protocol values review
+
+Native pin: eadb95cd3ca7f711c203d7f2f4ee21c150d4d7f1.
+
+Reviewed actual source at cardano-api 5e63165a4bb7481a03d2e50464dc9c4f106c9fa5:
+- https://github.com/IntersectMBO/cardano-api/blob/5e63165a4bb7481a03d2e50464dc9c4f106c9fa5/cardano-api/src/Cardano/Api/ProtocolParameters.hs
+- https://github.com/IntersectMBO/cardano-api/blob/5e63165a4bb7481a03d2e50464dc9c4f106c9fa5/cardano-api/test/cardano-api-test/Test/Cardano/Api/ProtocolParameters.hs
+ExecutionUnitPrices stores exact Rational, conversion to ledger bounds through boundRationalEither; CostModel stores [Int64], conversion validates language-dependent evaluator support. Tests explicitly distinguish arbitrary-cost-model ledger conversion from CBOR round-trip.
+
+Reviewed Atlas c3adfb416242ea25a244bfaa1614213eecdc55d9 actual source:
+- https://github.com/geniusyield/atlas/blob/c3adfb416242ea25a244bfaa1614213eecdc55d9/src/GeniusYield/Types/ProtocolParameters.hs
+- https://github.com/geniusyield/atlas/blob/c3adfb416242ea25a244bfaa1614213eecdc55d9/src/GeniusYield/TxBuilder/Common.hs
+- https://github.com/geniusyield/atlas/blob/c3adfb416242ea25a244bfaa1614213eecdc55d9/src/GeniusYield/TxBuilder/IO/Builder.hs
+Atlas aliases ledger PParams; maximumFee reads validated execution prices and ExUnits, computes exact Rational products then ceiling. Cometa workflow validates external numerator/denominator once, assembles immutable prices, multiplies via explicit Rational observation, and serializes pure values. No Double conversions.
+
+Native audit:
+- common/unit_interval.c new stores uint64 pair without validation, from_cbor tag30+[uint,uint], permits zero denominator and >1. Used for prices, pool pledge influence and reference script multiplier too. Public nonnegative rational rejects zero denominator, subset UnitInterval also enforces <=1. Pair retained unreduced; equality/ordering compare exact numeric values using Integer cross-products. Original pairs remain observable and serializable. No normalization of imported pairs, shortest integer representation on output (not byte-preserving nonminimal CBOR).
+- common/ex_units.c uses unsigned uint64 memory then steps array.
+- common/protocol_version.c from_cbor/set_minor enforce UINT32_MAX; new omits bound check. Public validation major u64, minor u32 for round-trip closure.
+- protocol_params/cost_model.c known-language constructor plus unknown language decode (0..255), signed int64 vector max 2048. Encoding is a two-item stream (language id + costs array), embedded as a map pair by costmdls.c. No Haskell semantic evaluator-validity claim for opaque vectors. costmdls insertion replaces existing key and output sorts raw language ids ascending.
+- protocol_params/ex_unit_prices.c array memory price then step price, each native unit_interval pair.
+- threshold constructors retain each child; immutable Haskell records avoid lifecycle effects. Threshold ordering follows native constructor/from_cbor order (5 pool / 10 DRep).
+
+No upstream code or tests copied. License: upstream cardano-api Apache-2.0; Atlas Apache-2.0; native Apache-2.0 source remains referenced not copied. Generated properties and independent boundary tests are original.
+
+Public individual cost-model codec intentionally encodes only the cost array, with explicit raw language supplied on decode; the collection codec emits the native language-keyed map. Duplicate external language map keys are rejected, while explicit fromList/insert use last-wins replacement. This avoids silently selecting an ambiguous external model.
+
+Verification delegated to root: cabal build/tests/haddock, C oracle integration and Valgrind. Locally completed Ormolu and HLint with no hints across owned files. No commits made.
+
+#### Protocol parameter review (2026-11-05)
+
+Reviewed before API design, cardano-api 5e63165a4bb7481a03d2e50464dc9c4f106c9fa5:
+https://github.com/IntersectMBO/cardano-api/blob/5e63165a4bb7481a03d2e50464dc9c4f106c9fa5/cardano-api/src/Cardano/Api/ProtocolParameters.hs
+https://github.com/IntersectMBO/cardano-api/blob/5e63165a4bb7481a03d2e50464dc9c4f106c9fa5/cardano-api/src/Cardano/Api/Compatible/ProtocolParametersUpdate.hs
+
+The compatible API uses typed records grouped by introduction/deprecation era, StrictMaybe fields for sparse changes, nested StrictMaybe for nullable maximum pledge leverage and Peras bootstrap round. createEraBasedProtocolParamUpdate combines groups, createPParams applies changes to emptyPParams. Common fields cover fees, deposits and sizes; Conway adds voting and governance; Dijkstra adds reference-script tiers, pledge/margin, Leios, Peras and reference-input charges. Extra entropy/decentralization are deprecated after Alonzo, version updates after Babbage; minimum UTxO value key15 is absent from native interface.
+
+Atlas c3adfb416242ea25a244bfaa1614213eecdc55d9:
+https://github.com/geniusyield/atlas/blob/c3adfb416242ea25a244bfaa1614213eecdc55d9/src/GeniusYield/Types/ProtocolParameters.hs
+https://github.com/geniusyield/atlas/blob/c3adfb416242ea25a244bfaa1614213eecdc55d9/src/GeniusYield/TxBuilder/Common.hs
+
+Atlas aliases ledger PParams. Real caller buildTxCore takes protocol parameters into GYBuildTxEnv; maximumFee uses minFeeA/B, maxTxSize, exact prices and maxTxExUnits plus tier reference-script fee; collateral uses exact rational percentage. The workflow is obtain a complete snapshot, inspect typed values, assemble a sparse update and apply it immutably. Cometa adopts Haskell-owned typed records and Maybe absence, standard Either errors, explicit exact encoding wrapper. It does not fabricate full parameters by filling missing values with defaults. No era witness exists in the binding; native representability does not assert validity for a particular ledger era.
+
+Pinned cardano-c eadb95cd3ca7f711c203d7f2f4ee21c150d4d7f1 audited headers and implementations protocol_parameters.{h,c}, protocol_param_update.{h,c}. Full parameters expose typed setters/getters and no serialization in the audited header. Sparse update CBOR maps keys0..56 excluding15. Dijkstra fields have Word32/Word16 bounds, stride positive Word32. Fields38,53 explicitly distinguish absent and present-null; nested Maybe preserves all three states. Full getters retain reference-valued fields; update pointer-to-pointer getters retain references or report absence. Each obligation must be released once and local pointer nulled even when native unref leaves it nonnull.
+
+Generic native unit_interval permits nonnegative ratios above1; true proportions use validated UnitInterval while pledge influence, costs, multiplier, leverage and healing use NonNegativeRational. Native does not enforce era-specific positive multiplier/healing ledger checks. Entropy decoder ignores variant tag and hash length; Cometa validates [0] neutral or [1,bytes32] deliberately. Native update caches original CBOR; public EncodedUpdate preserves identity and fresh encodeCbor explicitly normalizes. Native full defaults include0/1/empty placeholders and are not a meaningful complete snapshot.
+
+Approved API: Cometa.Protocol.Parameters complete concrete immutable record (no default), Nonce and ReferenceScriptCostStride validated values; Cometa.Protocol.Parameters.Update sparse record, empty, apply, fromParameters; pure codec with opaque EncodedUpdate exact bytes plus semantic inspection, strict duplicate/unknown/trailing rejection. Old proposed-update envelopes deferred.
+
+
+Availability refinement after review: Parameters retains required common fields,
+while deprecated entropy/decentralization and fields introduced after Shelley are
+Maybe. Dijkstra nullable fields therefore use Maybe (Maybe value): unavailable,
+present-null, and present-value. fromParameters omits unavailable fields; apply
+preserves them unless a field is explicitly changed. This permits real Conway
+snapshots without invented future defaults. Native lacks key15/minUTxOValue and
+old ada-per-word schema, so the snapshot is not a full historical-era validator.
+
+Native oracle: all56 update getters are independently traversed through full
+parameter setters/getters and into a newly allocated update. Every acquired
+reference is released once and nulled immediately. It exercises full Dijkstra,
+Conway-like absent future fields, all56 singleton changes, all nullable states,
+neutral nonce, width bounds and random fee changes. No opaque parent cache can
+establish agreement. Shared foundation oracles separately inspect rational pairs,
+execution values, model contents and threshold fields. Production has no native
+owners or IO boundary in this scope.
+
+Native limitations discovered by integrated checks: sparse decoder casts the
+indefinite map sentinel to size_t and does not support indefinite maps. Pure
+Haskell import deliberately supports them and preserves identity; oracle agrees
+on normalized definite maps and additionally tests nonminimal definite integers.
+The full max_value_size getter/storage and sparse API are uint64_t but its full
+setter takes int64_t with unchecked assignment. Public Haskell preserves Word64
+snapshot/update domain. The oracle performs checked conversion and full traversal
+only through INT64_MAX; larger values use sparse typed getter/setter alone. It
+never calls an incompatible function pointer or narrows out of range.
+
+Independent field mapping test pairs all56 explicitly named singleton updates
+with native keys0..14 and16..56 and inspects the serialized map key. This prevents
+matching encoder/decoder key-swap bugs from passing a roundtrip. A separate
+pinned byte vector selects distinct feeA44,feeB155381,blockrefsize256 and explicit
+null leverage. Full scalar fixture values are distinct, plus width maxima and
+invalid-overflow matrix cover unsigned bounds.
+
+#### Governance identity and voting API review
+
+Native pin: `eadb95cd3ca7f711c203d7f2f4ee21c150d4d7f1`.
+
+Reviewed actual upstream sources before design:
+
+* cardano-api `5e63165a4bb7481a03d2e50464dc9c4f106c9fa5`, [VotingProcedure](https://github.com/IntersectMBO/cardano-api/blob/5e63165a4bb7481a03d2e50464dc9c4f106c9fa5/cardano-api/src/Cardano/Api/Governance/Internal/Action/VotingProcedure.hs). A vote and optional anchor assemble a VotingProcedure; singleton associates voter/action identity; merge rejects overlapping voter/action pairs even when votes agree. Serialized voting procedures use nested ledger maps. Era witnesses supply ledger integration, not a necessary property of standalone immutable vote values.
+* Atlas `c3adfb416242ea25a244bfaa1614213eecdc55d9`, [Governance](https://github.com/geniusyield/atlas/blob/c3adfb416242ea25a244bfaa1614213eecdc55d9/src/GeniusYield/Types/Governance.hs), [Anchor](https://github.com/geniusyield/atlas/blob/c3adfb416242ea25a244bfaa1614213eecdc55d9/src/GeniusYield/Types/Anchor.hs), [DRep](https://github.com/geniusyield/atlas/blob/c3adfb416242ea25a244bfaa1614213eecdc55d9/src/GeniusYield/Types/DRep.hs). Role-specific committee hot/DRep credentials and stake-pool key hashes distinguish voter authorities. Special DRep delegation targets always-abstain/no-confidence are distinct from credential voters. Anchor URLs are UTF8 byte-bounded (128), hashes are 32 bytes. Action identity has transaction ID and Word16 index. Atlas combineVotingProcedures resolves duplicates right-biased, unlike cardano-api; Cometa makes conflicts explicit rather than silently discard an instruction.
+* Actual caller flow: Atlas [TxBuilder.Class](https://github.com/geniusyield/atlas/blob/c3adfb416242ea25a244bfaa1614213eecdc55d9/src/GeniusYield/TxBuilder/Class.hs) `mustHaveVotingProcedures` (lines 873-874) installs a caller-built `Map Voter (witness,Map ActionId VotingProcedure)` into the skeleton. This establishes identity -> optional anchor -> vote -> voter/action association -> builder integration. Cometa scope ends at standalone voting data/CBOR; witness signing and transaction builder integration belong to later phases. Atlas [DRep privnet caller](https://github.com/geniusyield/atlas/blob/c3adfb416242ea25a244bfaa1614213eecdc55d9/tests-privnet/GeniusYield/Test/Privnet/DRep.hs) separately validates URL, hashes metadata, assembles optional anchor and uses role-aware DRep identity in registration/update. This supports reusable anchor/credential values for future certificate work without implementing certificates here.
+
+##### Native semantics audit
+
+`common/anchor.c` stores URL in a 129-byte NUL-terminated array and serializes with safe_strlen: embedded NUL truncates. Constructors require 1..128 bytes. Cometa rejects embedded NUL and empty URLs rather than allow silent changes. Text is validated UTF8, not HTTP/URI syntax. Hash bytes exactly 32.
+
+`common/governance_action_id.c` accepts a full uint64 CBOR index, greater than Atlas Word16. Preserve native index range in standalone protocol API and document it. Native CIP129 helper `to_cip29_bech32` takes `byte_t index`, payload 32-byte transaction hash plus one-byte index. This is incompatible with claiming arbitrary uint64 identity text round trips. CIP129 text is explicitly deferred pending a separate standards review and carefully checked narrower boundary.
+
+`voting_procedures/voting_procedures.c` sorts outer voters using voter kind (0 committee key,1 committee script,2 DRep key,3 DRep script,4 pool key) then credential bytes. `voting_procedure_map.c` sorts action keys by transaction hash bytes then numeric uint64 index. Inner insertion APPENDS duplicates. Outer insertion merges repeated voter keys. Serialization traverses duplicate action keys but calls first-match get for each: conflicting duplicate values can be changed. `from_cbor` discards empty inner voter maps. Therefore native decode/re-encode cannot establish exact imported voting CBOR identity.
+
+Implemented semantic collection: unique nested maps, explicit duplicate errors, canonical native ordering for newly assembled values, no Monoid instance that masks conflicts. Decode rejects duplicate outer voters, duplicate inner action IDs, and empty inner maps. Exact EncodedVotingProcedures retains all accepted input bytes (including map order and nonminimal encodings) plus semantic snapshot; `toCbor` is exact and `encodeCbor . to...` is explicitly fresh serialization. Rejection policy is narrower than native permissiveness and avoids native corruption; no external encoding is silently normalized.
+
+Pure owned ADTs and CBOR codecs use existing cborg dependency; native oracles reconstruct typed values and compare bytes/inspect meaning. No native object resources enter public values and no new unsafePerformIO boundary is introduced.
+
+##### Implemented API
+
+The shared API review approved a reusable `Cometa.TransactionId.TransactionId`
+(32 bytes, byte/hex import and observation). `ActionId` is a total record of this
+validated hash and an ordinary `Word64` index; no additional index smart constructor
+or partial numeric instances are introduced. Credential adds `DRep`,
+`CommitteeHot` and `StakePool` roles now. Committee-cold role remains deferred
+until certificates need it.
+
+Public modules: `Cometa.TransactionId`, `Cometa.Governance.Anchor`,
+`Cometa.Governance.ActionId`, `Cometa.Governance.DRep`,
+`Cometa.Governance.Voting`. Private `Cometa.Internal.Governance` holds pure
+schemas and representations so cborg parser workers do not leak publicly.
+Haddock on re-exported declarations describes validated fields and collection
+laws. `VotingProcedure` and `Anchor` total record constructors assemble
+validated component values; `DRepCredential` distinguishes the credential target.
+
+`Anchor.hashData` delegates the existing BLAKE2b-256 native IO boundary, including
+its empty-message native failure; it does not repurpose the `EmptyHash` error,
+which belongs to importing an empty digest. The existing native restriction is
+documented and tested. A pinned independent Atlas Hello-World digest checks the
+payload semantics.
+
+##### Test and lifecycle evidence
+
+`test/Governance.hs`: pinned scalar and complete nested voting collection values
+are rebuilt using public Haskell constructors; all five voter forms, optional
+anchor choices and three votes, full uint64 index boundaries, UTF8 byte URL
+bounds and NUL rejection, malformed/trailing encodings, duplicate/empty inner-map
+rejection, representation-sensitive exact wrappers, repeated native lifecycle,
+and original Hedgehog scalar/collection round trips and disjoint merge laws.
+
+`test/cbits/governance_oracle.c` decodes typed Haskell-generated bytes, obtains
+semantic fields, reconstructs fresh native objects and serializes them, including
+rebuilding nested collections with native insertion and sorting. No source CBOR
+cache is forwarded. Native credential/anchor/list getters acquire retained
+references which are released locally. Borrowed raw hash/URL fields are consumed
+while their source owner remains alive. Reused loop pointer locals are explicitly
+nulled after unref, since another reference can keep the address nonnull.
+
+`test/Fixtures/Governance.hs` contains the imported Apache-2.0 pin with source
+constants recorded in `test/Fixtures/Governance.md`. No live tests or keys are
+used. `examples/Governance.hs` demonstrates one error boundary from input
+validation and metadata hashing through fresh encoding and exact stored-byte
+reload; `docs/userguide/governance.md` literalincludes the compiled example.
+
+The native API ledger retains original planned phases for all 163 scoped
+governance symbols. Implemented domain operations map to
+`adapted` Haskell-owned APIs; CIP116 JSON, identifier/enum string interchange and
+anchor hash hex conveniences remain `pending` with explicit omissions. Public
+transaction ID hex conversion is implemented separately from anchor hash hex.
+
+##### Integrated verification
+
+The protocol and governance batch passes all 239 tests with warnings treated as
+errors. The same tests pass from an extracted source distribution built as a
+separate consumer. All 16 executable examples and the credential/key-handler role
+checks pass. The 15 new public modules have complete Haddock declaration coverage;
+the strict Sphinx HTML build, Ormolu, HLint, C formatting, C11 warning checks,
+package checks, and native inventory checks pass.
+
+The complete test suite also passes under Valgrind in 203.61 seconds, with zero
+definitely, indirectly, or possibly lost bytes and zero reported errors. This
+uses the existing GHC 9.6.7 idle-GC workaround described above, without Valgrind
+suppressions. Ordinary tests retain their normal runtime configuration.
+
+The ledger now records 1,040 implemented or adapted native symbols. This is a
+symbol count, not a completion percentage: lifecycle plumbing and deferred domain
+operations remain explicitly tracked. Certificates, stake-pool registration,
+governance proposal actions, and proposed-update envelopes remain for subsequent
+work. Hosted matrix validation is checked on the pull request.

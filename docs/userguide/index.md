@@ -1,6 +1,7 @@
 # Cometa.hs
 
-Cometa.hs provides Plutus data, metadata and scripts, asset values, Shelley addresses
+Cometa.hs provides protocol parameters and governance votes, Plutus data, metadata
+and scripts, asset values, Shelley addresses
 and credentials, Ed25519 signing,
 BIP39 recovery, BIP32 derivation, CBOR
 encoding, and immutable Blake2b hashes,
@@ -15,7 +16,8 @@ Start with [installation](installation.md), then read the
 [software key-handler guide](software-key-handlers.md),
 [address guide](addresses.md), [assets and values guide](assets-values.md),
 [Plutus data guide](plutus-data.md), [metadata guide](metadata.md), and
-[script guide](scripts.md).
+[script guide](scripts.md), [protocol values](protocol-values.md),
+[protocol parameters](protocol-parameters.md), and [governance votes](governance.md).
 The [API reference](api-reference.md) explains how to browse the declarations for the revision you build.
 
 ```{toctree}
@@ -35,6 +37,9 @@ assets-values
 plutus-data
 metadata
 scripts
+protocol-values
+protocol-parameters
+governance
 api-reference
 ```
 

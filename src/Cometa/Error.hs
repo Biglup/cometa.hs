@@ -176,6 +176,36 @@ data Error
     InvalidScriptCbor !Text
   | -- | Compiled Plutus script bytes are empty.
     EmptyPlutusScript
+  | -- | A protocol fraction has a negative or oversized component, or a zero denominator.
+    InvalidProtocolRational !Integer !Integer
+  | -- | A unit interval fraction lies outside zero through one inclusive.
+    InvalidUnitInterval !Integer !Integer
+  | -- | An execution budget component is outside the unsigned 64-bit range.
+    InvalidExUnits !Integer !Integer
+  | -- | A protocol version exceeds its unsigned major/minor bounds.
+    InvalidProtocolVersion !Integer !Integer
+  | -- | A protocol value has malformed CBOR or violates its field constraints.
+    InvalidProtocolCbor !Text
+  | -- | A cost model contains an unsupported number of coefficients.
+    InvalidCostModelLength !Int
+  | -- | A parameter update has malformed CBOR or invalid fields.
+    InvalidProtocolParametersCbor !Text
+  | -- | A reference script cost stride is outside 1 through 4294967295 bytes.
+    InvalidReferenceScriptCostStride !Integer
+  | -- | A nonneutral protocol nonce does not contain exactly 32 bytes.
+    InvalidProtocolNonceLength !Int
+  | -- | An anchor URL is outside 1 through 128 UTF-8 bytes.
+    InvalidAnchorUrlLength !Int
+  | -- | An anchor URL contains a NUL character.
+    InvalidAnchorUrl
+  | -- | An anchor data digest does not contain exactly 32 bytes.
+    InvalidAnchorDataHashLength !Int
+  | -- | A transaction identifier does not contain exactly 32 bytes.
+    InvalidTransactionIdLength !Int
+  | -- | Governance CBOR is malformed or violates the selected value's schema.
+    InvalidGovernanceCbor !Text
+  | -- | A voter/action pair is present more than once.
+    DuplicateGovernanceVote
   | -- | An operation reported success but did not produce a valid result.
     NativeContractViolation
       -- | Operation name; excludes user input.
