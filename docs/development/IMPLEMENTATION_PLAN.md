@@ -1849,9 +1849,10 @@ The complete 214-test Valgrind run finishes in 261.67 seconds with zero errors
 and zero definite, indirect or possible losses, without suppressions. It retains
 the existing pinned-GHC idle-GC workaround (`-N2 -I0`); ordinary tests retain
 normal idle-GC behavior. The final property-generator and semantic-assertion
-refinements also run under the focused domain memory check.
+refinements also pass a focused 31-test domain Valgrind run with zero errors
+and zero definite, indirect or possible losses.
 
-The ledger now records 621 implemented/adapted entries across the binding,
+The ledger now records 614 implemented/adapted entries across the binding,
 compared with 341 before this batch. This is symbol coverage, not an estimate of
 remaining engineering effort. Native lifetime plumbing retains internal
 visibility without being counted as implemented. Plutus/script JSON and native
