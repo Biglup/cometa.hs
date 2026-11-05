@@ -32,6 +32,15 @@ without a repository-wide decision and compiler-matrix evidence.
 
 ## Design from complete workflows
 
+Before designing or extending a public API, review how relevant established
+Haskell libraries solve the same task. Read their actual documentation, source
+and usage examples, including the complete caller workflow and error handling.
+Record links and the reviewed version or commit in the implementation plan,
+explain which contracts inform Cometa, and justify material differences. This
+review is required before choosing the API; familiar names or remembered
+signatures are insufficient evidence. Adopt patterns that fit the domain and
+Cometa's guarantees rather than copying another library mechanically.
+
 Design a complete caller workflow before adding primitives. Write the code an
 application needs to validate input, assemble values, execute the operation, and
 handle the result. Review successful use, invalid input, and cleanup together.
@@ -268,6 +277,9 @@ that fit this library rather than copying historical partial APIs or dependencie
 
 Before accepting a public API change, review concrete caller code:
 
+- Have relevant established libraries' documentation, source and real usage been
+  reviewed before design, with links, version or commit, workflow and justified
+  differences recorded in the implementation plan?
 - Can the common task run from input to result with one clear error boundary?
   Are runtime inputs validated once and valid values assembled without spurious
   failure branches?

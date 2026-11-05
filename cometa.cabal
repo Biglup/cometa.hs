@@ -94,6 +94,10 @@ library
   exposed-modules:
     Cometa
     Cometa.Crypto.Blake2b
+    Cometa.Credential
+    Cometa.Address.Shelley
+    Cometa.Address.Reward
+    Cometa.NetworkId
     Cometa.Crypto.Ed25519.PublicKey
     Cometa.Crypto.Ed25519.Signature
     Cometa.Crypto.Ed25519.SigningKey
@@ -110,11 +114,13 @@ library
     Cometa.Encoding.Cbor
   other-modules:
     Cometa.Internal.Error
+    Cometa.Internal.AddressText
     Cometa.Internal.Bip39Pure
     Cometa.Internal.Pbkdf2Pure
     Cometa.Internal.Ed25519SigningKey
   build-depends:
     base >=4.18 && <4.22,
+    bech32 >=1.1.10 && <1.2,
     bytestring >=0.11 && <0.13,
     text >=2.0 && <2.2,
     cometa:core
@@ -197,6 +203,17 @@ executable cometa-derivation-paths
     base >=4.18 && <4.22,
     cometa
 
+executable cometa-addresses
+  import: language
+  hs-source-dirs: examples
+  main-is: Addresses.hs
+  build-depends:
+    base >=4.18 && <4.22,
+    bytestring >=0.11 && <0.13,
+    text >=2.0 && <2.2,
+    transformers >=0.6 && <0.7,
+    cometa
+
 test-suite cometa-test
   import: language
   type: exitcode-stdio-1.0
@@ -206,8 +223,11 @@ test-suite cometa-test
     cbits/cometa_error_codes_test.c
     test/cbits/transaction_oracle.c
     test/cbits/derivation_path_oracle.c
+    test/cbits/address_oracle.c
   cc-options: -std=c11 -Wall -Wextra
   other-modules:
+    Address
+    Fixtures.Address
     ErrorCode
     Ownership
     Callback
@@ -226,6 +246,7 @@ test-suite cometa-test
   ghc-options: -threaded
   build-depends:
     base >=4.18 && <4.22,
+    bech32 >=1.1.10 && <1.2,
     bytestring >=0.11 && <0.13,
     text >=2.0 && <2.2,
     cometa,
