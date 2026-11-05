@@ -110,7 +110,8 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y valgrind
-          timeout 600s valgrind --fair-sched=yes --leak-check=full --show-leak-kinds=definite,indirect --errors-for-leak-kinds=definite,indirect --error-exitcode=1 "$(cabal list-bin cometa-test)" --num-threads=1 +RTS -N2 -RTS
+          # Disable idle GC only here for the GHC 9.6.7 shutdown race documented in the plan.
+          timeout 600s valgrind --fair-sched=yes --leak-check=full --show-leak-kinds=definite,indirect --errors-for-leak-kinds=definite,indirect --error-exitcode=1 "$(cabal list-bin cometa-test)" --num-threads=1 +RTS -N2 -I0 -RTS
 
   quality:
     runs-on: ubuntu-24.04

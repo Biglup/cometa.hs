@@ -1665,3 +1665,27 @@ property cases, passes in 2.52 seconds with zero errors and zero definite,
 indirect or possible losses. Both runs use `+RTS -N2`, with no suppressions or
 runtime-option workaround. The focused result does not replace or establish a
 clean full-suite result; hosted full-suite validation remains a separate gate.
+
+#### GHC 9.6.7 Valgrind CI workaround
+
+The hosted Linux/GHC 9.6.7 Valgrind job passed all 183 tests in 265.48 seconds,
+then failed its leak gate on the same 2-byte definite loss from
+`stgMallocBytes -> scheduleDoGC -> scheduleWorker`; indirect and possible losses
+were zero. In the pinned [GHC 9.6.7 scheduler source](https://github.com/ghc/ghc/blob/ghc-9.6.7-release/rts/Schedule.c#L1555-L1605),
+`scheduleDoGC` allocates one `bool` per capability before yielding to
+`requestSync`; its subsequent shutdown return can bypass release. The stack,
+two-capability allocation size and earlier controlled run support this shutdown
+race diagnosis; they do not establish a new Cometa native allocation failure.
+
+The test executable now permits RTS options with `-rtsopts`. Only the pinned
+Valgrind CI invocation adds `+RTS -N2 -I0`: the [GHC 9.6.7 RTS guide](https://downloads.haskell.org/ghc/9.6.7/docs/users_guide/runtime_control.html#rts-flag--I)
+defines `-I0` as disabling idle GC. Allocation-triggered collections and explicit
+`performGC` tests remain active, and ordinary tests retain their default idle-GC
+behavior. No suppression or library runtime default is added. This is a scoped
+CI workaround for the runtime shutdown race, to revisit when upgrading the
+Valgrind job's GHC version.
+
+The rebuilt executable passes all 183 ordinary tests with default idle-GC
+behavior. The complete local Valgrind run with `-N2 -I0` passes all 183 tests in
+188.32 seconds with zero errors and zero definite, indirect or possible losses,
+without suppressions. Hosted validation remains pending for this follow-up.
