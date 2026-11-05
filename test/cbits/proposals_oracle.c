@@ -77,7 +77,9 @@ rebuild_withdrawal_map(cardano_withdrawal_map_t* source, cardano_withdrawal_map_
     uint64_t                  amount  = 0;
     result                            = cardano_withdrawal_map_get_key_value_at(source, i, &account, &amount);
     if (result == CARDANO_SUCCESS)
+    {
       result = cardano_withdrawal_map_insert(*output, account, amount);
+    }
     cardano_reward_address_unref(&account);
   }
   return result;
@@ -97,7 +99,9 @@ rebuild_treasury_withdrawals_action(cardano_treasury_withdrawals_action_t* sourc
   cardano_withdrawal_map_t* fresh       = NULL;
   cardano_error_t           result      = rebuild_withdrawal_map(withdrawals, &fresh);
   if (result == CARDANO_SUCCESS)
+  {
     result = cardano_treasury_withdrawals_action_new(fresh, policy_hash, output);
+  }
   cardano_withdrawal_map_unref(&fresh);
   cardano_withdrawal_map_unref(&withdrawals);
   cardano_blake2b_hash_unref(&policy_hash);
@@ -196,7 +200,9 @@ rebuild_committee_members_map(cardano_committee_members_map_t* source, cardano_c
     uint64_t              epoch = 0;
     result                      = cardano_committee_members_map_get_key_value_at(source, i, &key, &epoch);
     if (result == CARDANO_SUCCESS)
+    {
       result = cardano_committee_members_map_insert(*output, key, epoch);
+    }
     cardano_credential_unref(&key);
   }
   return result;
@@ -210,14 +216,18 @@ rebuild_committee(cardano_committee_t* source, cardano_committee_t** output)
   cardano_credential_set_t* keys   = NULL;
   cardano_error_t           result = cardano_committee_new(quorum, output);
   if (result == CARDANO_SUCCESS)
+  {
     result = cardano_committee_members_keys(source, &keys);
+  }
   for (size_t i = 0; result == CARDANO_SUCCESS && i < cardano_credential_set_get_length(keys); ++i)
   {
     cardano_credential_t* key   = NULL;
     uint64_t              epoch = 0;
     result                      = cardano_committee_get_key_value_at(source, i, &key, &epoch);
     if (result == CARDANO_SUCCESS)
+    {
       result = cardano_committee_add_member(*output, key, epoch);
+    }
     cardano_credential_unref(&key);
   }
   cardano_credential_set_unref(&keys);
@@ -236,7 +246,9 @@ rebuild_proposed_param_updates(cardano_proposed_param_updates_t* source, cardano
     cardano_protocol_param_update_t* value = NULL;
     result                                 = cardano_proposed_param_updates_get_key_value_at(source, i, &key, &value);
     if (result == CARDANO_SUCCESS)
+    {
       result = cardano_proposed_param_updates_insert(*output, key, value);
+    }
     cardano_blake2b_hash_unref(&key);
     cardano_protocol_param_update_unref(&value);
   }
@@ -256,11 +268,17 @@ rebuild_update(cardano_update_t* source, cardano_update_t** output)
   cardano_proposed_param_updates_t* fresh   = NULL;
   cardano_error_t                   result  = cardano_update_get_epoch(source, &epoch);
   if (result == CARDANO_SUCCESS)
+  {
     result = cardano_update_get_proposed_parameters(source, &changes);
+  }
   if (result == CARDANO_SUCCESS)
+  {
     result = rebuild_proposed_param_updates(changes, &fresh);
+  }
   if (result == CARDANO_SUCCESS)
+  {
     result = cardano_update_new(epoch, fresh, output);
+  }
   cardano_proposed_param_updates_unref(&fresh);
   return result;
 }
@@ -287,9 +305,13 @@ rebuild_proposal_procedure(cardano_proposal_procedure_t* source, cardano_proposa
         cardano_parameter_change_action_t* fresh  = NULL;
         result                                    = cardano_proposal_procedure_to_parameter_change_action(source, &action);
         if (result == CARDANO_SUCCESS)
+        {
           result = rebuild_parameter_change_action(action, &fresh);
+        }
         if (result == CARDANO_SUCCESS)
+        {
           result = cardano_proposal_procedure_new_parameter_change_action(deposit, account, anchor, fresh, output);
+        }
         cardano_parameter_change_action_unref(&fresh);
         cardano_parameter_change_action_unref(&action);
         break;
@@ -300,9 +322,13 @@ rebuild_proposal_procedure(cardano_proposal_procedure_t* source, cardano_proposa
         cardano_hard_fork_initiation_action_t* fresh  = NULL;
         result                                        = cardano_proposal_procedure_to_hard_fork_initiation_action(source, &action);
         if (result == CARDANO_SUCCESS)
+        {
           result = rebuild_hard_fork_initiation_action(action, &fresh);
+        }
         if (result == CARDANO_SUCCESS)
+        {
           result = cardano_proposal_procedure_new_hard_fork_initiation_action(deposit, account, anchor, fresh, output);
+        }
         cardano_hard_fork_initiation_action_unref(&fresh);
         cardano_hard_fork_initiation_action_unref(&action);
         break;
@@ -313,9 +339,13 @@ rebuild_proposal_procedure(cardano_proposal_procedure_t* source, cardano_proposa
         cardano_treasury_withdrawals_action_t* fresh  = NULL;
         result                                        = cardano_proposal_procedure_to_treasury_withdrawals_action(source, &action);
         if (result == CARDANO_SUCCESS)
+        {
           result = rebuild_treasury_withdrawals_action(action, &fresh);
+        }
         if (result == CARDANO_SUCCESS)
+        {
           result = cardano_proposal_procedure_new_treasury_withdrawals_action(deposit, account, anchor, fresh, output);
+        }
         cardano_treasury_withdrawals_action_unref(&fresh);
         cardano_treasury_withdrawals_action_unref(&action);
         break;
@@ -326,9 +356,13 @@ rebuild_proposal_procedure(cardano_proposal_procedure_t* source, cardano_proposa
         cardano_no_confidence_action_t* fresh  = NULL;
         result                                 = cardano_proposal_procedure_to_no_confidence_action(source, &action);
         if (result == CARDANO_SUCCESS)
+        {
           result = rebuild_no_confidence_action(action, &fresh);
+        }
         if (result == CARDANO_SUCCESS)
+        {
           result = cardano_proposal_procedure_new_no_confidence_action(deposit, account, anchor, fresh, output);
+        }
         cardano_no_confidence_action_unref(&fresh);
         cardano_no_confidence_action_unref(&action);
         break;
@@ -339,9 +373,13 @@ rebuild_proposal_procedure(cardano_proposal_procedure_t* source, cardano_proposa
         cardano_update_committee_action_t* fresh  = NULL;
         result                                    = cardano_proposal_procedure_to_update_committee_action(source, &action);
         if (result == CARDANO_SUCCESS)
+        {
           result = rebuild_update_committee_action(action, &fresh);
+        }
         if (result == CARDANO_SUCCESS)
+        {
           result = cardano_proposal_procedure_new_update_committee_action(deposit, account, anchor, fresh, output);
+        }
         cardano_update_committee_action_unref(&fresh);
         cardano_update_committee_action_unref(&action);
         break;
@@ -352,9 +390,13 @@ rebuild_proposal_procedure(cardano_proposal_procedure_t* source, cardano_proposa
         cardano_new_constitution_action_t* fresh  = NULL;
         result                                    = cardano_proposal_procedure_to_constitution_action(source, &action);
         if (result == CARDANO_SUCCESS)
+        {
           result = rebuild_new_constitution_action(action, &fresh);
+        }
         if (result == CARDANO_SUCCESS)
+        {
           result = cardano_proposal_procedure_new_constitution_action(deposit, account, anchor, fresh, output);
+        }
         cardano_new_constitution_action_unref(&fresh);
         cardano_new_constitution_action_unref(&action);
         break;
@@ -365,9 +407,13 @@ rebuild_proposal_procedure(cardano_proposal_procedure_t* source, cardano_proposa
         cardano_info_action_t* fresh  = NULL;
         result                        = cardano_proposal_procedure_to_info_action(source, &action);
         if (result == CARDANO_SUCCESS)
+        {
           result = rebuild_info_action(action, &fresh);
+        }
         if (result == CARDANO_SUCCESS)
+        {
           result = cardano_proposal_procedure_new_info_action(deposit, account, anchor, fresh, output);
+        }
         cardano_info_action_unref(&fresh);
         cardano_info_action_unref(&action);
         break;
@@ -393,9 +439,13 @@ rebuild_proposal_procedure_set(cardano_proposal_procedure_set_t* source, cardano
     cardano_proposal_procedure_t* fresh = NULL;
     result                              = cardano_proposal_procedure_set_get(source, i, &value);
     if (result == CARDANO_SUCCESS)
+    {
       result = rebuild_proposal_procedure(value, &fresh);
+    }
     if (result == CARDANO_SUCCESS)
+    {
       result = cardano_proposal_procedure_set_add(*output, fresh);
+    }
     cardano_proposal_procedure_unref(&fresh);
     cardano_proposal_procedure_unref(&value);
   }
@@ -420,7 +470,9 @@ cometa_test_proposals_agreement(unsigned int mode, const unsigned char* input, s
   cardano_error_t        result  = CARDANO_ERROR_MEMORY_ALLOCATION_FAILED;
   int                    agrees  = 0;
   if (reader == NULL || writer == NULL)
+  {
     goto cleanup;
+  }
   switch (mode)
   {
     case 0:
@@ -429,9 +481,13 @@ cometa_test_proposals_agreement(unsigned int mode, const unsigned char* input, s
       cardano_parameter_change_action_t* fresh  = NULL;
       result                                    = cardano_parameter_change_action_from_cbor(reader, &source);
       if (result == CARDANO_SUCCESS)
+      {
         result = rebuild_parameter_change_action(source, &fresh);
+      }
       if (result == CARDANO_SUCCESS)
+      {
         result = cardano_parameter_change_action_to_cbor(fresh, writer);
+      }
       cardano_parameter_change_action_unref(&fresh);
       cardano_parameter_change_action_unref(&source);
       break;
@@ -442,9 +498,13 @@ cometa_test_proposals_agreement(unsigned int mode, const unsigned char* input, s
       cardano_hard_fork_initiation_action_t* fresh  = NULL;
       result                                        = cardano_hard_fork_initiation_action_from_cbor(reader, &source);
       if (result == CARDANO_SUCCESS)
+      {
         result = rebuild_hard_fork_initiation_action(source, &fresh);
+      }
       if (result == CARDANO_SUCCESS)
+      {
         result = cardano_hard_fork_initiation_action_to_cbor(fresh, writer);
+      }
       cardano_hard_fork_initiation_action_unref(&fresh);
       cardano_hard_fork_initiation_action_unref(&source);
       break;
@@ -455,9 +515,13 @@ cometa_test_proposals_agreement(unsigned int mode, const unsigned char* input, s
       cardano_treasury_withdrawals_action_t* fresh  = NULL;
       result                                        = cardano_treasury_withdrawals_action_from_cbor(reader, &source);
       if (result == CARDANO_SUCCESS)
+      {
         result = rebuild_treasury_withdrawals_action(source, &fresh);
+      }
       if (result == CARDANO_SUCCESS)
+      {
         result = cardano_treasury_withdrawals_action_to_cbor(fresh, writer);
+      }
       cardano_treasury_withdrawals_action_unref(&fresh);
       cardano_treasury_withdrawals_action_unref(&source);
       break;
@@ -468,9 +532,13 @@ cometa_test_proposals_agreement(unsigned int mode, const unsigned char* input, s
       cardano_no_confidence_action_t* fresh  = NULL;
       result                                 = cardano_no_confidence_action_from_cbor(reader, &source);
       if (result == CARDANO_SUCCESS)
+      {
         result = rebuild_no_confidence_action(source, &fresh);
+      }
       if (result == CARDANO_SUCCESS)
+      {
         result = cardano_no_confidence_action_to_cbor(fresh, writer);
+      }
       cardano_no_confidence_action_unref(&fresh);
       cardano_no_confidence_action_unref(&source);
       break;
@@ -481,9 +549,13 @@ cometa_test_proposals_agreement(unsigned int mode, const unsigned char* input, s
       cardano_update_committee_action_t* fresh  = NULL;
       result                                    = cardano_update_committee_action_from_cbor(reader, &source);
       if (result == CARDANO_SUCCESS)
+      {
         result = rebuild_update_committee_action(source, &fresh);
+      }
       if (result == CARDANO_SUCCESS)
+      {
         result = cardano_update_committee_action_to_cbor(fresh, writer);
+      }
       cardano_update_committee_action_unref(&fresh);
       cardano_update_committee_action_unref(&source);
       break;
@@ -494,9 +566,13 @@ cometa_test_proposals_agreement(unsigned int mode, const unsigned char* input, s
       cardano_new_constitution_action_t* fresh  = NULL;
       result                                    = cardano_new_constitution_action_from_cbor(reader, &source);
       if (result == CARDANO_SUCCESS)
+      {
         result = rebuild_new_constitution_action(source, &fresh);
+      }
       if (result == CARDANO_SUCCESS)
+      {
         result = cardano_new_constitution_action_to_cbor(fresh, writer);
+      }
       cardano_new_constitution_action_unref(&fresh);
       cardano_new_constitution_action_unref(&source);
       break;
@@ -507,9 +583,13 @@ cometa_test_proposals_agreement(unsigned int mode, const unsigned char* input, s
       cardano_info_action_t* fresh  = NULL;
       result                        = cardano_info_action_from_cbor(reader, &source);
       if (result == CARDANO_SUCCESS)
+      {
         result = rebuild_info_action(source, &fresh);
+      }
       if (result == CARDANO_SUCCESS)
+      {
         result = cardano_info_action_to_cbor(fresh, writer);
+      }
       cardano_info_action_unref(&fresh);
       cardano_info_action_unref(&source);
       break;
@@ -520,9 +600,13 @@ cometa_test_proposals_agreement(unsigned int mode, const unsigned char* input, s
       cardano_constitution_t* fresh  = NULL;
       result                         = cardano_constitution_from_cbor(reader, &source);
       if (result == CARDANO_SUCCESS)
+      {
         result = rebuild_constitution(source, &fresh);
+      }
       if (result == CARDANO_SUCCESS)
+      {
         result = cardano_constitution_to_cbor(fresh, writer);
+      }
       cardano_constitution_unref(&fresh);
       cardano_constitution_unref(&source);
       break;
@@ -533,9 +617,13 @@ cometa_test_proposals_agreement(unsigned int mode, const unsigned char* input, s
       cardano_committee_t* fresh  = NULL;
       result                      = cardano_committee_from_cbor(reader, &source);
       if (result == CARDANO_SUCCESS)
+      {
         result = rebuild_committee(source, &fresh);
+      }
       if (result == CARDANO_SUCCESS)
+      {
         result = cardano_committee_to_cbor(fresh, writer);
+      }
       cardano_committee_unref(&fresh);
       cardano_committee_unref(&source);
       break;
@@ -546,9 +634,13 @@ cometa_test_proposals_agreement(unsigned int mode, const unsigned char* input, s
       cardano_committee_members_map_t* fresh  = NULL;
       result                                  = cardano_committee_members_map_from_cbor(reader, &source);
       if (result == CARDANO_SUCCESS)
+      {
         result = rebuild_committee_members_map(source, &fresh);
+      }
       if (result == CARDANO_SUCCESS)
+      {
         result = cardano_committee_members_map_to_cbor(fresh, writer);
+      }
       cardano_committee_members_map_unref(&fresh);
       cardano_committee_members_map_unref(&source);
       break;
@@ -559,9 +651,13 @@ cometa_test_proposals_agreement(unsigned int mode, const unsigned char* input, s
       cardano_proposal_procedure_t* fresh  = NULL;
       result                               = cardano_proposal_procedure_from_cbor(reader, &source);
       if (result == CARDANO_SUCCESS)
+      {
         result = rebuild_proposal_procedure(source, &fresh);
+      }
       if (result == CARDANO_SUCCESS)
+      {
         result = cardano_proposal_procedure_to_cbor(fresh, writer);
+      }
       cardano_proposal_procedure_unref(&fresh);
       cardano_proposal_procedure_unref(&source);
       break;
@@ -572,9 +668,13 @@ cometa_test_proposals_agreement(unsigned int mode, const unsigned char* input, s
       cardano_proposal_procedure_set_t* fresh  = NULL;
       result                                   = cardano_proposal_procedure_set_from_cbor(reader, &source);
       if (result == CARDANO_SUCCESS)
+      {
         result = rebuild_proposal_procedure_set(source, &fresh);
+      }
       if (result == CARDANO_SUCCESS)
+      {
         result = cardano_proposal_procedure_set_to_cbor(fresh, writer);
+      }
       cardano_proposal_procedure_set_unref(&fresh);
       cardano_proposal_procedure_set_unref(&source);
       break;
@@ -585,9 +685,13 @@ cometa_test_proposals_agreement(unsigned int mode, const unsigned char* input, s
       cardano_proposed_param_updates_t* fresh  = NULL;
       result                                   = cardano_proposed_param_updates_from_cbor(reader, &source);
       if (result == CARDANO_SUCCESS)
+      {
         result = rebuild_proposed_param_updates(source, &fresh);
+      }
       if (result == CARDANO_SUCCESS)
+      {
         result = cardano_proposed_param_updates_to_cbor(fresh, writer);
+      }
       cardano_proposed_param_updates_unref(&fresh);
       cardano_proposed_param_updates_unref(&source);
       break;
@@ -598,9 +702,13 @@ cometa_test_proposals_agreement(unsigned int mode, const unsigned char* input, s
       cardano_update_t* fresh  = NULL;
       result                   = cardano_update_from_cbor(reader, &source);
       if (result == CARDANO_SUCCESS)
+      {
         result = rebuild_update(source, &fresh);
+      }
       if (result == CARDANO_SUCCESS)
+      {
         result = cardano_update_to_cbor(fresh, writer);
+      }
       cardano_update_unref(&fresh);
       cardano_update_unref(&source);
       break;
@@ -610,9 +718,13 @@ cometa_test_proposals_agreement(unsigned int mode, const unsigned char* input, s
       break;
   }
   if (result == CARDANO_SUCCESS)
+  {
     result = cardano_cbor_writer_encode_in_buffer(writer, &encoded);
+  }
   if (result == CARDANO_SUCCESS)
+  {
     agrees = cardano_buffer_get_size(encoded) == size && memcmp(cardano_buffer_get_data(encoded), input, size) == 0;
+  }
 cleanup:
   cardano_buffer_unref(&encoded);
   cardano_cbor_writer_unref(&writer);

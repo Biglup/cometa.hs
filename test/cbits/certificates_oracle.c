@@ -228,9 +228,13 @@ rebuild_auth_committee_hot(cardano_auth_committee_hot_cert_t* source, cardano_au
   cardano_credential_t* hot    = NULL;
   cardano_error_t       result = cardano_auth_committee_hot_cert_get_cold_cred(source, &cold);
   if (result == CARDANO_SUCCESS)
+  {
     result = cardano_auth_committee_hot_cert_get_hot_cred(source, &hot);
+  }
   if (result == CARDANO_SUCCESS)
+  {
     result = cardano_auth_committee_hot_cert_new(cold, hot, output);
+  }
   cardano_credential_unref(&hot);
   cardano_credential_unref(&cold);
   return result;
@@ -245,7 +249,9 @@ rebuild_pool_registration(cardano_pool_registration_cert_t* source, cardano_pool
   cardano_pool_params_t* parameters = NULL;
   cardano_error_t        result     = cardano_pool_registration_cert_get_params(source, &parameters);
   if (result == CARDANO_SUCCESS)
+  {
     result = cardano_pool_registration_cert_new(parameters, output);
+  }
   cardano_pool_params_unref(&parameters);
   return result;
 }
@@ -257,14 +263,18 @@ rebuild_rewards(cardano_mir_to_stake_creds_cert_t* source, cardano_mir_to_stake_
   cardano_mir_cert_pot_type_t pot    = CARDANO_MIR_CERT_POT_TYPE_RESERVE;
   cardano_error_t             result = cardano_mir_to_stake_creds_cert_get_pot(source, &pot);
   if (result == CARDANO_SUCCESS)
+  {
     result = cardano_mir_to_stake_creds_cert_new(pot, output);
+  }
   for (size_t index = 0; result == CARDANO_SUCCESS && index < cardano_mir_to_stake_creds_cert_get_size(source); ++index)
   {
     cardano_credential_t* credential = NULL;
     uint64_t              amount     = 0;
     result                           = cardano_mir_to_stake_creds_cert_get_key_value_at(source, index, &credential, &amount);
     if (result == CARDANO_SUCCESS)
+    {
       result = cardano_mir_to_stake_creds_cert_insert(*output, credential, amount);
+    }
     cardano_credential_unref(&credential);
   }
   return result;
@@ -278,9 +288,13 @@ rebuild_pot(cardano_mir_to_pot_cert_t* source, cardano_mir_to_pot_cert_t** outpu
   uint64_t                    amount = 0;
   cardano_error_t             result = cardano_mir_to_pot_cert_get_pot(source, &pot);
   if (result == CARDANO_SUCCESS)
+  {
     result = cardano_mir_to_pot_cert_get_amount(source, &amount);
+  }
   if (result == CARDANO_SUCCESS)
+  {
     result = cardano_mir_to_pot_cert_new(pot, amount, output);
+  }
   return result;
 }
 
@@ -291,16 +305,22 @@ rebuild_mir(cardano_mir_cert_t* source, cardano_mir_cert_t** output)
   cardano_mir_cert_type_t kind   = CARDANO_MIR_CERT_TYPE_TO_POT;
   cardano_error_t         result = cardano_mir_cert_get_type(source, &kind);
   if (result != CARDANO_SUCCESS)
+  {
     return result;
+  }
   if (kind == CARDANO_MIR_CERT_TYPE_TO_POT)
   {
     cardano_mir_to_pot_cert_t* old   = NULL;
     cardano_mir_to_pot_cert_t* fresh = NULL;
     result                           = cardano_mir_cert_as_to_other_pot(source, &old);
     if (result == CARDANO_SUCCESS)
+    {
       result = rebuild_pot(old, &fresh);
+    }
     if (result == CARDANO_SUCCESS)
+    {
       result = cardano_mir_cert_new_to_other_pot(fresh, output);
+    }
     cardano_mir_to_pot_cert_unref(&fresh);
     cardano_mir_to_pot_cert_unref(&old);
   }
@@ -310,9 +330,13 @@ rebuild_mir(cardano_mir_cert_t* source, cardano_mir_cert_t** output)
     cardano_mir_to_stake_creds_cert_t* fresh = NULL;
     result                                   = cardano_mir_cert_as_to_stake_creds(source, &old);
     if (result == CARDANO_SUCCESS)
+    {
       result = rebuild_rewards(old, &fresh);
+    }
     if (result == CARDANO_SUCCESS)
+    {
       result = cardano_mir_cert_new_to_stake_creds(fresh, output);
+    }
     cardano_mir_to_stake_creds_cert_unref(&fresh);
     cardano_mir_to_stake_creds_cert_unref(&old);
   }
@@ -329,7 +353,9 @@ rebuild_certificate(cardano_certificate_t* source, cardano_certificate_t** outpu
   cardano_cert_type_t kind   = CARDANO_CERT_TYPE_STAKE_REGISTRATION;
   cardano_error_t     result = cardano_cert_get_type(source, &kind);
   if (result != CARDANO_SUCCESS)
+  {
     return result;
+  }
   switch (kind)
   {
     case 0:
@@ -338,9 +364,13 @@ rebuild_certificate(cardano_certificate_t* source, cardano_certificate_t** outpu
       cardano_stake_registration_cert_t* fresh = NULL;
       result                                   = cardano_certificate_to_stake_registration(source, &old);
       if (result == CARDANO_SUCCESS)
+      {
         result = rebuild_stake_registration(old, &fresh);
+      }
       if (result == CARDANO_SUCCESS)
+      {
         result = cardano_certificate_new_stake_registration(fresh, output);
+      }
       cardano_stake_registration_cert_unref(&fresh);
       cardano_stake_registration_cert_unref(&old);
       break;
@@ -351,9 +381,13 @@ rebuild_certificate(cardano_certificate_t* source, cardano_certificate_t** outpu
       cardano_stake_deregistration_cert_t* fresh = NULL;
       result                                     = cardano_certificate_to_stake_deregistration(source, &old);
       if (result == CARDANO_SUCCESS)
+      {
         result = rebuild_stake_deregistration(old, &fresh);
+      }
       if (result == CARDANO_SUCCESS)
+      {
         result = cardano_certificate_new_stake_deregistration(fresh, output);
+      }
       cardano_stake_deregistration_cert_unref(&fresh);
       cardano_stake_deregistration_cert_unref(&old);
       break;
@@ -364,9 +398,13 @@ rebuild_certificate(cardano_certificate_t* source, cardano_certificate_t** outpu
       cardano_stake_delegation_cert_t* fresh = NULL;
       result                                 = cardano_certificate_to_stake_delegation(source, &old);
       if (result == CARDANO_SUCCESS)
+      {
         result = rebuild_stake_delegation(old, &fresh);
+      }
       if (result == CARDANO_SUCCESS)
+      {
         result = cardano_certificate_new_stake_delegation(fresh, output);
+      }
       cardano_stake_delegation_cert_unref(&fresh);
       cardano_stake_delegation_cert_unref(&old);
       break;
@@ -377,9 +415,13 @@ rebuild_certificate(cardano_certificate_t* source, cardano_certificate_t** outpu
       cardano_pool_registration_cert_t* fresh = NULL;
       result                                  = cardano_certificate_to_pool_registration(source, &old);
       if (result == CARDANO_SUCCESS)
+      {
         result = rebuild_pool_registration(old, &fresh);
+      }
       if (result == CARDANO_SUCCESS)
+      {
         result = cardano_certificate_new_pool_registration(fresh, output);
+      }
       cardano_pool_registration_cert_unref(&fresh);
       cardano_pool_registration_cert_unref(&old);
       break;
@@ -390,9 +432,13 @@ rebuild_certificate(cardano_certificate_t* source, cardano_certificate_t** outpu
       cardano_pool_retirement_cert_t* fresh = NULL;
       result                                = cardano_certificate_to_pool_retirement(source, &old);
       if (result == CARDANO_SUCCESS)
+      {
         result = rebuild_pool_retirement(old, &fresh);
+      }
       if (result == CARDANO_SUCCESS)
+      {
         result = cardano_certificate_new_pool_retirement(fresh, output);
+      }
       cardano_pool_retirement_cert_unref(&fresh);
       cardano_pool_retirement_cert_unref(&old);
       break;
@@ -403,9 +449,13 @@ rebuild_certificate(cardano_certificate_t* source, cardano_certificate_t** outpu
       cardano_genesis_key_delegation_cert_t* fresh = NULL;
       result                                       = cardano_certificate_to_genesis_key_delegation(source, &old);
       if (result == CARDANO_SUCCESS)
+      {
         result = rebuild_genesis_key_delegation(old, &fresh);
+      }
       if (result == CARDANO_SUCCESS)
+      {
         result = cardano_certificate_new_genesis_key_delegation(fresh, output);
+      }
       cardano_genesis_key_delegation_cert_unref(&fresh);
       cardano_genesis_key_delegation_cert_unref(&old);
       break;
@@ -416,9 +466,13 @@ rebuild_certificate(cardano_certificate_t* source, cardano_certificate_t** outpu
       cardano_mir_cert_t* fresh = NULL;
       result                    = cardano_certificate_to_mir(source, &old);
       if (result == CARDANO_SUCCESS)
+      {
         result = rebuild_mir(old, &fresh);
+      }
       if (result == CARDANO_SUCCESS)
+      {
         result = cardano_certificate_new_mir(fresh, output);
+      }
       cardano_mir_cert_unref(&fresh);
       cardano_mir_cert_unref(&old);
       break;
@@ -429,9 +483,13 @@ rebuild_certificate(cardano_certificate_t* source, cardano_certificate_t** outpu
       cardano_registration_cert_t* fresh = NULL;
       result                             = cardano_certificate_to_registration(source, &old);
       if (result == CARDANO_SUCCESS)
+      {
         result = rebuild_registration(old, &fresh);
+      }
       if (result == CARDANO_SUCCESS)
+      {
         result = cardano_certificate_new_registration(fresh, output);
+      }
       cardano_registration_cert_unref(&fresh);
       cardano_registration_cert_unref(&old);
       break;
@@ -442,9 +500,13 @@ rebuild_certificate(cardano_certificate_t* source, cardano_certificate_t** outpu
       cardano_unregistration_cert_t* fresh = NULL;
       result                               = cardano_certificate_to_unregistration(source, &old);
       if (result == CARDANO_SUCCESS)
+      {
         result = rebuild_unregistration(old, &fresh);
+      }
       if (result == CARDANO_SUCCESS)
+      {
         result = cardano_certificate_new_unregistration(fresh, output);
+      }
       cardano_unregistration_cert_unref(&fresh);
       cardano_unregistration_cert_unref(&old);
       break;
@@ -455,9 +517,13 @@ rebuild_certificate(cardano_certificate_t* source, cardano_certificate_t** outpu
       cardano_vote_delegation_cert_t* fresh = NULL;
       result                                = cardano_certificate_to_vote_delegation(source, &old);
       if (result == CARDANO_SUCCESS)
+      {
         result = rebuild_vote_delegation(old, &fresh);
+      }
       if (result == CARDANO_SUCCESS)
+      {
         result = cardano_certificate_new_vote_delegation(fresh, output);
+      }
       cardano_vote_delegation_cert_unref(&fresh);
       cardano_vote_delegation_cert_unref(&old);
       break;
@@ -468,9 +534,13 @@ rebuild_certificate(cardano_certificate_t* source, cardano_certificate_t** outpu
       cardano_stake_vote_delegation_cert_t* fresh = NULL;
       result                                      = cardano_certificate_to_stake_vote_delegation(source, &old);
       if (result == CARDANO_SUCCESS)
+      {
         result = rebuild_stake_vote_delegation(old, &fresh);
+      }
       if (result == CARDANO_SUCCESS)
+      {
         result = cardano_certificate_new_stake_vote_delegation(fresh, output);
+      }
       cardano_stake_vote_delegation_cert_unref(&fresh);
       cardano_stake_vote_delegation_cert_unref(&old);
       break;
@@ -481,9 +551,13 @@ rebuild_certificate(cardano_certificate_t* source, cardano_certificate_t** outpu
       cardano_stake_registration_delegation_cert_t* fresh = NULL;
       result                                              = cardano_certificate_to_stake_registration_delegation(source, &old);
       if (result == CARDANO_SUCCESS)
+      {
         result = rebuild_stake_registration_delegation(old, &fresh);
+      }
       if (result == CARDANO_SUCCESS)
+      {
         result = cardano_certificate_new_stake_registration_delegation(fresh, output);
+      }
       cardano_stake_registration_delegation_cert_unref(&fresh);
       cardano_stake_registration_delegation_cert_unref(&old);
       break;
@@ -494,9 +568,13 @@ rebuild_certificate(cardano_certificate_t* source, cardano_certificate_t** outpu
       cardano_vote_registration_delegation_cert_t* fresh = NULL;
       result                                             = cardano_certificate_to_vote_registration_delegation(source, &old);
       if (result == CARDANO_SUCCESS)
+      {
         result = rebuild_vote_registration_delegation(old, &fresh);
+      }
       if (result == CARDANO_SUCCESS)
+      {
         result = cardano_certificate_new_vote_registration_delegation(fresh, output);
+      }
       cardano_vote_registration_delegation_cert_unref(&fresh);
       cardano_vote_registration_delegation_cert_unref(&old);
       break;
@@ -507,9 +585,13 @@ rebuild_certificate(cardano_certificate_t* source, cardano_certificate_t** outpu
       cardano_stake_vote_registration_delegation_cert_t* fresh = NULL;
       result                                                   = cardano_certificate_to_stake_vote_registration_delegation(source, &old);
       if (result == CARDANO_SUCCESS)
+      {
         result = rebuild_stake_vote_registration_delegation(old, &fresh);
+      }
       if (result == CARDANO_SUCCESS)
+      {
         result = cardano_certificate_new_stake_vote_registration_delegation(fresh, output);
+      }
       cardano_stake_vote_registration_delegation_cert_unref(&fresh);
       cardano_stake_vote_registration_delegation_cert_unref(&old);
       break;
@@ -520,9 +602,13 @@ rebuild_certificate(cardano_certificate_t* source, cardano_certificate_t** outpu
       cardano_auth_committee_hot_cert_t* fresh = NULL;
       result                                   = cardano_certificate_to_auth_committee_hot(source, &old);
       if (result == CARDANO_SUCCESS)
+      {
         result = rebuild_auth_committee_hot(old, &fresh);
+      }
       if (result == CARDANO_SUCCESS)
+      {
         result = cardano_certificate_new_auth_committee_hot(fresh, output);
+      }
       cardano_auth_committee_hot_cert_unref(&fresh);
       cardano_auth_committee_hot_cert_unref(&old);
       break;
@@ -533,9 +619,13 @@ rebuild_certificate(cardano_certificate_t* source, cardano_certificate_t** outpu
       cardano_resign_committee_cold_cert_t* fresh = NULL;
       result                                      = cardano_certificate_to_resign_committee_cold(source, &old);
       if (result == CARDANO_SUCCESS)
+      {
         result = rebuild_resign_committee_cold(old, &fresh);
+      }
       if (result == CARDANO_SUCCESS)
+      {
         result = cardano_certificate_new_resign_committee_cold(fresh, output);
+      }
       cardano_resign_committee_cold_cert_unref(&fresh);
       cardano_resign_committee_cold_cert_unref(&old);
       break;
@@ -546,9 +636,13 @@ rebuild_certificate(cardano_certificate_t* source, cardano_certificate_t** outpu
       cardano_register_drep_cert_t* fresh = NULL;
       result                              = cardano_certificate_to_register_drep(source, &old);
       if (result == CARDANO_SUCCESS)
+      {
         result = rebuild_register_drep(old, &fresh);
+      }
       if (result == CARDANO_SUCCESS)
+      {
         result = cardano_certificate_new_register_drep(fresh, output);
+      }
       cardano_register_drep_cert_unref(&fresh);
       cardano_register_drep_cert_unref(&old);
       break;
@@ -559,9 +653,13 @@ rebuild_certificate(cardano_certificate_t* source, cardano_certificate_t** outpu
       cardano_unregister_drep_cert_t* fresh = NULL;
       result                                = cardano_certificate_to_unregister_drep(source, &old);
       if (result == CARDANO_SUCCESS)
+      {
         result = rebuild_unregister_drep(old, &fresh);
+      }
       if (result == CARDANO_SUCCESS)
+      {
         result = cardano_certificate_new_unregister_drep(fresh, output);
+      }
       cardano_unregister_drep_cert_unref(&fresh);
       cardano_unregister_drep_cert_unref(&old);
       break;
@@ -572,9 +670,13 @@ rebuild_certificate(cardano_certificate_t* source, cardano_certificate_t** outpu
       cardano_update_drep_cert_t* fresh = NULL;
       result                            = cardano_certificate_to_update_drep(source, &old);
       if (result == CARDANO_SUCCESS)
+      {
         result = rebuild_update_drep(old, &fresh);
+      }
       if (result == CARDANO_SUCCESS)
+      {
         result = cardano_certificate_new_update_drep(fresh, output);
+      }
       cardano_update_drep_cert_unref(&fresh);
       cardano_update_drep_cert_unref(&old);
       break;
@@ -597,9 +699,13 @@ rebuild_collection(cardano_certificate_set_t* source, cardano_certificate_set_t*
     cardano_certificate_t* fresh = NULL;
     result                       = cardano_certificate_set_get(source, index, &old);
     if (result == CARDANO_SUCCESS)
+    {
       result = rebuild_certificate(old, &fresh);
+    }
     if (result == CARDANO_SUCCESS)
+    {
       result = cardano_certificate_set_add(*output, fresh);
+    }
     cardano_certificate_unref(&fresh);
     cardano_certificate_unref(&old);
   }
@@ -622,16 +728,22 @@ cometa_test_certificates_agree(unsigned int kind, const unsigned char* input, si
   cardano_error_t        result = CARDANO_SUCCESS;
   int                    agrees = 0;
   if (reader == NULL || writer == NULL)
+  {
     goto cleanup;
+  }
   if (kind == 0)
   {
     cardano_certificate_t* old   = NULL;
     cardano_certificate_t* fresh = NULL;
     result                       = cardano_certificate_from_cbor(reader, &old);
     if (result == CARDANO_SUCCESS)
+    {
       result = rebuild_certificate(old, &fresh);
+    }
     if (result == CARDANO_SUCCESS)
+    {
       result = cardano_certificate_to_cbor(fresh, writer);
+    }
     cardano_certificate_unref(&fresh);
     cardano_certificate_unref(&old);
   }
@@ -641,16 +753,24 @@ cometa_test_certificates_agree(unsigned int kind, const unsigned char* input, si
     cardano_certificate_set_t* fresh = NULL;
     result                           = cardano_certificate_set_from_cbor(reader, &old);
     if (result == CARDANO_SUCCESS)
+    {
       result = rebuild_collection(old, &fresh);
+    }
     if (result == CARDANO_SUCCESS)
+    {
       result = cardano_certificate_set_to_cbor(fresh, writer);
+    }
     cardano_certificate_set_unref(&fresh);
     cardano_certificate_set_unref(&old);
   }
   if (result == CARDANO_SUCCESS)
+  {
     result = cardano_cbor_writer_encode_in_buffer(writer, &buffer);
+  }
   if (result == CARDANO_SUCCESS)
+  {
     agrees = cardano_buffer_get_size(buffer) == size && memcmp(cardano_buffer_get_data(buffer), input, size) == 0;
+  }
 cleanup:
   cardano_buffer_unref(&buffer);
   cardano_cbor_writer_unref(&writer);

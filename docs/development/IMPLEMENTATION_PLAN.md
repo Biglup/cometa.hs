@@ -2146,3 +2146,10 @@ JSON/text conversions and internal lifecycle entries remain tracked rather than
 being counted as complete. The next substantive phase is transaction bodies,
 witnesses, auxiliary data and signing integration (P08). Hosted matrix results
 are verified on the pull request separately from local results.
+
+Final C-helper formatting uses explicit braces, matching cardano-c. After that
+format-only change, all 264 ordinary tests and a focused Valgrind run covering
+all 25 new domain tests pass with zero errors or lost bytes. A throwaway negative
+control intentionally omitted a cardano-c buffer release; Valgrind still failed
+with both direct and indirect losses and no suppressions, confirming that the
+RTS exception does not match that native allocation stack.
