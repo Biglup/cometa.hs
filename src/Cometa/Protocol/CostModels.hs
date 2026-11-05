@@ -43,7 +43,7 @@ import Cometa.Internal.CostModels (CostModel, CostModels, costs, languageId, mkC
 import qualified Cometa.Internal.CostModels as Model
 import qualified Cometa.Internal.ProtocolValues as Internal
 import Data.ByteString (ByteString)
-import Data.List (foldl')
+import qualified Data.List as List
 import qualified Data.Map.Strict as Map
 import Data.Word (Word8)
 import Prelude hiding (lookup)
@@ -56,7 +56,7 @@ empty = Model.CostModels Map.empty
 
 -- | Assemble models. Later models replace earlier models with the same language.
 fromList :: [CostModel] -> CostModels
-fromList = foldl' (flip insert) empty
+fromList = List.foldl' (flip insert) empty
 
 -- | Replace the model for this language, preserving every other model.
 insert :: CostModel -> CostModels -> CostModels

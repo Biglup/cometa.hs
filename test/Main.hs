@@ -23,6 +23,7 @@ import qualified Bip32
 import qualified Bip39
 import qualified Callback
 import qualified Cbor
+import qualified Certificates
 import qualified Cometa
 import qualified Cometa.Crypto.Blake2b as Blake2b
 import Cometa.Error (Error (..))
@@ -44,6 +45,8 @@ import qualified Ownership
 import qualified Parameters
 import qualified PasswordCrypto
 import qualified PlutusData
+import qualified Pool
+import qualified Proposals
 import qualified ProtocolValues
 import qualified Scripts
 import qualified SoftwareKeyHandler
@@ -61,7 +64,7 @@ main :: IO ()
 main =
   defaultMain $
     testGroup "Cometa foundation" $
-      [Governance.tests, ProtocolValues.tests, Parameters.tests, Scripts.tests, Metadata.tests, PlutusData.tests, Value.tests, Address.tests, ErrorCode.tests, Callback.tests, Ownership.tests, Cbor.tests, Transaction.tests, Ed25519.tests, Bip32.tests, Bip39.tests, PasswordCrypto.tests, DerivationPath.tests, SoftwareKeyHandler.tests] ++ foundationTests
+      [Proposals.tests, Certificates.tests, Pool.tests, Governance.tests, ProtocolValues.tests, Parameters.tests, Scripts.tests, Metadata.tests, PlutusData.tests, Value.tests, Address.tests, ErrorCode.tests, Callback.tests, Ownership.tests, Cbor.tests, Transaction.tests, Ed25519.tests, Bip32.tests, Bip39.tests, PasswordCrypto.tests, DerivationPath.tests, SoftwareKeyHandler.tests] ++ foundationTests
 
 foundationTests :: [TestTree]
 foundationTests =

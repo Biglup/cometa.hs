@@ -1,10 +1,8 @@
 # Cometa.hs
 
-Cometa.hs provides protocol parameters and governance votes, Plutus data, metadata
-and scripts, asset values, Shelley addresses
-and credentials, Ed25519 signing,
-BIP39 recovery, BIP32 derivation, CBOR
-encoding, and immutable Blake2b hashes,
+Cometa.hs provides Cardano protocol values, staking certificates, pool registrations,
+governance proposals and votes, scripts and metadata, addresses and assets,
+and key management and cryptography,
 backed by [cardano-c](https://github.com/Biglup/cardano-c). Operations report
 structured errors.
 The library is unpublished; build it from a checked-out source revision.
@@ -17,7 +15,9 @@ Start with [installation](installation.md), then read the
 [address guide](addresses.md), [assets and values guide](assets-values.md),
 [Plutus data guide](plutus-data.md), [metadata guide](metadata.md), and
 [script guide](scripts.md), [protocol values](protocol-values.md),
-[protocol parameters](protocol-parameters.md), and [governance votes](governance.md).
+[protocol parameters](protocol-parameters.md), [governance votes](governance.md),
+[stake pools](stake-pools.md), [certificates](certificates.md), and
+[governance proposals](governance-proposals.md).
 The [API reference](api-reference.md) explains how to browse the declarations for the revision you build.
 
 ```{toctree}
@@ -40,6 +40,9 @@ scripts
 protocol-values
 protocol-parameters
 governance
+stake-pools
+certificates
+governance-proposals
 api-reference
 ```
 

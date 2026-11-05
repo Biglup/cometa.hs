@@ -30,6 +30,7 @@ extra-source-files:
   docs/development/*.json
   docs/development/*.csv
   test/Fixtures/*.md
+  test/valgrind/*.supp
 
 source-repository head
   type: git
@@ -114,7 +115,18 @@ library
     Cometa.Protocol.DRepVotingThresholds
     Cometa.Protocol.Parameters
     Cometa.Protocol.Parameters.Update
+    Cometa.Certificate
+    Cometa.Certificate.Collection
+    Cometa.Pool.Parameters
+    Cometa.Pool.Relay
+    Cometa.Pool.Metadata
+    Cometa.Pool.BlsKey
     Cometa.TransactionId
+    Cometa.Governance.Action
+    Cometa.Governance.Constitution
+    Cometa.Governance.Committee
+    Cometa.Governance.Proposal
+    Cometa.Protocol.ProposedUpdates
     Cometa.Governance.Anchor
     Cometa.Governance.ActionId
     Cometa.Governance.DRep
@@ -142,6 +154,9 @@ library
     Cometa.Internal.Error
     Cometa.Internal.ProtocolValues
     Cometa.Internal.CostModels
+    Cometa.Internal.Certificate
+    Cometa.Internal.Pool
+    Cometa.Internal.ProposalCbor
     Cometa.Internal.Governance
     Cometa.Internal.AddressText
     Cometa.Internal.Bip39Pure
@@ -263,6 +278,9 @@ test-suite cometa-test
     test/cbits/script_oracle.c
     test/cbits/parameters_oracle.c
     test/cbits/protocol_values_oracle.c
+    test/cbits/proposals_oracle.c
+    test/cbits/pool_oracle.c
+    test/cbits/certificates_oracle.c
     test/cbits/governance_oracle.c
   cc-options: -std=c11 -Wall -Wextra
   other-modules:
@@ -272,6 +290,9 @@ test-suite cometa-test
     Parameters
     ProtocolValues
     Governance
+    Proposals
+    Pool
+    Certificates
     Fixtures.Governance
     Scripts
     Fixtures.Scripts
@@ -296,6 +317,7 @@ test-suite cometa-test
   ghc-options: -threaded -rtsopts
   build-depends:
     base >=4.18 && <4.22,
+    containers >=0.6.7 && <0.8,
     aeson >=2.2 && <2.3,
     cborg >=0.2.10 && <0.3,
     scientific >=0.3.7 && <0.4,
@@ -373,4 +395,32 @@ executable cometa-governance
     base >=4.18 && <4.22,
     bytestring >=0.11 && <0.13,
     transformers >=0.6 && <0.7,
+    cometa
+
+executable cometa-certificates
+  import: language
+  hs-source-dirs: examples
+  main-is: Certificates.hs
+  build-depends:
+    base >=4.18 && <4.22,
+    bytestring >=0.11 && <0.13,
+    cometa
+
+executable cometa-stake-pools
+  import: language
+  hs-source-dirs: examples
+  main-is: StakePools.hs
+  build-depends:
+    base >=4.18 && <4.22,
+    bytestring >=0.11 && <0.13,
+    containers >=0.6.7 && <0.8,
+    cometa
+
+executable cometa-governance-proposals
+  import: language
+  hs-source-dirs: examples
+  main-is: GovernanceProposals.hs
+  build-depends:
+    base >=4.18 && <4.22,
+    bytestring >=0.11 && <0.13,
     cometa

@@ -186,6 +186,32 @@ data Error
     InvalidProtocolVersion !Integer !Integer
   | -- | A protocol value has malformed CBOR or violates its field constraints.
     InvalidProtocolCbor !Text
+  | -- | Pool CBOR is malformed or violates a field constraint.
+    InvalidPoolCbor !Text
+  | -- | A pool VRF key hash does not contain 32 bytes.
+    InvalidPoolHashLength !Int
+  | -- | A pool metadata URL violates its byte-length or NUL constraint.
+    InvalidPoolMetadataUrl !Text
+  | -- | A pool metadata hash does not contain 32 bytes.
+    InvalidPoolMetadataHashLength !Int
+  | -- | A relay DNS name violates its byte-length or NUL constraint.
+    InvalidPoolDnsName !Text
+  | -- | An IP address has an incorrect byte count: expected, then actual.
+    InvalidPoolIpLength !Int !Int
+  | -- | An IP address text representation is malformed.
+    InvalidPoolIpText !Text
+  | -- | A BLS key or proof has an incorrect byte count: expected, then actual.
+    InvalidPoolBlsKeyLength !Int !Int
+  | -- | A certificate has malformed CBOR or invalid fields.
+    InvalidCertificateCbor !Text
+  | -- | A governance proposal has malformed CBOR or invalid fields.
+    InvalidProposalCbor !Text
+  | -- | A reward account occurs more than once in treasury withdrawals.
+    DuplicateTreasuryWithdrawal
+  | -- | A committee credential occurs more than once.
+    DuplicateCommitteeMember
+  | -- | A genesis key occurs more than once in a proposed update map.
+    DuplicateProtocolUpdate
   | -- | A cost model contains an unsupported number of coefficients.
     InvalidCostModelLength !Int
   | -- | A parameter update has malformed CBOR or invalid fields.

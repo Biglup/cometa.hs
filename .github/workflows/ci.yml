@@ -82,6 +82,9 @@ jobs:
           cabal run cometa-protocol-values
           cabal run cometa-protocol-parameters
           cabal run cometa-governance
+          cabal run cometa-certificates
+          cabal run cometa-stake-pools
+          cabal run cometa-governance-proposals
           python tools/check-key-handler-roles.py
           python tools/check-credential-roles.py
       - name: Exercise optimized pure crypto evaluation and concurrency
@@ -116,8 +119,8 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y valgrind
-          # Disable idle GC only here for the GHC 9.6.7 shutdown race documented in the plan.
-          timeout 600s valgrind --fair-sched=yes --leak-check=full --show-leak-kinds=definite,indirect --errors-for-leak-kinds=definite,indirect --error-exitcode=1 "$(cabal list-bin cometa-test)" --num-threads=1 +RTS -N2 -I0 -RTS
+          # Suppress only the documented GHC 9.6.7 scheduler shutdown allocation.
+          timeout 600s valgrind --suppressions=test/valgrind/ghc-9.6.7.supp --fair-sched=yes --leak-check=full --show-leak-kinds=definite,indirect --errors-for-leak-kinds=definite,indirect --error-exitcode=1 "$(cabal list-bin cometa-test)" --num-threads=1 +RTS -N2 -RTS
 
   quality:
     runs-on: ubuntu-24.04

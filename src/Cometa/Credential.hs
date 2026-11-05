@@ -32,6 +32,9 @@ module Cometa.Credential
     Guard,
     DRep,
     CommitteeHot,
+    CommitteeCold,
+    Genesis,
+    GenesisDelegate,
     StakePool,
     KeyHash,
     keyHashFromBytes,
@@ -68,6 +71,15 @@ data DRep
 
 -- | Role of a constitutional committee member's voting credential.
 data CommitteeHot
+
+-- | Role of a constitutional committee member's authorization credential.
+data CommitteeCold
+
+-- | Role of a genesis key authorizing delegation or a legacy protocol update.
+data Genesis
+
+-- | Role of a delegate authorized by a genesis key.
+data GenesisDelegate
 
 -- | Role of a stake pool operator's key hash.
 data StakePool
