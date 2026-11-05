@@ -42,7 +42,7 @@ typedef struct uint_field_t
 typedef struct buffer_field_t
 {
     cardano_error_t (*read_update)(cardano_protocol_param_update_t*, cardano_buffer_t**);
-    cardano_error_t   (*write_full)(cardano_protocol_parameters_t*, cardano_buffer_t*);
+    cardano_error_t (*write_full)(cardano_protocol_parameters_t*, cardano_buffer_t*);
     cardano_buffer_t* (*read_full)(cardano_protocol_parameters_t*);
     cardano_error_t (*write_update)(cardano_protocol_param_update_t*, cardano_buffer_t*);
 } buffer_field_t;
@@ -51,7 +51,7 @@ typedef struct buffer_field_t
 typedef struct costmdls_field_t
 {
     cardano_error_t (*read_update)(cardano_protocol_param_update_t*, cardano_costmdls_t**);
-    cardano_error_t     (*write_full)(cardano_protocol_parameters_t*, cardano_costmdls_t*);
+    cardano_error_t (*write_full)(cardano_protocol_parameters_t*, cardano_costmdls_t*);
     cardano_costmdls_t* (*read_full)(cardano_protocol_parameters_t*);
     cardano_error_t (*write_update)(cardano_protocol_param_update_t*, cardano_costmdls_t*);
 } costmdls_field_t;
@@ -60,7 +60,7 @@ typedef struct costmdls_field_t
 typedef struct drep_voting_thresholds_field_t
 {
     cardano_error_t (*read_update)(cardano_protocol_param_update_t*, cardano_drep_voting_thresholds_t**);
-    cardano_error_t                   (*write_full)(cardano_protocol_parameters_t*, cardano_drep_voting_thresholds_t*);
+    cardano_error_t (*write_full)(cardano_protocol_parameters_t*, cardano_drep_voting_thresholds_t*);
     cardano_drep_voting_thresholds_t* (*read_full)(cardano_protocol_parameters_t*);
     cardano_error_t (*write_update)(cardano_protocol_param_update_t*, cardano_drep_voting_thresholds_t*);
 } drep_voting_thresholds_field_t;
@@ -69,7 +69,7 @@ typedef struct drep_voting_thresholds_field_t
 typedef struct ex_unit_prices_field_t
 {
     cardano_error_t (*read_update)(cardano_protocol_param_update_t*, cardano_ex_unit_prices_t**);
-    cardano_error_t           (*write_full)(cardano_protocol_parameters_t*, cardano_ex_unit_prices_t*);
+    cardano_error_t (*write_full)(cardano_protocol_parameters_t*, cardano_ex_unit_prices_t*);
     cardano_ex_unit_prices_t* (*read_full)(cardano_protocol_parameters_t*);
     cardano_error_t (*write_update)(cardano_protocol_param_update_t*, cardano_ex_unit_prices_t*);
 } ex_unit_prices_field_t;
@@ -78,7 +78,7 @@ typedef struct ex_unit_prices_field_t
 typedef struct ex_units_field_t
 {
     cardano_error_t (*read_update)(cardano_protocol_param_update_t*, cardano_ex_units_t**);
-    cardano_error_t     (*write_full)(cardano_protocol_parameters_t*, cardano_ex_units_t*);
+    cardano_error_t (*write_full)(cardano_protocol_parameters_t*, cardano_ex_units_t*);
     cardano_ex_units_t* (*read_full)(cardano_protocol_parameters_t*);
     cardano_error_t (*write_update)(cardano_protocol_param_update_t*, cardano_ex_units_t*);
 } ex_units_field_t;
@@ -87,7 +87,7 @@ typedef struct ex_units_field_t
 typedef struct pool_voting_thresholds_field_t
 {
     cardano_error_t (*read_update)(cardano_protocol_param_update_t*, cardano_pool_voting_thresholds_t**);
-    cardano_error_t                   (*write_full)(cardano_protocol_parameters_t*, cardano_pool_voting_thresholds_t*);
+    cardano_error_t (*write_full)(cardano_protocol_parameters_t*, cardano_pool_voting_thresholds_t*);
     cardano_pool_voting_thresholds_t* (*read_full)(cardano_protocol_parameters_t*);
     cardano_error_t (*write_update)(cardano_protocol_param_update_t*, cardano_pool_voting_thresholds_t*);
 } pool_voting_thresholds_field_t;
@@ -96,7 +96,7 @@ typedef struct pool_voting_thresholds_field_t
 typedef struct protocol_version_field_t
 {
     cardano_error_t (*read_update)(cardano_protocol_param_update_t*, cardano_protocol_version_t**);
-    cardano_error_t             (*write_full)(cardano_protocol_parameters_t*, cardano_protocol_version_t*);
+    cardano_error_t (*write_full)(cardano_protocol_parameters_t*, cardano_protocol_version_t*);
     cardano_protocol_version_t* (*read_full)(cardano_protocol_parameters_t*);
     cardano_error_t (*write_update)(cardano_protocol_param_update_t*, cardano_protocol_version_t*);
 } protocol_version_field_t;
@@ -105,7 +105,7 @@ typedef struct protocol_version_field_t
 typedef struct unit_interval_field_t
 {
     cardano_error_t (*read_update)(cardano_protocol_param_update_t*, cardano_unit_interval_t**);
-    cardano_error_t          (*write_full)(cardano_protocol_parameters_t*, cardano_unit_interval_t*);
+    cardano_error_t (*write_full)(cardano_protocol_parameters_t*, cardano_unit_interval_t*);
     cardano_unit_interval_t* (*read_full)(cardano_protocol_parameters_t*);
     cardano_error_t (*write_update)(cardano_protocol_param_update_t*, cardano_unit_interval_t*);
 } unit_interval_field_t;
