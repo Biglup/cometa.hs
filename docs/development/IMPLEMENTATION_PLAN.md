@@ -2050,3 +2050,106 @@ symbol count, not a completion percentage: lifecycle plumbing and deferred domai
 operations remain explicitly tracked. Certificates, stake-pool registration,
 governance proposal actions, and proposed-update envelopes remain for subsequent
 work. Hosted matrix validation is checked on the pull request.
+
+### P07 continuation: certificates, pools and proposals
+
+Merged PR #13's run `41978295643` passed Windows, both macOS runners, Linux
+ARM, quality and documentation. Two failures require corrections in this batch.
+GHC 9.10 exports `foldl'` from Prelude, making the explicit unqualified
+`Data.List` import redundant under `-Werror`; the cost-model fold now uses a
+qualified import on both supported compilers.
+
+All 239 hosted Valgrind tests passed, but process shutdown leaked two bytes from
+`malloc -> stgMallocBytes -> scheduleDoGC -> schedule -> scheduleWorker ->
+workerStart`. The [pinned GHC scheduler](https://github.com/ghc/ghc/blob/ghc-9.6.7-release/rts/Schedule.c#L1689-L1742)
+allocates one boolean per capability before `requestSync`; a subsequent shutdown
+return can bypass its release. The earlier idle-GC workaround reduced occurrence
+but does not prevent this allocation-triggered shutdown race.
+
+The GHC 9.6.7 Valgrind job now uses `test/valgrind/ghc-9.6.7.supp`, matching only
+definite leaks with that complete scheduler worker allocation stack, including
+the pthread entry frames. Native Cometa/cardano-c allocation frames do not match.
+Invalid accesses and other leak stacks remain errors. Default idle GC is restored
+for this invocation; no library runtime options change. Reports must distinguish
+any suppressed runtime allocation from actual zero-leak observations. Revisit the
+suppression when changing the job's compiler; GHC 9.10.3 still contains the same
+early-return path, so moving the check to it would not address the cause.
+
+
+#### Pool API evidence and design review (2026-11-05)
+
+Reviewed exact sources before choosing API:
+- cardano-api 5e63165a4bb7481a03d2e50464dc9c4f106c9fa5, https://github.com/IntersectMBO/cardano-api/blob/5e63165a4bb7481a03d2e50464dc9c4f106c9fa5/cardano-api/src/Cardano/Api/Certificate/Internal.hs. StakePoolParameters includes typed operator/VRF, Lovelace pledge/cost, Rational margin, StakeAddress, owner list, relay list, metadata. toShelleyPoolParams converts margin with boundRational and errors if invalid; owner conversion uses Set; relays convert optional IP/port, DNS via ledger validation. Metadata URL uses text bounds and hash bytes. makeStakePoolRegistrationCertificate consumes fully assembled record.
+- Atlas c3adfb416242ea25a244bfaa1614213eecdc55d9 https://github.com/geniusyield/atlas/blob/c3adfb416242ea25a244bfaa1614213eecdc55d9/src/GeniusYield/Types/Pool.hs. GYPoolParams uses role-indexed pool/stake key hashes, VRF hash, Natural pledge/cost, UnitInterval margin, Set owners, ordered relays, optional GYAnchor. GYSingleHostAddr carries optional port/IPv4/IPv6. Ledger conversion is total for valid values; metadata from-ledger conversion contains error if hash invalid.
+- Actual complete caller: https://github.com/geniusyield/atlas/blob/c3adfb416242ea25a244bfaa1614213eecdc55d9/tests-privnet/GeniusYield/Test/Privnet/StakePool.hs generates pool and owner keys, converts public hashes, imports VRF hash, gets protocol minimum cost, validates margin, assembles reward account, owner Set, relays and metadata, builds registration certificate, signs with pool/owner/payment keys and submits. Later record update replaces metadata then registration updates; retirement uses pool hash and epoch. Ordinary Cometa examples cover offline input→assembly→persist/reload→record update→certificate, not network/build/signing work from later milestones.
+
+Contracts adopted: role-specific operator/owner hashes, exact UnitInterval (reused existing module), Set owners/list relays, three relay sum alternatives, Maybe optional metadata/port/IP. Differences justified: Word64 money follows actual native uint64 bounds and existing protocol convention, avoiding unchecked Natural→native truncation; upfront validation avoids upstream partial error branches. Separate pool URL permits native empty and <=128 UTF8 bytes while governance anchor URL requires nonempty. Separate metadata digest and VRF hash prohibit accidental interchange; BLS extension represents native optional 96+48-byte field although pinned reviewed Haskell APIs do not expose it. No claims of cryptographic BLS verification or ledger-era acceptance. Public CBOR parameters is one array; native flat group remains private for certificates and differential oracle. This follows caller values, not native embedding details.
+
+Native audit: eadb95cd3ca7f711c203d7f2f4ee21c150d4d7f1, lib/src/pool_params/*.c and corresponding include/test trees. pool params serializes nine flat fields, or ten with BLS after the VRF hash; decoder accepts an explicit null BLS field, encoder omits it. Margin is tag 30 followed by `[uint64, uint64]`, existing safe UnitInterval validates denominator/nonunit cases. Owners sorted hash bytes with tag 258; native add does not deduplicate and decode permits duplicates, so pure decoder rejects duplicate owners. Native getters return retained refs except byte/text/port snapshots; oracle releases every getter owner. Name get_dns_size includes terminator (subtract1), metadata URLsize excludes terminator. IPv4/6 require exactly 4 or 16 bytes; native IPv6 textual parser only expanded notation; public pure text parser deliberately improves caller workflow with standard short groups, single :: compression and final dotted IPv4 suffix. Invalid repeated compression and over/underfull groups are tested. DNS names of 1–64 UTF-8 bytes and metadata URLs of 0–128 UTF-8 bytes reject embedded NUL upfront rather than native truncation. No unsafePerformIO or arbitrary native boundary used; pure codecs cborg.
+
+Tests: public-field reconstruction of exact pinned pool_params.cpp CBOR/nullmetadata/BLS/nullBLS, pool_metadata.cpp and bls_key.cpp goldens, relay.cpp three alternatives. Fixtures retain native revision/path Apache-2.0 provenance in test/Pool.hs. Generated typed pools compare exact public encoding with native fresh getter/new/add reconstruction, after explicit array framing transformation; all port/IP alternatives, maximum uint64 fields, empty owners, relay duplicates, optional metadata/BLS, invalid hashes/IP text/UTF8/NUL/arity/duplicate owners/trailing/truncation. IP textual roundtrip property. 100 repeated native reconstruction scopes. C oracle built against configured stock headers, formatted stock ClangFormat18. Haskell Ormolu0.8.0.2, HLint3.8 pass; integrated verification is recorded below. Corrected native oracle definite-array framing to omit write_end_array (native function emits indefinite break). Standalone linked C oracle checks confirm all three full golden parameter variants agree after correction.
+
+#### Certificate API review and evidence
+
+Reviewed before implementation:
+
+* cardano-api `5e63165a4bb7481a03d2e50464dc9c4f106c9fa5`, https://github.com/IntersectMBO/cardano-api/blob/5e63165a4bb7481a03d2e50464dc9c4f106c9fa5/cardano-api/src/Cardano/Api/Experimental/Tx/Internal/Certificate/Type.hs and https://github.com/IntersectMBO/cardano-api/blob/5e63165a4bb7481a03d2e50464dc9c4f106c9fa5/cardano-api/src/Cardano/Api/Compatible/Certificate.hs; pool integration https://github.com/IntersectMBO/cardano-api/blob/5e63165a4bb7481a03d2e50464dc9c4f106c9fa5/cardano-api/src/Cardano/Api/Certificate/Internal.hs. Actual ADT wraps era-indexed ledger certificate; stake registration/delegation and DRep operations use requirements carrying explicit era/deposit information. CBOR serialization delegates to ledger; pool records separate operator/VRF/BLS and metadata/relay forms.
+* Atlas `c3adfb416242ea25a244bfaa1614213eecdc55d9`, https://github.com/geniusyield/atlas/blob/c3adfb416242ea25a244bfaa1614213eecdc55d9/src/GeniusYield/Types/Certificate.hs. `GYCertificatePreBuild` receives caller credentials and delegation targets; `finaliseCert` fills stake/DRep deposits from queried protocol parameters. `certificateToApi` translates each ADT constructor to cardano-api requirements. Cold/hot/DRep/pool roles are distinct. Separate optional anchor is shared across DRep registration/update and committee resignation.
+
+Complete Cometa workflow: validate runtime hashes and metadata once; assemble explicit deposit-bearing certificates and delegation target using total constructors; collect in transaction order; encode for storage; reload through one Either Error boundary; inspect semantic data or return exact original CBOR. examples/Certificates.hs compiles this deterministic register-DRep+delegate workflow. Differences: Cometa currently exposes standalone data, not an era-indexed transaction builder, so does not infer deposits or imply ledger-state/era validation. Native numeric schema is uint64, represented by Word64 with documented lovelace units, never floating point. Legacy certs and MIR remain available for decoding historical data; unsupported signed MIR adjustments are explicitly rejected.
+
+Native audit: `eadb95cd3ca7f711c203d7f2f4ee21c150d4d7f1`, lib/include/cardano/certs/*.h and lib/src/certs/*.c. All cert tags 0–18 and both MIR alternatives audited. Fresh certificate encoding is definite, minimal integers; PoolRegistration flattens nine/ten field groups and validates reported arity, including null-BLS omission alias. Native genesis constructor does not enforce protocol hash sizes, so Cometa uses stricter validated 28/28/32-byte role hashes. Native MIR quantities unsigned uint64 (negative ledger deltas omitted). MIR rewards native insert sorts by credential but permits duplicates; native first-match retrieval can conflate duplicate amounts. Cometa uses unique Map and rejects imported duplicates to avoid semantic loss; sorted output agrees with native comparison.
+
+Native certificate_set_add merely pushes an element; no uniqueness or sorting. Public Certificate.Collection preserves order and duplicates, fresh tag 258; decode optionally tagged/indefinite arrays and exact original envelope. EncodedCertificate/EncodedCertificates equality includes exact bytes; semantic ADT equality is constructor/field comparison. Fresh encoding deliberately does not retain signed transaction identity; exact containing transaction must be preserved when required.
+
+Ownership: public data/codecs are pure and Haskell-owned; no unsafePerformIO/no persistent native resources. Test oracle parses public fresh encodings, obtains retained subtype getters, snapshots scalar fields and passes children into new constructors, then reconstructs fresh generic wrapper and serializes. All returned subtype/child references unref independently from parent obligations (even if parent retains pointer); no conditional ownership inferred from pointer nullness. MIR as/get_key_value_at and certificate_set_get retained outputs balanced. Pool envelope oracle reuses retained pool params whose individual fields are independently reconstructed by Pool oracle. No ABI inference outside C adapter. Native JSON, diagnostic and refcount/lifecycle APIs remain explicitly pending; immutable field replacement adapts domain setters rather than exposing mutable handles.
+
+Tests: test/Certificates.hs plus test/cbits/certificates_oracle.c. Public typed construction covers all19 tags/both MIR forms, special and credential DRep targets, key/script roles, optional anchors, uint64 CBOR width boundaries0,23,24,255,256,65535,65536,2^32-1,2^32,max. Hedgehog generates all alternatives from varied hashes/full-range Word64 and compares fresh native reconstruction. Imported corpus is Apache-2.0.0 native lib/tests/certs/*cert.cpp at pinned revision; inline fixtures retain filename/constant name. Exact nonminimal/indefinite, trailing bytes, invalid codes/hash lengths/arity, duplicate MIR rewards, signed adjustments and >uint64 quantities, ordered duplicate collection, optional tag, repeated native reconstruction covered. Lifecycle failure/cancellation coverage is not claimed for pure codecs; C oracle deterministic cleanup exercised repeatedly and by aggregate Valgrind as root verifies.
+
+#### Governance proposals and legacy update API review
+
+Reviewed before implementation:
+* cardano-api `5e63165a4bb7481a03d2e50464dc9c4f106c9fa5`, [ProposalProcedure](https://github.com/IntersectMBO/cardano-api/blob/5e63165a4bb7481a03d2e50464dc9c4f106c9fa5/cardano-api/src/Cardano/Api/Governance/Internal/Action/ProposalProcedure.hs). `createProposalProcedure` assembles deposit, reward authority/network, action and anchor. Seven action alternatives carry optional predecessors and policies. `ProposeNewCommittee` accepts Rational then uses partial `error` if outside [0,1]. Cometa instead accepts validated UnitInterval, RewardAddress, credentials, hashes and protocol Update, so assembly is total; only input validation fails. Era witnesses remain ledger integration concerns outside standalone values. cardano-api creates proposal identifiers from Word16; Cometa follows the pinned native standalone Word64 schema and documents this distinction.
+* Atlas `c3adfb416242ea25a244bfaa1614213eecdc55d9`, [Governance](https://github.com/geniusyield/atlas/blob/c3adfb416242ea25a244bfaa1614213eecdc55d9/src/GeniusYield/Types/Governance.hs). `GYProposalProcedurePB` takes return address/action/anchor; `completeProposalProcedure` adds externally obtained deposit. Constitution is anchor plus optional script; GovAction is a seven-case ADT; typed cold credentials distinguish committee management from hot voting. Cometa follows these typed immutable components and total assembly, using bounded Word64 native amounts rather than unbounded Natural. Deposit discovery belongs to query integration. Cometa rejects duplicate map keys explicitly; removal credential multiplicity and proposal insertion order are retained, because proposal index is identity-relevant. Exact wrappers preserve original bytes independently from semantic values.
+
+Complete workflow: validate runtime reward-account bytes, anchor URL/hash and any policy hash once; create a typed action from validated components; assemble Proposal with queried deposit; collect ordered proposals preserving duplicates and their indices; encode fresh CBOR or retain imported wrapper bytes unchanged. A single Either boundary handles expected failures. No native objects persist in public values.
+
+Native ownership evidence: cardano-c pin `eadb95cd3ca7f711c203d7f2f4ee21c150d4d7f1`, `lib/src/protocol_params/update.c` `cardano_update_get_proposed_parameters` borrows its map (plain assignment without ref). The reconstruction oracle keeps its source alive and never unrefs this borrowed pointer; `cardano_update_new` retains the supplied map. Action field getters, proposal action conversion/common field getters and indexed committee/withdrawal/proposed-update getters retain results; the oracle releases each local getter owner once. Fresh treasury maps are rebuilt through indexed account/amount snapshots and insertion. Repeated native reconstruction and Valgrind cover these mixed ownership contracts.
+
+The independent certificate getter audit checked the actual implementations,
+including indirect retention through `cardano_array_get`. Certificate subtype,
+MIR credential and optional BLS-object getters retain references; BLS byte getters
+borrow arrays until their key owner is released. The legacy update getter is an
+exception: `cardano_update_get_proposed_parameters` returns a borrowed map. An
+incorrect release in the new test oracle caused heap corruption during initial
+integration; removing it and reconstructing the treasury withdrawal entries
+resolved the failure. These test adapters hold no public persistent handles.
+
+#### Integrated continuation verification
+
+All 264 tests pass with warnings treated as errors, including the fresh
+source-distribution consumer (6.39 seconds). All 19 examples run successfully.
+Key-handler capability controls and ten credential-role compile-fail checks
+pass. The 11 new public modules have complete Haddock declaration coverage;
+strict Sphinx HTML, Ormolu, HLint, stock ClangFormat 18, package checks and the
+3,881-entry native inventory also pass.
+
+The complete Valgrind run passes all 264 tests in 207.87 seconds, with zero
+errors and zero definitely, indirectly or possibly lost bytes. No allocation
+was suppressed in this particular run. Default idle GC is enabled; the narrow
+pinned-runtime suppression remains available for the intermittent shutdown
+allocation observed in hosted CI.
+
+The ledger now contains 1,613 implemented or adapted symbols. P07's typed
+certificate, pool and proposal domains are implemented; explicitly deferred
+JSON/text conversions and internal lifecycle entries remain tracked rather than
+being counted as complete. The next substantive phase is transaction bodies,
+witnesses, auxiliary data and signing integration (P08). Hosted matrix results
+are verified on the pull request separately from local results.
+
+Final C-helper formatting uses explicit braces, matching cardano-c. After that
+format-only change, all 264 ordinary tests and a focused Valgrind run covering
+all 25 new domain tests pass with zero errors or lost bytes. A throwaway negative
+control intentionally omitted a cardano-c buffer release; Valgrind still failed
+with both direct and indirect losses and no suppressions, confirming that the
+RTS exception does not match that native allocation stack.

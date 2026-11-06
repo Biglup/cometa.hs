@@ -1,0 +1,17 @@
+# GHC 9.6.7 rts/Schedule.c: scheduleDoGC allocates idle_cap before
+# requestSync, then can return on SCHED_SHUTTING_DOWN without releasing it.
+# Restrict this to the scheduler worker stack; native binding allocations
+# and all other leak/error classes remain checked. See IMPLEMENTATION_PLAN.md.
+{
+   ghc-9.6.7-scheduler-shutdown-idle-cap
+   Memcheck:Leak
+   match-leak-kinds: definite
+   fun:malloc
+   fun:stgMallocBytes
+   fun:scheduleDoGC
+   fun:schedule
+   fun:scheduleWorker
+   fun:workerStart
+   fun:start_thread
+   fun:clone
+}
