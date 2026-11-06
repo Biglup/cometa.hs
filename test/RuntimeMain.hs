@@ -19,13 +19,29 @@ module Main (main) where
 
 import qualified CoinSelection
 import qualified Evaluation
+import qualified NativeCoinSelection
 import qualified ParameterSnapshot
 import qualified Provider
 import qualified Runtime
 import Test.Tasty (defaultMain, localOption, testGroup)
 import Test.Tasty.Runners (NumThreads (..))
+import qualified TransactionBuilder
+import qualified TransactionBuilding
 
 -- DEFINITIONS ----------------------------------------------------------------
 
 main :: IO ()
-main = defaultMain $ localOption (NumThreads 1) $ testGroup "Runtime extension points" [Runtime.tests, Provider.tests, ParameterSnapshot.tests, CoinSelection.tests, Evaluation.tests]
+main =
+  defaultMain $
+    localOption (NumThreads 1) $
+      testGroup
+        "Runtime extension points"
+        [ Runtime.tests,
+          Provider.tests,
+          ParameterSnapshot.tests,
+          CoinSelection.tests,
+          NativeCoinSelection.tests,
+          TransactionBuilding.tests,
+          TransactionBuilder.tests,
+          Evaluation.tests
+        ]

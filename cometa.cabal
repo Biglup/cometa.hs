@@ -71,6 +71,8 @@ library core
     Cometa.Internal.FFI.ProviderRuntime
     Cometa.Internal.FFI.CoinSelection
     Cometa.Internal.FFI.Evaluation
+    Cometa.Internal.FFI.Building
+    Cometa.Internal.FFI.TransactionBuilder
   build-depends:
     base >=4.18 && <4.22,
     bytestring >=0.11 && <0.13,
@@ -96,6 +98,8 @@ library core
     cbits/cometa_parameters.c
     cbits/cometa_coin_selection.c
     cbits/cometa_evaluation.c
+    cbits/cometa_building.c
+    cbits/cometa_transaction_builder.c
   include-dirs: cbits
   includes: cometa_provider.h
   cc-options: -std=c11 -Wall -Wextra
@@ -118,6 +122,9 @@ library
     Cometa.Transaction.Datum
     Cometa.Transaction.Fields
     Cometa.Transaction.Body
+    Cometa.Transaction.Building
+    Cometa.Transaction.Builder
+    Cometa.Transaction.Plan
     Cometa.SubTransaction.Body
     Cometa.Transaction.Witness
     Cometa.Transaction.Witnesses
@@ -178,6 +185,7 @@ library
     Cometa.Provider
     Cometa.Evaluation
     Cometa.Signer
+    Cometa.SlotConfig
     Cometa.CoinSelection
   other-modules:
     Cometa.Internal.Runtime
@@ -186,6 +194,9 @@ library
     Cometa.Internal.CoinSelection.Native
     Cometa.Internal.ParameterSnapshot
     Cometa.Internal.Evaluation
+    Cometa.Internal.Building
+    Cometa.Internal.TransactionPlan
+    Cometa.Internal.TransactionBuilder
     Cometa.Internal.EvaluationNative
     Cometa.Internal.TransactionCbor
     Cometa.Internal.TransactionValue
@@ -325,6 +336,7 @@ test-suite cometa-test
     test/cbits/pool_oracle.c
     test/cbits/certificates_oracle.c
     test/cbits/governance_oracle.c
+    test/cbits/slot_config_oracle.c
   cc-options: -std=c11 -Wall -Wextra
   other-modules:
     Value
@@ -332,6 +344,7 @@ test-suite cometa-test
     Metadata
     Parameters
     ProtocolValues
+    SlotConfig
     Governance
     Proposals
     Pool
@@ -525,6 +538,9 @@ test-suite cometa-runtime-test
     Evaluation
     CoinSelection
     ParameterSnapshot
+    TransactionBuilding
+    TransactionBuilder
+    NativeCoinSelection
     Fixtures.ProtocolParameters
     Cometa
     Cometa.Address
@@ -569,6 +585,9 @@ test-suite cometa-runtime-test
     Cometa.Internal.Ed25519SigningKey
     Cometa.Internal.Error
     Cometa.Internal.Evaluation
+    Cometa.Internal.Building
+    Cometa.Internal.TransactionPlan
+    Cometa.Internal.TransactionBuilder
     Cometa.Internal.EvaluationNative
     Cometa.Internal.Governance
     Cometa.Internal.ParameterSnapshot
@@ -605,11 +624,15 @@ test-suite cometa-runtime-test
     Cometa.Script.Native
     Cometa.Script.Plutus
     Cometa.Signer
+    Cometa.SlotConfig
     Cometa.SubTransaction
     Cometa.SubTransaction.Body
     Cometa.Transaction
     Cometa.Transaction.AuxiliaryData
     Cometa.Transaction.Body
+    Cometa.Transaction.Building
+    Cometa.Transaction.Builder
+    Cometa.Transaction.Plan
     Cometa.Transaction.Datum
     Cometa.Transaction.Fields
     Cometa.Transaction.Input
@@ -669,5 +692,27 @@ executable cometa-coin-selection
     base >=4.18 && <4.22,
     bytestring >=0.11 && <0.13,
     containers >=0.6.7 && <0.8,
+    transformers >=0.6 && <0.7,
+    cometa
+
+executable cometa-building-utilities
+  import: language
+  hs-source-dirs: examples
+  main-is: BuildingUtilities.hs
+  build-depends:
+    base >=4.18 && <4.22,
+    bytestring >=0.11 && <0.13,
+    transformers >=0.6 && <0.7,
+    cometa
+
+executable cometa-transaction-building
+  import: language
+  hs-source-dirs: examples test
+  main-is: TransactionBuilding.hs
+  other-modules: Fixtures.ProtocolParameters
+  build-depends:
+    base >=4.18 && <4.22,
+    bytestring >=0.11 && <0.13,
+    text >=2.0 && <2.2,
     transformers >=0.6 && <0.7,
     cometa

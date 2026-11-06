@@ -51,6 +51,7 @@ import qualified Proposals
 import qualified ProtocolValues
 import qualified PublicTransaction
 import qualified Scripts
+import qualified SlotConfig
 import qualified SoftwareKeyHandler
 import System.Mem (performGC)
 import System.Timeout (timeout)
@@ -68,7 +69,35 @@ main :: IO ()
 main =
   defaultMain $
     testGroup "Cometa foundation" $
-      [CompleteAddress.tests, TransactionBody.tests, PublicTransaction.tests, TransactionWitnesses.tests, Proposals.tests, Certificates.tests, Pool.tests, Governance.tests, ProtocolValues.tests, Parameters.tests, Scripts.tests, Metadata.tests, PlutusData.tests, Value.tests, Address.tests, ErrorCode.tests, Callback.tests, Ownership.tests, Cbor.tests, Transaction.tests, Ed25519.tests, Bip32.tests, Bip39.tests, PasswordCrypto.tests, DerivationPath.tests, SoftwareKeyHandler.tests] ++ foundationTests
+      [ CompleteAddress.tests,
+        TransactionBody.tests,
+        PublicTransaction.tests,
+        TransactionWitnesses.tests,
+        Proposals.tests,
+        Certificates.tests,
+        Pool.tests,
+        Governance.tests,
+        ProtocolValues.tests,
+        SlotConfig.tests,
+        Parameters.tests,
+        Scripts.tests,
+        Metadata.tests,
+        PlutusData.tests,
+        Value.tests,
+        Address.tests,
+        ErrorCode.tests,
+        Callback.tests,
+        Ownership.tests,
+        Cbor.tests,
+        Transaction.tests,
+        Ed25519.tests,
+        Bip32.tests,
+        Bip39.tests,
+        PasswordCrypto.tests,
+        DerivationPath.tests,
+        SoftwareKeyHandler.tests
+      ]
+        ++ foundationTests
 
 foundationTests :: [TestTree]
 foundationTests =

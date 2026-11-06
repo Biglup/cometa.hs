@@ -89,6 +89,8 @@ jobs:
           cabal run cometa-transactions
           cabal run cometa-providers
           cabal run cometa-evaluation
+          cabal run cometa-transaction-building
+          cabal run cometa-building-utilities
           cabal run cometa-coin-selection
           cabal run cometa-transaction-witnesses
           python tools/check-key-handler-roles.py

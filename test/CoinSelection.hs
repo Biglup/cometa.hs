@@ -129,7 +129,7 @@ checkRequests = do
   let raw = options request
       mandatory = Selection.preselected request
       candidates = Selection.available request
-      invalid = [raw {Selection.selectionPreselected = mandatory ++ mandatory}, raw {Selection.selectionAvailable = candidates ++ candidates}, raw {Selection.selectionTarget = Value.lovelace (-1)}, raw {Selection.selectionTarget = Value.lovelace (2 ^ (63 :: Int))}, raw {Selection.selectionParameters = (Selection.parameters request) {Parameters.parameterAdaPerUtxoByte = Nothing}}]
+      invalid = [raw {Selection.selectionPreselected = mandatory ++ mandatory}, raw {Selection.selectionAvailable = candidates ++ candidates}, raw {Selection.selectionTarget = Value.lovelace (negate (2 ^ (63 :: Int)) - 1)}, raw {Selection.selectionTarget = Value.lovelace (2 ^ (63 :: Int))}, raw {Selection.selectionParameters = (Selection.parameters request) {Parameters.parameterAdaPerUtxoByte = Nothing}}]
   forM_ invalid $ \value -> assertBool "invalid request accepted" (isLeft (Selection.mkSelectionRequest value))
   case mandatory of
     [original] -> do
