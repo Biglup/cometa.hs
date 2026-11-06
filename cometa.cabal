@@ -67,6 +67,10 @@ library core
     Cometa.Internal.FFI.KeyHandler
     Cometa.Internal.Bip32PrivateKey
     Cometa.Internal.FFI.Script
+    Cometa.Internal.FFI.Runtime
+    Cometa.Internal.FFI.ProviderRuntime
+    Cometa.Internal.FFI.CoinSelection
+    Cometa.Internal.FFI.Evaluation
   build-depends:
     base >=4.18 && <4.22,
     bytestring >=0.11 && <0.13,
@@ -87,6 +91,11 @@ library core
     cbits/cometa_bip39.c
     cbits/cometa_password_crypto.c
     cbits/cometa_script.c
+    cbits/cometa_runtime.c
+    cbits/cometa_provider_runtime.c
+    cbits/cometa_parameters.c
+    cbits/cometa_coin_selection.c
+    cbits/cometa_evaluation.c
   include-dirs: cbits
   includes: cometa_provider.h
   cc-options: -std=c11 -Wall -Wextra
@@ -166,7 +175,18 @@ library
     Cometa.Error
     Cometa.Error.Code
     Cometa.Encoding.Cbor
+    Cometa.Provider
+    Cometa.Evaluation
+    Cometa.Signer
+    Cometa.CoinSelection
   other-modules:
+    Cometa.Internal.Runtime
+    Cometa.Internal.ProviderRuntime
+    Cometa.Internal.CoinSelection
+    Cometa.Internal.CoinSelection.Native
+    Cometa.Internal.ParameterSnapshot
+    Cometa.Internal.Evaluation
+    Cometa.Internal.EvaluationNative
     Cometa.Internal.TransactionCbor
     Cometa.Internal.TransactionValue
     Cometa.Internal.TransactionFields
@@ -317,6 +337,7 @@ test-suite cometa-test
     Pool
     Certificates
     Fixtures.Governance
+    Fixtures.ProtocolParameters
     Scripts
     Fixtures.Scripts
     Fixtures.PlutusData
@@ -482,5 +503,171 @@ executable cometa-transaction-bodies
     base >=4.18 && <4.22,
     bytestring >=0.11 && <0.13,
     text >=2.0 && <2.2,
+    transformers >=0.6 && <0.7,
+    cometa
+
+-- Compile private adapters from the same sources without exporting them from
+-- the public library. The existing suite and examples test package consumers.
+test-suite cometa-runtime-test
+  import: language
+  type: exitcode-stdio-1.0
+  hs-source-dirs: test src
+  main-is: RuntimeMain.hs
+  c-sources:
+    test/cbits/parameter_snapshot_oracle.c
+    test/cbits/runtime_oracle.c
+  include-dirs: cbits
+  cc-options: -std=c11 -Wall -Wextra
+  ghc-options: -threaded -rtsopts
+  other-modules:
+    Provider
+    Runtime
+    Evaluation
+    CoinSelection
+    ParameterSnapshot
+    Fixtures.ProtocolParameters
+    Cometa
+    Cometa.Address
+    Cometa.Address.Byron
+    Cometa.Address.Reward
+    Cometa.Address.Shelley
+    Cometa.AssetId
+    Cometa.AssetName
+    Cometa.Certificate
+    Cometa.Certificate.Collection
+    Cometa.CoinSelection
+    Cometa.Credential
+    Cometa.Crypto.Bip32
+    Cometa.Crypto.Bip32.PrivateKey
+    Cometa.Crypto.Bip32.PublicKey
+    Cometa.Crypto.Bip39
+    Cometa.Crypto.Blake2b
+    Cometa.Crypto.DerivationPath
+    Cometa.Crypto.Ed25519.PublicKey
+    Cometa.Crypto.Ed25519.Signature
+    Cometa.Crypto.Ed25519.SigningKey
+    Cometa.Crypto.Emip3
+    Cometa.Crypto.Pbkdf2
+    Cometa.Encoding.Cbor
+    Cometa.Error
+    Cometa.Error.Code
+    Cometa.Evaluation
+    Cometa.Governance.Action
+    Cometa.Governance.ActionId
+    Cometa.Governance.Anchor
+    Cometa.Governance.Committee
+    Cometa.Governance.Constitution
+    Cometa.Governance.DRep
+    Cometa.Governance.Proposal
+    Cometa.Governance.Voting
+    Cometa.Internal.AddressText
+    Cometa.Internal.Bip39Pure
+    Cometa.Internal.Certificate
+    Cometa.Internal.CoinSelection
+    Cometa.Internal.CoinSelection.Native
+    Cometa.Internal.CostModels
+    Cometa.Internal.Ed25519SigningKey
+    Cometa.Internal.Error
+    Cometa.Internal.Evaluation
+    Cometa.Internal.EvaluationNative
+    Cometa.Internal.Governance
+    Cometa.Internal.ParameterSnapshot
+    Cometa.Internal.Pbkdf2Pure
+    Cometa.Internal.Pool
+    Cometa.Internal.ProposalCbor
+    Cometa.Internal.ProtocolValues
+    Cometa.Internal.ProviderRuntime
+    Cometa.Internal.Runtime
+    Cometa.Internal.TransactionCbor
+    Cometa.Internal.TransactionFields
+    Cometa.Internal.TransactionValue
+    Cometa.KeyHandler.Software
+    Cometa.Metadata
+    Cometa.NetworkId
+    Cometa.PlutusData
+    Cometa.PolicyId
+    Cometa.Pool.BlsKey
+    Cometa.Pool.Metadata
+    Cometa.Pool.Parameters
+    Cometa.Pool.Relay
+    Cometa.Protocol.CostModels
+    Cometa.Protocol.DRepVotingThresholds
+    Cometa.Protocol.ExUnitPrices
+    Cometa.Protocol.ExUnits
+    Cometa.Protocol.Parameters
+    Cometa.Protocol.Parameters.Update
+    Cometa.Protocol.PoolVotingThresholds
+    Cometa.Protocol.ProposedUpdates
+    Cometa.Protocol.Rational
+    Cometa.Protocol.Version
+    Cometa.Provider
+    Cometa.Script
+    Cometa.Script.Native
+    Cometa.Script.Plutus
+    Cometa.Signer
+    Cometa.SubTransaction
+    Cometa.SubTransaction.Body
+    Cometa.Transaction
+    Cometa.Transaction.AuxiliaryData
+    Cometa.Transaction.Body
+    Cometa.Transaction.Datum
+    Cometa.Transaction.Fields
+    Cometa.Transaction.Input
+    Cometa.Transaction.Output
+    Cometa.Transaction.Redeemer
+    Cometa.Transaction.Signing
+    Cometa.Transaction.Utxo
+    Cometa.Transaction.Witness
+    Cometa.Transaction.Witnesses
+    Cometa.TransactionId
+    Cometa.UnitInterval
+    Cometa.Value
+  build-depends:
+    base >=4.18 && <4.22,
+    containers >=0.6.7 && <0.8,
+    aeson >=2.2 && <2.3,
+    cborg >=0.2.10 && <0.3,
+    scientific >=0.3.7 && <0.4,
+    bech32 >=1.1.10 && <1.2,
+    bytestring >=0.11 && <0.13,
+    text >=2.0 && <2.2,
+    transformers >=0.6 && <0.7,
+    cometa:core,
+    tasty >=1.4 && <1.6,
+    tasty-hunit >=0.10 && <0.11,
+    tasty-hedgehog >=1.4 && <1.5,
+    hedgehog >=1.2 && <1.6
+
+executable cometa-providers
+  import: language
+  hs-source-dirs: examples
+  main-is: Providers.hs
+  build-depends:
+    base >=4.18 && <4.22,
+    bytestring >=0.11 && <0.13,
+    containers >=0.6.7 && <0.8,
+    transformers >=0.6 && <0.7,
+    cometa
+
+executable cometa-evaluation
+  import: language
+  hs-source-dirs: examples
+  main-is: Evaluation.hs
+  build-depends:
+    base >=4.18 && <4.22,
+    bytestring >=0.11 && <0.13,
+    containers >=0.6.7 && <0.8,
+    transformers >=0.6 && <0.7,
+    cometa
+
+executable cometa-coin-selection
+  import: language
+  hs-source-dirs: examples test
+  main-is: CoinSelection.hs
+  other-modules: Fixtures.ProtocolParameters
+  build-depends:
+    base >=4.18 && <4.22,
+    bytestring >=0.11 && <0.13,
+    containers >=0.6.7 && <0.8,
     transformers >=0.6 && <0.7,
     cometa

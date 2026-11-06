@@ -87,6 +87,9 @@ jobs:
           cabal run cometa-governance-proposals
           cabal run cometa-transaction-bodies
           cabal run cometa-transactions
+          cabal run cometa-providers
+          cabal run cometa-evaluation
+          cabal run cometa-coin-selection
           cabal run cometa-transaction-witnesses
           python tools/check-key-handler-roles.py
           python tools/check-credential-roles.py
@@ -124,6 +127,7 @@ jobs:
           sudo apt-get install -y valgrind
           # Suppress only the documented GHC 9.6.7 scheduler shutdown allocation.
           timeout 600s valgrind --suppressions=test/valgrind/ghc-9.6.7.supp --fair-sched=yes --leak-check=full --show-leak-kinds=definite,indirect --errors-for-leak-kinds=definite,indirect --error-exitcode=1 "$(cabal list-bin cometa-test)" --num-threads=1 +RTS -N2 -RTS
+          timeout 600s valgrind --suppressions=test/valgrind/ghc-9.6.7.supp --fair-sched=yes --leak-check=full --show-leak-kinds=definite,indirect --errors-for-leak-kinds=definite,indirect --error-exitcode=1 "$(cabal list-bin cometa-runtime-test)" --num-threads=1 +RTS -N2 -RTS
 
   quality:
     runs-on: ubuntu-24.04

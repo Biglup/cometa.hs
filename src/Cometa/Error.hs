@@ -208,6 +208,24 @@ data Error
     InvalidByronAddress !Text
   | -- | Byron address text is not a valid Base58 address.
     InvalidByronAddressText
+  | -- | The requested service capability is not supplied.
+    UnsupportedOperation !Text
+  | -- | An operation used a resource after its scope ended.
+    RuntimeClosed
+  | -- | An overlapping operation is already using the same resource.
+    RuntimeBusy
+  | -- | An injected callback returned a result outside its contract.
+    InvalidCallbackResult !Text
+  | -- | A parameter snapshot is incomplete or outside supported bounds.
+    InvalidParameterSnapshot !Text
+  | -- | Coin-selection inputs are inconsistent or outside supported bounds.
+    InvalidSelectionRequest !Text
+  | -- | A selection violates eligibility, balance or change requirements.
+    InvalidSelection !Text
+  | -- | An evaluation target or resolved input snapshot is inconsistent.
+    InvalidEvaluationRequest !Text
+  | -- | Evaluation budgets do not match the transaction's redeemer identities.
+    InvalidEvaluationResult !Text
   | -- | Pool CBOR is malformed or violates a field constraint.
     InvalidPoolCbor !Text
   | -- | A pool VRF key hash does not contain 32 bytes.
