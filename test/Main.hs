@@ -28,6 +28,7 @@ import qualified Cometa
 import qualified Cometa.Crypto.Blake2b as Blake2b
 import Cometa.Error (Error (..))
 import qualified Cometa.Error.Code as Code
+import qualified CompleteAddress
 import Control.Concurrent (forkFinally, killThread, newEmptyMVar, putMVar, takeMVar, threadDelay, yield)
 import Control.Exception (AsyncException (ThreadKilled), fromException)
 import Control.Monad (forever, replicateM_)
@@ -48,6 +49,7 @@ import qualified PlutusData
 import qualified Pool
 import qualified Proposals
 import qualified ProtocolValues
+import qualified PublicTransaction
 import qualified Scripts
 import qualified SoftwareKeyHandler
 import System.Mem (performGC)
@@ -56,6 +58,8 @@ import Test.Tasty (TestTree, defaultMain, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 import Test.Tasty.Hedgehog (testProperty)
 import qualified Transaction
+import qualified TransactionBody
+import qualified TransactionWitnesses
 import qualified Value
 
 -- DEFINITIONS ----------------------------------------------------------------
@@ -64,7 +68,7 @@ main :: IO ()
 main =
   defaultMain $
     testGroup "Cometa foundation" $
-      [Proposals.tests, Certificates.tests, Pool.tests, Governance.tests, ProtocolValues.tests, Parameters.tests, Scripts.tests, Metadata.tests, PlutusData.tests, Value.tests, Address.tests, ErrorCode.tests, Callback.tests, Ownership.tests, Cbor.tests, Transaction.tests, Ed25519.tests, Bip32.tests, Bip39.tests, PasswordCrypto.tests, DerivationPath.tests, SoftwareKeyHandler.tests] ++ foundationTests
+      [CompleteAddress.tests, TransactionBody.tests, PublicTransaction.tests, TransactionWitnesses.tests, Proposals.tests, Certificates.tests, Pool.tests, Governance.tests, ProtocolValues.tests, Parameters.tests, Scripts.tests, Metadata.tests, PlutusData.tests, Value.tests, Address.tests, ErrorCode.tests, Callback.tests, Ownership.tests, Cbor.tests, Transaction.tests, Ed25519.tests, Bip32.tests, Bip39.tests, PasswordCrypto.tests, DerivationPath.tests, SoftwareKeyHandler.tests] ++ foundationTests
 
 foundationTests :: [TestTree]
 foundationTests =

@@ -98,6 +98,22 @@ library
     Cometa
     Cometa.Crypto.Blake2b
     Cometa.Credential
+    Cometa.Address
+    Cometa.Address.Byron
+    Cometa.Transaction
+    Cometa.SubTransaction
+    Cometa.Transaction.Signing
+    Cometa.Transaction.Input
+    Cometa.Transaction.Utxo
+    Cometa.Transaction.Output
+    Cometa.Transaction.Datum
+    Cometa.Transaction.Fields
+    Cometa.Transaction.Body
+    Cometa.SubTransaction.Body
+    Cometa.Transaction.Witness
+    Cometa.Transaction.Witnesses
+    Cometa.Transaction.Redeemer
+    Cometa.Transaction.AuxiliaryData
     Cometa.Address.Shelley
     Cometa.Address.Reward
     Cometa.NetworkId
@@ -151,6 +167,9 @@ library
     Cometa.Error.Code
     Cometa.Encoding.Cbor
   other-modules:
+    Cometa.Internal.TransactionCbor
+    Cometa.Internal.TransactionValue
+    Cometa.Internal.TransactionFields
     Cometa.Internal.Error
     Cometa.Internal.ProtocolValues
     Cometa.Internal.CostModels
@@ -171,6 +190,7 @@ library
     containers >=0.6.7 && <0.8,
     bytestring >=0.11 && <0.13,
     text >=2.0 && <2.2,
+    transformers >=0.6 && <0.7,
     cometa:core
 
 executable cometa-hash
@@ -270,8 +290,11 @@ test-suite cometa-test
   c-sources:
     cbits/cometa_error_codes_test.c
     test/cbits/transaction_oracle.c
+    test/cbits/transaction_witnesses_oracle.c
+    test/cbits/transaction_body_oracle.c
     test/cbits/derivation_path_oracle.c
     test/cbits/address_oracle.c
+    test/cbits/complete_address_oracle.c
     test/cbits/value_oracle.c
     test/cbits/plutus_data_oracle.c
     test/cbits/metadata_oracle.c
@@ -298,12 +321,16 @@ test-suite cometa-test
     Fixtures.Scripts
     Fixtures.PlutusData
     Address
+    CompleteAddress
     Fixtures.Address
     ErrorCode
     Ownership
     Callback
     Cbor
     Transaction
+    PublicTransaction
+    TransactionWitnesses
+    TransactionBody
     Fixtures.Transaction
     Fixtures.Ed25519
     Ed25519
@@ -423,4 +450,37 @@ executable cometa-governance-proposals
   build-depends:
     base >=4.18 && <4.22,
     bytestring >=0.11 && <0.13,
+    cometa
+
+executable cometa-transactions
+  import: language
+  hs-source-dirs: examples
+  main-is: Transactions.hs
+  build-depends:
+    base >=4.18 && <4.22,
+    bytestring >=0.11 && <0.13,
+    text >=2.0 && <2.2,
+    transformers >=0.6 && <0.7,
+    cometa
+
+executable cometa-transaction-witnesses
+  import: language
+  hs-source-dirs: examples
+  main-is: TransactionWitnesses.hs
+  build-depends:
+    base >=4.18 && <4.22,
+    bytestring >=0.11 && <0.13,
+    text >=2.0 && <2.2,
+    transformers >=0.6 && <0.7,
+    cometa
+
+executable cometa-transaction-bodies
+  import: language
+  hs-source-dirs: examples
+  main-is: TransactionBodies.hs
+  build-depends:
+    base >=4.18 && <4.22,
+    bytestring >=0.11 && <0.13,
+    text >=2.0 && <2.2,
+    transformers >=0.6 && <0.7,
     cometa

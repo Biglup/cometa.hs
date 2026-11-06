@@ -186,6 +186,28 @@ data Error
     InvalidProtocolVersion !Integer !Integer
   | -- | A protocol value has malformed CBOR or violates its field constraints.
     InvalidProtocolCbor !Text
+  | -- | Transaction CBOR is malformed or violates its field constraints.
+    InvalidTransactionCbor !Text
+  | -- | A transaction output contains an unsupported quantity.
+    InvalidTransactionOutputValue !Integer
+  | -- | A transaction digest does not contain exactly 32 bytes.
+    InvalidTransactionHashLength !Int
+  | -- | A transaction field violates its domain constraints.
+    InvalidTransactionField !Text
+  | -- | Witness CBOR is malformed or violates its field constraints.
+    InvalidWitnessCbor !Text
+  | -- | Redeemer CBOR is malformed or violates its field constraints.
+    InvalidRedeemerCbor !Text
+  | -- | Auxiliary data CBOR is malformed or violates its field constraints.
+    InvalidAuxiliaryDataCbor !Text
+  | -- | A bootstrap witness chain code does not contain 32 bytes.
+    InvalidBootstrapChainCodeLength !Int
+  | -- | Witnesses contain conflicting values for the same identity.
+    WitnessConflict !Text
+  | -- | Byron address bytes or attributes are malformed or have a bad checksum.
+    InvalidByronAddress !Text
+  | -- | Byron address text is not a valid Base58 address.
+    InvalidByronAddressText
   | -- | Pool CBOR is malformed or violates a field constraint.
     InvalidPoolCbor !Text
   | -- | A pool VRF key hash does not contain 32 bytes.

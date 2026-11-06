@@ -13,9 +13,8 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
--- | Base and enterprise payment addresses. Construction and byte conversion
--- are pure. Pointer,
--- Byron and reward addresses return 'UnsupportedAddressType' when imported as bytes.
+-- | Base, enterprise and pointer payment addresses. Construction and byte conversion
+-- are pure. Byron and reward addresses return 'UnsupportedAddressType' when imported as bytes.
 --
 -- @
 -- import qualified Cometa.Address.Shelley as Address
@@ -34,6 +33,9 @@ module Cometa.Address.Shelley
 
     -- * Construction
     Address,
+    StakePointer (..),
+    pointer,
+    pointerRef,
     base,
     enterprise,
 
@@ -61,15 +63,27 @@ import Data.Bits (shiftL, shiftR, testBit, (.&.), (.|.))
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as ByteString
 import Data.Text (Text)
-import Data.Word (Word8)
+import Data.Word (Word32, Word8)
 
 -- TYPES ----------------------------------------------------------------------
 
 -- | An immutable address. Equality and ordering compare form (base,
--- enterprise), network, then credentials; 'Show' is diagnostic.
+-- enterprise, pointer), network, then credentials; 'Show' is diagnostic.
 data Address
   = Base !NetworkId !(Credential Payment) !(Credential Stake)
   | Enterprise !NetworkId !(Credential Payment)
+  | Pointer !NetworkId !(Credential Payment) !StakePointer
+  deriving (Eq, Ord, Show)
+
+-- | Location of a stake registration. Each component is an unsigned 32-bit value.
+data StakePointer = StakePointer
+  { -- | Absolute slot containing the registration.
+    slot :: !Word32,
+    -- | Zero-based transaction index within that slot.
+    transactionIndex :: !Word32,
+    -- | Zero-based certificate index within that transaction.
+    certificateIndex :: !Word32
+  }
   deriving (Eq, Ord, Show)
 
 -- DEFINITIONS ----------------------------------------------------------------
@@ -83,36 +97,50 @@ base = Base
 enterprise :: NetworkId -> Credential Payment -> Address
 enterprise = Enterprise
 
+-- | Assemble a pointer address from payment authority and a registration location.
+pointer :: NetworkId -> Credential Payment -> StakePointer -> Address
+pointer = Pointer
+
+-- | Registration location, present only in pointer addresses.
+pointerRef :: Address -> Maybe StakePointer
+pointerRef (Pointer _ _ location) = Just location
+pointerRef _ = Nothing
+
 -- | Network tag carried by the header.
 networkId :: Address -> NetworkId
 networkId address = case address of
   Base network _ _ -> network
   Enterprise network _ -> network
+  Pointer network _ _ -> network
 
 -- | Payment authority carried by every payment address.
 paymentCredential :: Address -> Credential Payment
 paymentCredential address = case address of
   Base _ credential _ -> credential
   Enterprise _ credential -> credential
+  Pointer _ credential _ -> credential
 
--- | Staking authority; absent for enterprise addresses.
+-- | Staking authority; absent for enterprise and pointer addresses.
 stakeCredential :: Address -> Maybe (Credential Stake)
 stakeCredential address = case address of
   Base _ _ credential -> Just credential
   Enterprise {} -> Nothing
+  Pointer {} -> Nothing
 
 -- | Serialize exact header and credential bytes: 57 bytes for base addresses,
--- 29 for enterprise addresses.
+-- 29 for enterprise addresses, and 32–44 for pointer addresses.
 toBytes :: Address -> ByteString
 toBytes address = case address of
   Base network payment stake -> encode network (kind payment + 2 * kind stake) [credentialBytes payment, credentialBytes stake]
   Enterprise network payment -> encode network (6 + kind payment) [credentialBytes payment]
+  Pointer network payment (StakePointer a b c) -> encode network (4 + kind payment) [credentialBytes payment, variable a, variable b, variable c]
   where
     encode network tag parts = ByteString.cons ((tag `shiftL` 4) .|. networkIdValue network) (ByteString.concat parts)
 
--- | Import exact bytes. Pointer, Byron, reward and reserved headers return
+-- | Import exact bytes. Byron, reward and reserved headers return
 -- 'UnsupportedAddressType'. Empty input or incorrect exact lengths return
--- 'InvalidShelleyAddress'. All four-bit network tags are retained.
+-- 'InvalidShelleyAddress'. Pointer components must be minimally encoded, fit
+-- 32 bits and consume the full input. All four-bit network tags are retained.
 fromBytes :: ByteString -> Either Error Address
 fromBytes bytes = case ByteString.uncons bytes of
   Nothing -> Left InvalidShelleyAddress
@@ -127,6 +155,14 @@ fromBytes bytes = case ByteString.uncons bytes of
             if ByteString.length payload /= 56
               then Left InvalidShelleyAddress
               else Base network <$> decodeCredential (testBit tag 0) payment <*> decodeCredential (testBit tag 1) stake
+      value | value == 4 || value == 5 -> do
+        credential <- decodeCredential (testBit tag 0) payment
+        (a, restA) <- readVariable stake
+        (b, restB) <- readVariable restA
+        (c, restC) <- readVariable restB
+        if ByteString.null restC
+          then Right (Pointer network credential (StakePointer a b c))
+          else Left InvalidShelleyAddress
       value | value == 6 || value == 7 -> Enterprise network <$> decodeCredential (testBit tag 0) payload
       _ -> Left (UnsupportedAddressType tag)
   where
@@ -157,3 +193,32 @@ credentialBytes :: Credential purpose -> ByteString
 credentialBytes credential = case credential of
   KeyCredential hash -> Credential.keyHashBytes hash
   ScriptCredential hash -> Credential.scriptHashBytes hash
+
+variable :: Word32 -> ByteString
+variable value = ByteString.pack (go value [])
+  where
+    go remaining tailBytes
+      | remaining < 128 = fromIntegral remaining : tailBytes
+      | otherwise = continue (remaining `shiftR` 7) [fromIntegral (remaining .&. 127)]
+    continue remaining tailBytes
+      | remaining < 128 = (fromIntegral remaining .|. 128) : tailBytes
+      | otherwise = continue (remaining `shiftR` 7) ((fromIntegral (remaining .&. 127) .|. 128) : tailBytes)
+
+readVariable :: ByteString -> Either Error (Word32, ByteString)
+readVariable original = go (0 :: Int) 0 original
+  where
+    go count value bytes = case ByteString.uncons bytes of
+      Nothing -> Left InvalidShelleyAddress
+      Just (byte, rest)
+        | count >= 5 -> Left InvalidShelleyAddress
+        | value > (toInteger (maxBound :: Word32) - toInteger (byte .&. 127)) `div` 128 -> Left InvalidShelleyAddress
+        | otherwise ->
+            let next = value * 128 + toInteger (byte .&. 127)
+             in if testBit byte 7
+                  then go (count + 1) next rest
+                  else
+                    let result = fromInteger next
+                        consumed = ByteString.length original - ByteString.length rest
+                     in if ByteString.take consumed original == variable result
+                          then Right (result, rest)
+                          else Left InvalidShelleyAddress

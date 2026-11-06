@@ -115,7 +115,7 @@ checkBytes = do
     let bytes = toBytes address
     fromBytes (ByteString.take (ByteString.length bytes - 1) bytes) @?= Left InvalidShelleyAddress
     fromBytes (bytes <> "\NUL") @?= Left InvalidShelleyAddress
-  forM_ [4, 5, 8, 9, 10, 11, 12, 13] $ \tag ->
+  forM_ [8, 9, 10, 11, 12, 13] $ \tag ->
     fromBytes (ByteString.singleton (tag `shiftL` 4) <> ByteString.replicate 56 0) @?= Left (UnsupportedAddressType tag)
 
 checkText :: IO ()
@@ -144,7 +144,8 @@ checkStrictText = do
   wrongNetwork <- customText "addr" (toBytes testAddress)
   fromText wrongNetwork @?= Left InvalidShelleyAddressText
   pointer <- customText "addr" (ByteString.singleton 0x41 <> ByteString.replicate 28 0 <> ByteString.pack [0, 0, 0])
-  fromText pointer @?= Left (UnsupportedAddressType 4)
+  key <- requireRight (Credential.keyHashFromBytes (ByteString.replicate 28 0))
+  fromText pointer @?= Right (PaymentAddress (Shelley.pointer Shelley.mainnet (KeyCredential key) (Shelley.StakePointer 0 0 0)))
 
 checkPublicKey :: IO ()
 checkPublicKey = do

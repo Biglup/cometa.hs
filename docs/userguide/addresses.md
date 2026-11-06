@@ -1,6 +1,6 @@
-# Shelley addresses and credentials
+# Addresses and credentials
 
-`Cometa.Address.Shelley` constructs, inspects, and encodes base and enterprise
+`Cometa.Address.Shelley` constructs, inspects, and encodes base, enterprise and pointer
 payment addresses. `Cometa.Address.Reward` handles staking reward accounts.
 `Cometa.Credential` describes their payment or staking authority.
 
@@ -8,11 +8,14 @@ payment addresses. `Cometa.Address.Reward` handles staking reward accounts.
 | --- | --- | --- | --- |
 | Base | Required | Required | Receive payments associated with staking rights |
 | Enterprise | Required | Absent | Receive payments without staking rights |
+| Pointer | Required | Registration location | Receive payments associated with an earlier stake registration |
 | Reward | Absent | Required | Identify a staking reward account |
 
 Both credential positions accept key or script credentials. Payment addresses
 have type `Address`; reward accounts have the distinct type `RewardAddress`.
-Pointer and Byron addresses are outside these modules' supported forms.
+`Cometa.Address.Byron` handles historical bootstrap addresses.
+`Cometa.Address` provides a sum of these validated address families for transaction
+outputs and applications that accept more than one form.
 
 ## Create a receiving address
 
@@ -54,7 +57,7 @@ hash; it does not hash script bytes.
 
 Use `Address.enterprise network payment` for an address without staking rights.
 `Address.paymentCredential` always returns its payment authority;
-`Address.stakeCredential` returns `Nothing` for enterprise addresses and `Just`
+`Address.stakeCredential` returns `Nothing` for enterprise and pointer addresses and `Just`
 the staking authority for base addresses.
 
 For a reward account, use `Reward.fromCredential network stake` from
@@ -93,3 +96,25 @@ Use `toText` for address interchange. `Show` is diagnostic. In the example,
 key derivation and `Credential.fromPublicKey` return failures in `IO`; address
 assembly and rendering use the resulting values directly. Callers do not manage
 address lifetimes.
+
+## Pointer and Byron addresses
+
+`Shelley.pointer network payment (Shelley.StakePointer slot txIndex certIndex)`
+identifies a stake registration by its absolute slot, transaction index and
+certificate index. Each component ranges from zero through 2^32-1.
+`Shelley.pointerRef` returns this location for pointer addresses. Byte decoding
+rejects overflowing, nonminimal and trailing pointer encodings.
+
+For Byron, validate a 28-byte root with `Byron.rootFromBytes`, then validate optional
+encrypted derivation bytes and network magic with `Byron.attributes`.
+`Byron.address root attributes Byron.PublicKey` assembles the address;
+`Byron.Script` and `Byron.Redeem` identify the other authority forms.
+`Byron.fromText` checks Base58, CBOR structure and the payload checksum.
+`Byron.toText` renders Base58, while `Byron.toBytes` preserves the accepted encoding.
+The encrypted derivation payload is at most 64 bytes; network magic ranges from
+zero through 2^63-1. These operations do not decrypt the derivation payload.
+
+Use `Cometa.Address.fromBytes` or `fromText` to import an address when its family
+is not known in advance. Pattern matching on `ShelleyAddress`, `ByronAddress` or
+`RewardAddress` gives access to family-specific inspection. A decoded address
+does not establish whether the selected ledger era permits it as an output.
