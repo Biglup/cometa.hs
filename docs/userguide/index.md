@@ -40,6 +40,7 @@ plutus-data
 metadata
 scripts
 protocol-values
+slot-config
 protocol-parameters
 governance
 stake-pools
@@ -50,6 +51,8 @@ transactions
 transaction-witnesses
 providers
 coin-selection
+building-utilities
+transaction-building
 evaluation-and-signing
 api-reference
 ```

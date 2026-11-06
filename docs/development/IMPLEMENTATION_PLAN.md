@@ -2457,3 +2457,147 @@ zero errors, zero definitely/indirectly/possibly lost bytes and zero suppression
 External compile checks confirm all four typed native adapters remain hidden.
 Formatter, lint, package and native-inventory checks pass. Hosted compiler/platform
 results are tracked on the PR separately from this local evidence.
+
+
+### P10 transaction-building workflows
+
+The preceding runtime PR passed the hosted compiler/platform matrix, formatting,
+strict documentation and Read the Docs. This increment adds native selectors,
+standalone cost calculations and ordinary transaction-building workflows to that
+merged baseline. Deferred redeemers, advanced VM APIs, governance proposal
+conveniences and Dijkstra batching remain subsequent work.
+
+#### API evidence
+
+Reviewed cardano-api at `5e63165a4bb7481a03d2e50464dc9c4f106c9fa5`, especially
+[`makeTransactionBodyAutoBalance`](https://github.com/IntersectMBO/cardano-api/blob/5e63165a4bb7481a03d2e50464dc9c4f106c9fa5/cardano-api/src/Cardano/Api/Tx/Internal/Fee.hs).
+Its caller supplies resolved inputs, protocol context, a body and a change
+address; evaluation, witness estimates, fees and change produce a balanced body.
+Cometa follows that explicit workflow with Haskell-owned inputs and one expected
+error boundary. Native balancing stays in IO; no additional purity exception is
+introduced.
+
+Reviewed Atlas at `c3adfb416242ea25a244bfaa1614213eecdc55d9`:
+
+- [`TxBuilder.Class`](https://github.com/geniusyield/atlas/blob/c3adfb416242ea25a244bfaa1614213eecdc55d9/src/GeniusYield/TxBuilder/Class.hs)
+  and its skeleton tests demonstrate composable requirements and separate signing.
+- [`Transaction.CoinSelection`](https://github.com/geniusyield/atlas/blob/c3adfb416242ea25a244bfaa1614213eecdc55d9/src/GeniusYield/Transaction/CoinSelection.hs)
+  and selection tests inform strategy selection, accounting and eligibility checks.
+- [`Types.SlotConfig`](https://github.com/geniusyield/atlas/blob/c3adfb416242ea25a244bfaa1614213eecdc55d9/src/GeniusYield/Types/SlotConfig.hs)
+  and its tests distinguish slot starts and enclosing slots. Atlas supports era
+  history; Cometa's current native interface accepts a single constant-duration
+  schedule. The public contract explicitly excludes earlier periods.
+
+The native audit used the pinned revision
+`eadb95cd3ca7f711c203d7f2f4ee21c150d4d7f1`: builder state/configuration/build/mint,
+transaction balancing, largest-first and random-improve implementations, change
+construction and splitting, fee and implicit-coin utilities, script-data hashing,
+value arithmetic, native evaluator limits, slot configuration and time conversion.
+
+#### Public contracts
+
+`Plan` is an abstract sequence with lawful associative composition and identity.
+Interpretation preserves payment order and multiplicity, combines mint quantities
+per asset, omits net-zero minting, coalesces compatible idempotent requirements,
+and intersects validity bounds. Incompatible inputs, metadata or withdrawals fail
+at the build boundary. Common key spends, minting, certificates and withdrawals
+have simple constructors; named variants accept script arguments.
+
+`Builder.Config` supplies protocol parameters, slot configuration, change and
+wallet/collateral snapshots. Optional selector and evaluator records reuse P09.
+Providers remain upstream of this operation, or inside an injected evaluator;
+the native builder has no provider setter. Building returns an unsigned owned
+transaction and performs no implicit signing or submission. The native defaults
+are random-improve selection and native evaluation, as established from source.
+
+Native selectors implement the existing `Selector` record. Seeded calls restart
+from the seed, allowing deterministic replay for one library version. Unseeded
+random-improve obtains fresh entropy per call. `Minimal` and `Optimal` preserve
+the authoritative target while choosing different input/change distributions.
+Output hints affect change shape, not the accounting equation.
+
+`SlotConfig` is immutable and validated. Conversions are pure, use Integer
+intermediates and return checked Word64 values in Unix milliseconds. Zero duration,
+earlier periods and overflow fail explicitly. Presets are checked against native
+constants. Network-magic helpers that use seconds remain separate ledger gaps.
+
+Standalone utilities calculate minimum Ada, linear/full fees, reference-script
+fees, script-data commitments and outer/subtransaction deposit/refund accounting.
+Full fee calculation requires resolved spending and reference inputs, not only
+references. Native pricing deduplicates within a body and charges occurrences in
+different bodies separately. Script-data hashing preserves exact redeemer/datum
+encodings and requires callers to supply the relevant language views.
+
+#### Native corrections and safety
+
+Native random-improve concatenates mandatory and available pools. The adapters
+remove mandatory references from candidates, preserving the public overlap
+contract. Builder wallet/collateral lists reject duplicate references and check
+conflicting snapshots across the plan and configuration.
+
+Native mint setters replace quantities. Plan interpretation therefore sums each
+asset in Integer before emitting one bounded setter. Repeated payments remain
+separate outputs; they are never removed by general-purpose deduplication.
+
+Balancing can subtract withdrawals, refunds and minted assets from the funding
+target. P09's nonnegative target restriction was too narrow. Requests now accept
+signed 64-bit target components with the unchanged conservation equation:
+selected value equals target plus nonnegative change. Private target snapshots use
+signed coin and a signed multiasset map because ledger Value CBOR uses unsigned
+coin. Ordinary transaction output encodings remain unchanged.
+
+Native balance additions and witness-fee intermediates need stronger bounds than
+individual field validation. Preflight uses Integer to bound aggregate sources,
+sinks, minting, deposits, refunds, witness estimates, execution costs and reference
+script charges. The serialized-size upper bound includes change that repeats
+incidental assets across payment hints. Oversized requests fail before balancing.
+Injected evaluation budgets are checked against protocol limits. Native execution
+fee bounds use the audited fixed memory/CPU ceilings; returned transactions are
+also checked against protocol budget limits.
+
+Final size validation uses the native distinct required-signing-key analysis,
+not the number of selected inputs. This avoids rejecting many inputs controlled
+by one key. Bootstrap witnesses retain a conservative attribute-size allowance.
+Explicit validity endpoints must fit the supplied slot schedule.
+
+#### Ownership and evidence
+
+Every build owns a fresh native builder, decoded snapshots and callback adapters.
+Setters retain their inputs; local obligations are released independently. The
+shared runtime joins callbacks and native work on cancellation before releasing
+registrations. Results and native diagnostics are copied before owner cleanup.
+Native selectors similarly scope their request, selector and three result lists;
+standalone utilities release partial decoded owners and result buffers on failure.
+
+Tests use typed Haskell fixtures and actual native dispatch. Selector tests check
+accounting, shape, deterministic replay, size splitting, signed surplus targets,
+mandatory overlap, arithmetic failure, concurrent use and cleanup. Slot tests
+compare native constants and both conversion directions, including boundaries.
+Utility tests independently calculate fees and tier rounding, cover spending
+reference scripts and per-body pricing, and reuse the native Apache-2.0
+`script_data_hash.cpp` datum-only hash vector. No funded-wallet data is included.
+
+Builder tests cover repeated payments, additive minting, certificates, withdrawals,
+metadata, scripts, validity intersections, surplus change, real selector/evaluator
+callbacks, malformed VM failure, budget/size/amount limits and plan laws. The
+injected evaluator fixture intentionally supplies budgets for a synthetic script;
+it tests callback integration, not on-chain script validity. Lifecycle tests cover
+success, failure, exceptions and cancellation. A 300-input shared-key regression
+checks distinct-witness sizing.
+
+
+#### Integrated validation
+
+All 383 tests pass: 307 public-package tests and 76 runtime tests. A fresh source
+archive builds all components and passes both suites. All 27 offline examples run,
+and handler/credential role checks pass. The complete runtime suite passes
+Valgrind with zero errors, zero definitely/indirectly/possibly lost bytes and zero
+suppressions. Public declarations have complete Haddock coverage; strict guide
+HTML and link checks, Ormolu, HLint, ClangFormat, package and inventory checks pass.
+Full public-suite Valgrind and hosted compiler/platform results are recorded on
+the PR. No live-network or complete advanced-VM conformance claim is made here.
+
+Standalone set-valued required-authority inspection remains pending in the native
+ledger: using its native signer analysis internally for witness sizing does not
+expose that entire public capability. Other outstanding building/evaluation and
+Dijkstra operations retain their explicit pending entries.

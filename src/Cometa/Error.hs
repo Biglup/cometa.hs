@@ -50,6 +50,12 @@ data Error
       !ErrorCode
       -- | Diagnostic message; do not parse it to determine the failure.
       !Text
+  | -- | A transaction-building request has invalid context or inconsistent inputs.
+    InvalidBuildingRequest !Text
+  | -- | Transaction requirements conflict or cannot form a valid build request.
+    InvalidTransactionPlan !Text
+  | -- | A slot configuration or conversion is outside its supported time range.
+    InvalidSlotConfig !Text
   | -- | The requested BLAKE2b digest length is outside 16 through 64 bytes.
     InvalidHashLength
       -- | Requested digest length in bytes.

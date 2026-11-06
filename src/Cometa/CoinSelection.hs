@@ -13,15 +13,21 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
--- | Inject coin selection with an ordinary record of functions. Validate a
--- request once, then use 'select' to check full selection and change laws. This
--- boundary selects inputs and change; it does not balance or submit transactions.
+-- | Select spending inputs with largest-first, random-improve or an application
+-- supplied selector. Validate a request once, then use 'select' to check full
+-- selection and change laws. Target values include externally assessed fees
+-- and deposits; this boundary selects inputs and change without submitting.
 --
 -- @
--- selectWith = select
+-- selectLargest = select largestFirst
 -- @
 module Cometa.CoinSelection
   ( Selector (..),
+    Strategy (..),
+    largestFirst,
+    randomImprove,
+    randomImproveWithSeed,
+    randomImproveWithOptions,
     SelectionOptions (..),
     SelectionRequest,
     mkSelectionRequest,
@@ -44,12 +50,17 @@ import Cometa.Internal.CoinSelection
     SelectionOptions (..),
     SelectionRequest,
     Selector (..),
+    Strategy (..),
     available,
     changeAddress,
+    largestFirst,
     mkSelectionRequest,
     outputHints,
     parameters,
     preselected,
+    randomImprove,
+    randomImproveWithOptions,
+    randomImproveWithSeed,
     select,
     target,
     validateSelection,

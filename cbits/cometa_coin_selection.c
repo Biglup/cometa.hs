@@ -22,6 +22,8 @@
 #include "cometa_coin_selection.h"
 #include "cometa_parameters.h"
 #include <cardano/transaction_builder/coin_selection/coin_selector_impl.h>
+#include <cardano/transaction_builder/coin_selection/large_first_coin_selector.h>
+#include <cardano/transaction_builder/coin_selection/random_improve_coin_selector.h>
 #include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -126,6 +128,58 @@ write_utxos(cardano_cbor_writer_t* writer, cardano_utxo_list_t* list)
   return result;
 }
 
+/** \brief Internal signed target codec; ledger value CBOR uses unsigned coin.
+ * Native value_t and multi_asset_t support signed implicit funding quantities.
+ */
+static cardano_error_t
+read_target(cardano_cbor_reader_t* reader, cardano_value_t** output)
+{
+  int64_t                count  = 0;
+  int64_t                coin   = 0;
+  cardano_multi_asset_t* assets = NULL;
+  cardano_error_t        result = cardano_cbor_reader_read_start_array(reader, &count);
+  if (result == CARDANO_SUCCESS && count != 2)
+  {
+    result = CARDANO_ERROR_INVALID_ARGUMENT;
+  }
+  if (result == CARDANO_SUCCESS)
+  {
+    result = cardano_cbor_reader_read_int(reader, &coin);
+  }
+  if (result == CARDANO_SUCCESS)
+  {
+    result = cardano_multi_asset_from_cbor(reader, &assets);
+  }
+  if (result == CARDANO_SUCCESS)
+  {
+    result = cardano_cbor_reader_read_end_array(reader);
+  }
+  if (result == CARDANO_SUCCESS)
+  {
+    result = cardano_value_new(coin, assets, output);
+  }
+  cardano_multi_asset_unref(&assets);
+  return result;
+}
+
+/** \brief Snapshot signed quantities without passing through ledger Value CBOR. */
+static cardano_error_t
+write_target(cardano_cbor_writer_t* writer, cardano_value_t* target)
+{
+  cardano_multi_asset_t* assets = cardano_value_get_multi_asset(target);
+  cardano_error_t        result = cardano_cbor_writer_write_start_array(writer, 2);
+  if (result == CARDANO_SUCCESS)
+  {
+    result = cardano_cbor_writer_write_signed_int(writer, cardano_value_get_coin(target));
+  }
+  if (result == CARDANO_SUCCESS)
+  {
+    result = cardano_multi_asset_to_cbor(assets, writer);
+  }
+  cardano_multi_asset_unref(&assets);
+  return result;
+}
+
 /** \brief Materialize all six request fields from an internal exact snapshot. */
 static cardano_error_t
 read_request(const unsigned char* bytes, size_t size, owned_request_t* output)
@@ -149,7 +203,7 @@ read_request(const unsigned char* bytes, size_t size, owned_request_t* output)
   }
   if (result == CARDANO_SUCCESS)
   {
-    result = cardano_value_from_cbor(reader, &output->value.target);
+    result = read_target(reader, &output->value.target);
   }
   cardano_cbor_reader_state_t state = CARDANO_CBOR_READER_STATE_UNDEFINED;
   if (result == CARDANO_SUCCESS)
@@ -209,7 +263,7 @@ write_request(selector_context_t* context, const cardano_coin_selection_request_
   }
   if (result == CARDANO_SUCCESS)
   {
-    result = cardano_value_to_cbor(request->target, writer);
+    result = write_target(writer, request->target);
   }
   if (result == CARDANO_SUCCESS)
   {
@@ -358,6 +412,70 @@ cometa_coin_selection_invoke(cometa_runtime_t* runtime, const unsigned char* byt
   if (result == CARDANO_SUCCESS)
   {
     result = (cardano_error_t)cometa_coin_selector_new(runtime, cardano_buffer_get_data(request.parameter_template), cardano_buffer_get_size(request.parameter_template), &selector);
+  }
+  if (result == CARDANO_SUCCESS)
+  {
+    result = cardano_coin_selector_select(selector, &request.value, &selected, &remaining, &change);
+  }
+  if (result == CARDANO_SUCCESS)
+  {
+    writer = cardano_cbor_writer_new();
+    result = writer == NULL ? CARDANO_ERROR_MEMORY_ALLOCATION_FAILED : cardano_cbor_writer_write_start_array(writer, 3);
+  }
+  if (result == CARDANO_SUCCESS)
+  {
+    result = write_utxos(writer, selected);
+  }
+  if (result == CARDANO_SUCCESS)
+  {
+    result = write_utxos(writer, remaining);
+  }
+  if (result == CARDANO_SUCCESS)
+  {
+    result = cardano_transaction_output_list_to_cbor(change, writer);
+  }
+  if (result == CARDANO_SUCCESS)
+  {
+    result = cardano_cbor_writer_encode_in_buffer(writer, output);
+  }
+  cardano_cbor_writer_unref(&writer);
+  cardano_transaction_output_list_unref(&change);
+  cardano_utxo_list_unref(&remaining);
+  cardano_utxo_list_unref(&selected);
+  cardano_coin_selector_unref(&selector);
+  request_free(&request);
+  return (unsigned int)result;
+}
+
+unsigned int
+cometa_coin_selection_native(unsigned int algorithm, uint64_t seed, unsigned int strategy, const unsigned char* bytes, size_t size, cardano_buffer_t** output)
+{
+  *output                                      = NULL;
+  owned_request_t                    request   = { 0 };
+  cardano_coin_selector_t*           selector  = NULL;
+  cardano_utxo_list_t*               selected  = NULL;
+  cardano_utxo_list_t*               remaining = NULL;
+  cardano_transaction_output_list_t* change    = NULL;
+  cardano_cbor_writer_t*             writer    = NULL;
+  cardano_error_t                    result    = read_request(bytes, size, &request);
+  if (result == CARDANO_SUCCESS)
+  {
+    if (algorithm == 0U)
+    {
+      result = cardano_large_first_coin_selector_new(&selector);
+    }
+    else if (algorithm == 1U)
+    {
+      result = cardano_random_improve_coin_selector_new(&selector);
+    }
+    else if (algorithm == 2U && strategy <= 1U)
+    {
+      result = cardano_random_improve_coin_selector_new_with_options(seed, (cardano_selection_strategy_t)strategy, &selector);
+    }
+    else
+    {
+      result = CARDANO_ERROR_INVALID_ARGUMENT;
+    }
   }
   if (result == CARDANO_SUCCESS)
   {

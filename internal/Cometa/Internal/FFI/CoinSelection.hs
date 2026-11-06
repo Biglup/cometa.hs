@@ -16,7 +16,7 @@
 {-# OPTIONS_HADDOCK hide #-}
 
 -- | Raw selector adapter. Safe calls may re-enter Haskell through runtime dispatch.
-module Cometa.Internal.FFI.CoinSelection (cMinimumAda, cSelect) where
+module Cometa.Internal.FFI.CoinSelection (cMinimumAda, cSelect, cNativeSelect) where
 
 import Cometa.Internal.FFI.Native (NativeCode)
 import Cometa.Internal.FFI.Runtime (Buffer, Context)
@@ -29,3 +29,7 @@ foreign import ccall safe "cometa_coin_selection_minimum_ada"
 
 foreign import ccall safe "cometa_coin_selection_invoke"
   cSelect :: Ptr Context -> Ptr Word8 -> CSize -> Ptr (Ptr Buffer) -> IO NativeCode
+
+-- Independent operation-local native owners; no callbacks or borrowed state escape.
+foreign import ccall safe "cometa_coin_selection_native"
+  cNativeSelect :: CUInt -> Word64 -> CUInt -> Ptr Word8 -> CSize -> Ptr (Ptr Buffer) -> IO NativeCode

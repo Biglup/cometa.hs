@@ -55,6 +55,19 @@ unsigned int cometa_coin_selector_new(cometa_runtime_t* runtime, const unsigned 
 unsigned int cometa_coin_selection_invoke(cometa_runtime_t* runtime, const unsigned char* bytes, size_t size, cardano_buffer_t** output);
 
 /**
+ * \brief Execute an actual native algorithm with operation-local ownership.
+ * \param algorithm 0 largest-first, 1 secure-seeded random-improve, 2 seeded.
+ * \param seed Seed for algorithm 2, ignored otherwise; replayed on each call.
+ * \param strategy 0 minimal or 1 optimal, for algorithm 2 only.
+ * \param bytes Borrowed validated request snapshot, including full parameters.
+ * \param size Complete request size.
+ * \param output Owned result buffer on success, NULL on failure.
+ * \return Native status. Constructor, request fields, and all three result
+ * lists are released synchronously before return, including partial failures.
+ */
+unsigned int cometa_coin_selection_native(unsigned int algorithm, uint64_t seed, unsigned int strategy, const unsigned char* bytes, size_t size, cardano_buffer_t** output);
+
+/**
  * \brief Compute minimum Ada with the pinned native fee utility.
  * \param bytes Borrowed fresh semantic output CBOR until return.
  * \param size Complete output byte count.
