@@ -2918,3 +2918,301 @@ missing installed APIs. Voting callbacks, subtransaction building and deferred
 local drafts remain P12 work. Remaining contextual authority/index queries and
 JSON inspection retain explicit pending ledger entries; this is not a claim
 of complete Dijkstra building or live-network conformance.
+
+
+### Deferred ergonomics review
+
+A future API ergonomics pass may introduce explicit `ToPlutusData` conversion
+for domain redeemers, keeping `Either Error` in deferred callbacks and preserving
+exact bytes for existing encoded values. This is intentionally deferred: current
+building work retains `EncodedPlutusData` and does not add generic derivation or
+implicit constructor-tag choices. Review schema compatibility and complete caller
+workflows before adopting the class.
+
+
+### P12: Dijkstra building and contextual accounting
+
+#### Balance workflow and source review
+
+Reviewed the existing pinned cardano-api Fee.hs evaluation/balance workflow and
+[sc-tools CoinSelection.balanceChanges](https://github.com/input-output-hk/sc-tools/blob/main/src/coin-selection/lib/Convex/CoinSelection.hs)
+(current main source reviewed 2026-11-06). sc-tools computes address-level input/output
+changes from resolved UTxOs; Cometa instead exposes the native ledger conservation
+quantity, including deposits, refunds, withdrawals, minting, donation and direct
+account deposits. Positive values are surplus and negative values are deficit.
+
+At native revision `eadb95cd3ca7f711c203d7f2f4ee21c150d4d7f1`, reviewed
+`transaction_builder/balancing/transaction_balancing.{h,c}` and its
+`compute_imbalance`, `compute_*_imbalance`, `add_repeated_pool_deposits`, and
+`is_transaction_balanced` paths. Top-level accounting deliberately excludes
+subtransactions; batch accounting includes all bodies and refunds pool deposits
+charged in more than one body. Local intents have no fee. The caller resolves
+spending inputs; reference and collateral inputs do not contribute value.
+
+The public Building functions reuse the existing `Parameters`, `Utxo`,
+`Transaction`, `SubTransaction`, signed `Value` and `IO (Either Error ...)`
+boundary. No special balance wrapper or effect framework is needed. Missing or
+duplicate resolution is rejected. Preflight computes all native body arithmetic
+intermediates in Integer, then checks signed bounds before native additions.
+For batches, separately bounded positive/negative component totals protect any
+native body iteration order, including the repeated-pool refund. Native results
+use a private signed coin/assets tuple because ledger Value CBOR encodes unsigned
+coin. Parsed values, references, parameters and result buffers are scoped on
+success and failure. `isBalanced` is exactly zero batch imbalance; it does not
+assert chain availability, valid signatures, scripts or ledger admission.
+
+
+### P12 contextual transaction utilities
+
+Reviewed actual established Haskell source before implementation:
+
+* cardano-api 5e63165a4bb7481a03d2e50464dc9c4f106c9fa5,
+  [Tx.Internal.Body](https://github.com/IntersectMBO/cardano-api/blob/5e63165a4bb7481a03d2e50464dc9c4f106c9fa5/cardano-api/src/Cardano/Api/Tx/Internal/Body.hs),
+  downloaded /tmp/p11-cardano-api-body.hs: indexTxWithdrawals548+ orders stake
+  addresses; indexTxCertificates645+ includes witnessed and unwitnessed certs in
+  list order; indexTxVotingProcedures781+ obtains voter rank from the ledger
+  map, independent of action count. collectTxBodyScriptWitnesses2296+ uses these
+  identities to associate body objects with script witnesses. Cometa follows the
+  complete-body, zero-based ordering workflow without era/witness wrappers.
+* Same commit,
+  [Tx.Internal.Fee](https://github.com/IntersectMBO/cardano-api/blob/5e63165a4bb7481a03d2e50464dc9c4f106c9fa5/cardano-api/src/Cardano/Api/Tx/Internal/Fee.hs),
+  actual /tmp/p09-api-fee.hs: estimateTransactionKeyWitnessCount496+ unions a
+  role-neutral Set(KeyHash Witness) for extra keys, withdrawals, certificates
+  including pool owners, and voters, then conservatively counts inputs and
+  collateral because resolved UTxO keys are unavailable. Auto-balance1158+
+  explains this overestimate and uses resolved UTxO data for fee calculation.
+  Cometa receives resolved snapshots and exposes the native unique direct hashes
+  as Set Blake2bHash, checks every returned digest has28bytes, and assigns no
+  payment/stake/governance role to a heterogeneous authority set.
+
+Workflow: validate/import address, voter, existing RedeemerId or encoded
+certificate; inspect a complete immutable transaction with qualified Indices
+helpers; handle legitimate absence with Maybe; assemble deferred redeemer data.
+Certificate canonicalization uses one IO(Either Error ...) boundary. Indices
+become stale after body edits. SubTransaction.Indices inspects one local level.
+For signing, pass complete outer spending/collateral resolutions to
+Transaction.Authority.requiredKeyHashes, handle one error boundary, then select
+wallet signing keys by the resulting unique role-neutral hashes.
+
+Exact native audit: eadb95cd3ca7f711c203d7f2f4ee21c150d4d7f1.
+
+* Public transaction/transaction.h declares8 find functions and get_unique_signers.
+  sub_transaction.h has no index or authority discovery equivalents. Sub index
+  APIs are shared level-local Haskell inspection conveniences.
+* transaction.c993+ withdrawal lookup delegates to common/ledger_order.c. Rank
+  key: network class(testnet0/mainnet1), credential(script0/key1), hash bytes.
+  All non1 network tags map to testnet class0. Native counts every strictly
+  smaller key and detects equality by this normalized key, including network
+  aliases. Public RewardAddress ordinarily orders exact network then KEY before
+  SCRIPT, so its Ord is unsuitable for ledger rank.
+* transaction.c1140+ voter lookup: committee, DRep, pool; SCRIPT before KEY within
+  role; then hash bytes. One voter counts once despite multiple action votes.
+  Public Voter Ord places KEY before SCRIPT and must not determine ledger rank.
+* transaction.c1170+ redeemer lookup counts smaller(tag,index) identities,
+  independent of witness collection order. Public schema rejects duplicate
+  identities and indices aboveWord32.
+* transaction.c1056+ certificate lookup serializes native subtypes and compares
+  their bytes, retaining list order/duplicates. Subtype codecs canonicalize
+  containers and integer widths. Semantic Certificate Eq is insufficient:
+  UnitInterval retains numerator/denominator for encoding but Eq compares numeric
+  values; native bytes distinguish2/4 from1/2. findCertificate therefore accepts
+  EncodedCertificate and runs native canonical comparison in IO. Public pool
+  owner decoder rejects duplicates, so that native corner cannot enter a Cometa
+  validated transaction.
+* unique_signers.c1259+ analyzes ONLY outer key guards, spending/collateral
+  payment addresses, key withdrawals, supported certificates and key voters.
+  get_required_signers filters script guards. No native-script required-key
+  discovery, script credential keys, Byron bootstrap authorities, nested levels,
+  or legacy update delegate-state discovery is promised. This is direct native
+  authority analysis, not complete script/ledger witness satisfaction.
+* Complete outer spending/collateral resolution is required; duplicate
+  references rejected. Extra UTxOs allowed; reference inputs are irrelevant.
+  Native parsed snapshots are operation-local, and caller bytes never mutate.
+
+Ownership: certificate adapter borrows collection/target, parses temporary
+owners, assembles an empty native transaction containing those certs, calls the
+public find function, then releases all readers/cert/set/input/output/body/witness/
+transaction owners. ElementNotFound9 maps to Right Nothing; other statuses stay
+NativeError. No private native AST. Authority adapter owns parsed tx/UTxOs/hash
+set/writer/readers; initializes outputNULL, transfers only fresh serialized
+buffer, and cleans partial state on failure. Runtime.withOwnedBuffer copies and
+brackets that buffer. Safe synchronous FFI preserves schedulability; operations
+have independent state, no callbacks, no interruptible native unwind.
+
+Newly authored tests: test/ContextualTransaction.hs and independent public native
+oracle test/cbits/contextual_transaction_oracle.c. Cover network aliases, mixed
+key/script ledger ordering, multi-action voter deduplication, redeemer ranks,
+nonminimal/indefinite certificate canonicalization, duplicate cert list positions,
+rational2/4 vs1/2 semantic equality/native distinction, top/sub correspondence,
+sub primitives/absence, exact input bytes, six distinct direct outer authorities,
+native-script/script-guard/nested exclusions, unresolved reference allowed,
+repeated success, missing/duplicate resolution, partial malformed tx/UTxO parses.
+No external fixture copying. Native source copyright Biglup Labs, Apache-2.0.
+
+Subtransaction authority discovery deliberately deferred: no public native
+entrypoint, and requiredTopLevelGuards/level-signing semantics need separate audit.
+Existing signed subtransaction witnesses are already serialized inside top body;
+outer fee witness sizing must not add their sizes a second time or treat nested
+keys as missing outer authorities.
+
+
+### P12 sub-transaction builder API/source review
+
+Before choosing this API, inspected actual established Haskell caller assembly
+and evaluation workflow in cardano-api `5e63165a4bb7481a03d2e50464dc9c4f106c9fa5`
+[Tx/Internal/Fee.hs](https://github.com/IntersectMBO/cardano-api/blob/5e63165a4bb7481a03d2e50464dc9c4f106c9fa5/cardano-api/src/Cardano/Api/Tx/Internal/Fee.hs),
+local `/tmp/p09-api-fee.hs`: createTransactionBody / explicit TxBodyContent before
+evaluateTransactionExecutionUnits at1100–1155, indexed per-script execution and
+protocol/resolved UTxO inputs at721–775, explicit budget substitution then fee
+calculation. Inspected Atlas source snapshot `/tmp/protocol-atlas-balance.hs`
+(commit c3adfb416242ea25a244bfaa1614213eecdc55d9, Apache-2.0),
+GeniusYield.Transaction.CoinSelection.Balance SelectionParams/SelectionResult,
+separating requested outputs from selected inputs/change and balance failures.
+Neither source establishes a native Dijkstra local-intent contract: that is
+reviewed directly against the pinned native API and not inferred from Haskell
+fee/balancing names. Cometa retains owned typed values, ordinary monoidal plans,
+explicit protocol/input snapshots and one IO(Either Error a) build boundary;
+uses a distinct SubTransaction.Plan and Builder because local intents must not
+silently select inputs, add change, fee or collateral.
+
+Native audited at eadb95cd3ca7f711c203d7f2f4ee21c150d4d7f1:
+`lib/include/cardano/transaction_builder/sub_transaction_builder.h`,
+`lib/src/transaction_builder/sub_transaction_builder.c`,
+`internals/builder_sub_build.{c,h}`, `builder_state.c`, `builder_outputs.c`,
+`builder_mint.c`, `balancing/deferred_redeemer_list.c`. Build creates the exact
+supplied input set/outputs, assigns spend indices, resolves deferred callbacks
+once against state.transaction (body inputs installed, fee0), then checks
+redeemers, copies all allowed fields into a sub body and evaluates native V4.
+Evaluation creates an empty carrier batch containing this sub at index0; returned
+budgets therefore need not match execution in the eventual outer context.
+Finally script-data hash is computed from evaluated redeemers. No balancing,
+fee/minAda computation or implicit coin summation occurs in this local path.
+`builder_add_output` only retains an output in its list. Native fixed global
+VM budget remains100m memory/100b CPU. No evaluator/selector injection is exposed
+because those do not exist in the public native sub-builder.
+
+Config is total record Parameters/SlotConfig/Fields.BodyNetwork, avoiding the
+broader address NetworkId0..15 domain for ledger body network0/1. Abstract local
+Plan wraps shared internal Plan to reuse intrinsic conflict checks, normalization,
+callback indexing and canonical transport while exposing only sub-valid ops.
+Nested sub-attachment and starting-account-balance operations are not exposed.
+Local-only requireTopLevelGuard uses shared private tag26 but no public top-plan
+constructor. Public resolvedInputs supports retaining snapshots for later outer
+attachment; build validates every original conflicting snapshot before this
+accessor's unique sorted result is used in the successful workflow.
+
+Preflight validates shared intrinsic plan checks, all supplied validity endpoints,
+native parameter representation, aggregate input/source and output/sink quantities
+and key/pool/governance/DRep deposits within signed64. Native local build itself
+has no monetary balance arithmetic; these conservative bounds also avoid carrying
+unrepresentable aggregates into the enclosing native builder. Postbuild checks
+actual sub CBOR <=protocol maxTxSize, each output's fresh serialized value size
+<=optional maxValueSize and total evaluated exunits <=required maxTxExUnits when
+redeemers exist. No balance, minimumAda or complete ledger admission assertion.
+Later witnesses/outer fields consume additional size. Local callback dispatch
+canonicalizes owned UTxO snapshots and checks exact reference correspondence and
+zero draft fee before user invocation. Reference inputs are absent from callback
+spending snapshots, but present in local draft and explicit resolver list.
+
+Ownership: C parses fresh parameters, reader(s), instruction objects, builder,
+resultsub, writer, buffers. Native state retains params and every inserted child;
+local parsed references are unref'd after each operation. Shared typed proposal
+conversion retains action/account/anchor children, all released after native
+builder has built/retained its independently owned proposal. Context-array
+storage is allocated for complete instruction count before registration and
+freed only after sub-builder destruction. Native callback registrations borrow
+user_context; Runtime State roots complete plan/closures until safe native C
+return and callback worker joins. One runtime gate encloses all native acquisition,
+callbacks and destruction. Success output and copied failure diagnostic transfer
+two independent bracketed buffers; no native pointer escapes the operation.
+Partial callback replies (including parsed payload followed by trailing bytes)
+release partial payload before native list cleanup. Expected Error identity,
+lazy payload exceptions and cancellation use shared Runtime exception protocol.
+
+Public native symbol adaptation: typed certificate operation replaces all
+staking/DRep certificate shorthand constructors; typed payTo replaces send/lock
+shorthands without hiding native domain behavior; typed policy/name mint replaces
+hex/id aliases. Typed Action proposal dispatch reaches all seven native proposal
+constructors, supplying configured deposit. Single/shared-voter immediate/deferred
+vote operations, guards, required outer guards, direct deposits, balance intervals,
+network, donation and slot validity all have direct native effects. No raw handle,
+refcount or error-buffer setter appears publicly.
+
+Tests SubTransactionBuilder: exact unbalanced intent inputs/outputs; nativeV4
+immediate/deferred agreement, exact budgets + commitment; reference script only
+resolution; canonical out-of-order2-input local deferred index and one callback;
+guards/account deposits/intervals/donation/required outer guard; all seven proposal
+constructors+protocol deposit; grouped two-action voting one callback; conflict,
+old-language and slot errors; signed aggregate/deposit, serialization/value size,
+execution cap errors; original typed error, lazy payload poison, malformed plan,
+partial trailing reply repeated cleanup+GC, cancellation after observed callback
+entry and registration baseline. V4 Flat lambda-unit fixture derived from native
+Apache-2.0 lib/tests/uplc/native_tx_evaluator.cpp build_v4_script at pinned commit.
+Existing native/public
+codec tests remain authoritative for imported certificate/governance corpus.
+
+Compiled example SubTransactionBuilding builds an exact local intent, signs its
+own hash with existing Signing.signSubTransaction, attaches signed bytes and
+resolved snapshots, balances parent funds and batch, signs parent, calls
+Building.isBalanced on the complete resolved union and prints both body hashes.
+All references/keys/funds are synthetic; no network calls.
+
+
+## P12 top-level governance/Dijkstra/batch builder research
+
+Reviewed native eadb95cd3ca7f711c203d7f2f4ee21c150d4d7f1 headers/source before API implementation: transaction_builder/transaction_builder.h and corresponding .c; internals builder_entities.c, builder_proposals.c, builder_votes.c, builder_redeemers.c, builder_build.c; balancing/transaction_balancing.c; proposal_procedures/proposal_procedure.h and retained getter definitions; account_balance_interval.c; fee.h. Public APIs remain pure Plan assembly and one IO(Either Error Transaction) build boundary. No ToPlutusData ergonomics added; user deferred that topic.
+
+Haskell caller design evidence reviewed actual sources:
+
+* sc-tools 4546122230491db4839a4a42fc2bc601f7900909 [Convex.BuildTx](https://github.com/input-output-hk/sc-tools/blob/4546122230491db4839a4a42fc2bc601f7900909/src/base/lib/Convex/BuildTx.hs), cached /tmp/cometa-haskell-review/sc-build.txt. addWithdrawal modifies a body builder; addScriptWithdrawalWithRedeemerFn accepts a pure TxBodyContent -> redeemer function, packages it as a witness and adds a withdrawal. The caller obtains network, constructs typed stake authority, declares witness function, and interprets body construction later. lookupIndex* total Maybe helpers coexist with partial findIndex* convenience functions. Cometa follows deferred pure snapshots and total explicit errors, not ToData typeclasses or partial lookup; runtime effects and ownership remain internal.
+* Atlas c3adfb416242ea25a244bfaa1614213eecdc55d9 [TxBuilder/Class.hs](https://github.com/geniusyield/atlas/blob/c3adfb416242ea25a244bfaa1614213eecdc55d9/src/GeniusYield/TxBuilder/Class.hs), cached atlas-class.txt: mustHaveVotingProcedures installs voter -> witness plus action/procedure Map; mustHaveProposalProcedures installs ordered proposal/witness pairs; mustHaveDonation stores donation; finaliseCert/proposal completion obtains deposit requirements from queried protocol context. Cometa uses one voter group/one redeemer for multiple actions, preserves proposal order and gets proposal deposits from the explicit Config protocol snapshot. It rejects conflicting requirements instead of a map's implicit precedence. Conway-era source does not establish Dijkstra batching/accounts support.
+* cardano-api 5e63165a4bb7481a03d2e50464dc9c4f106c9fa5 [Tx/Internal/Body.hs](https://github.com/IntersectMBO/cardano-api/blob/5e63165a4bb7481a03d2e50464dc9c4f106c9fa5/cardano-api/src/Cardano/Api/Tx/Internal/Body.hs), cached /tmp/p11-cardano-api-body.hs: mkTxVotingProcedures accepts grouped procedures plus script witnesses and derives canonical voting witness indices; proposal body APIs index ordered proposal collections; treasury donation is a separate field from current treasury value. Cometa reuses existing typed governance values, groups callback ownership per voter, and exposes only native-supported builder fields. Native header has set_donation but no current-treasury setter; standalone Body.fieldTreasuryValue remains available for manual assembly, without claiming native builder coverage.
+
+Native domain contracts:
+
+Guards use Credential Guard; key guard equals signer, script guard requires supplied script. Top guardWithRedeemer takes ScriptHash, preventing key+argument misuse. Top-level guard scripts use V4; guard order includes existing required signers. Duplicate identical guard requirements are idempotent; conflicting arguments fail. Direct deposits must be positive and <=INT64_MAX individually and accumulated per account (native builder_entities.c285+ confirms both; zero is not invented rejection). Account and starting intervals are distinct; native permits lower>=upper (representability is not satisfiability), rejects no bounds. Haskell keeps identical interval idempotence and reports different requirements rather than native last-write wins. Donation instructions add with Integer accumulation and signed bound validation, then emit one setter preserving explicit0.
+
+Proposal convenience functions create seven native action alternatives and supply protocol governanceActionDeposit. Haskell propose reward Action Anchor avoids accepting a Proposal.deposit that native would discard. Native ParameterChange and TreasuryWithdrawals require nonnull policy hash even though standalone Action supports absent guardrail; public docs state this native workflow restriction. Proposal encoding transports a typed proposal with placeholder deposit0, then retained native to_action/getter snapshots route to the seven native builder wrappers, releasing all temporary owners after builder retains its fresh proposal. Native proposal collection add appends without deduplication, preserving order and duplicate proposal instructions. All7 alternatives tested through public Haskell values against resulting semantic proposals/current deposit.
+
+Grouped votes attach one immediate or deferred argument per voter with many action/procedure pairs. Empty deferred group roots its pure closure but never invokes it. Same-voter competing deferred groups have distinct rebased callback slots and fail consistency validation, without comparing functions. C registers one deferred callback for the first normalized vote in a group; later actions use ordinary vote NULL, preserving the original native hash->redeemer map object. Shared Runtime table/rooting/cancellation contracts from P11 remain unchanged; new vote callbacks use same protected snapshot/decode/force/copy worker.
+
+Batch attach preserves exact sub CBOR, body hash and signatures by native retain; no edits/canonicalization of supplied sub occurs. Haskell requires every spend/reference snapshot, validates consistent snapshots and spending disjointness across all levels before C. Root/sub agent provide independent signed workflow. Parent wallet and collateral eligibility excludes every sub spend/reference, including overlap in wallet lists; explicit parent references still price independently. sourceExtras includes resolved sub spending value, positive mint, withdrawals and certificate refunds; sinkExtras includes sub outputs, burn, certificate deposits, exact declared sub proposal deposits, donation/direct deposits. Top proposal costs use configured deposit. Pure sums use Integer before native signed-bound conversion; typed Mint amounts already enforce Int64 before internal conversion. Outer witness reserve is outer-only; embedded sub witness bytes already occur in transaction size and are not counted as missing outer witnesses. validateBuilt caps aggregate outer+sub declared execution units and full serialized batch size.
+
+Reference-script fee preflight forms outer possible selections/references plus each sub's spent/reference UTxOs once per level. The public standalone helper rejects duplicate identities; private native transport op1 deliberately accepts repeated snapshots across levels and prices total serialized script bytes through native tier logic once, avoiding underpricing by summing separate tier resets. Parameters are validated and required byte price checked before this private call. The native header explicitly bills repeated references per level, including native reference scripts and scripts not executed. Missing sub references are rejected by Cometa instead of native optional skip because complete fee/accounting snapshots are the public contract.
+
+Source ownership: all new read_* objects are fresh local owners; native builder retains arguments; cleanup releases credential/interval/proposal/voter/action/procedure/sub/resolved-list on every path. Proposal to_action/getters all return retained refs, released locally after wrapper call. Attached sub bytes get parsed into native owned objects, retained through builder destruction, original encodings preserved by existing native cached original children. Deferred context array fixed allocation precedes registrations, freed only after builder destruction; grouped Runtime remains live through safe FFI unwind and final native cleanup.
+
+Internal shared op26 RequiredTopLevelGuard is only exposed through SubTransaction.Plan; top validateTopLevel rejects it. New op schemas communicated to sub agent, and its adapter rejects top-only starting balances and attached subs. Reuse of Plan bytecode retains callback rebasing and existing law tests, with native adapters selecting level-specific calls.
+
+No upstream code copied. Source licenses native/cardano-api/Atlas Apache-2.0, sc-tools licensing follows reviewed repository.
+
+Native proposal runtime finding: ParameterChange/TreasuryWithdrawals wrappers always install a Proposing redeemer with fixed native unit payload d87980, not just a policy reference. Therefore their policy must resolve to an executable Plutus script. Native allOf[] policy fixtures fail (top requires collateral; sub evaluator cannot resolve script redeemer), corrected to actual V4 Flat lambda unit, full369parameter coefficients100 and collateral for top. Shared requiresEvaluation marks these proposals, preserving complete fee/budget preflight. Tests now run actual guardrails native VM. Public documentation states unit argument and native absence of a custom proposing argument API. Native also preserves duplicate proposals by direct array_push; no implicit set deduplication assumed.
+
+Attached imported intent audits: validitySlots now includes each sub's invalidBefore/invalidAfter, preventing uint64 schedule multiplication overflow before C. Attached sub output values are checked against protocol maxValueSize before attachment, because native add_sub only checks IDs/resolution and immutable imported values bypass the local subbuilder. Regression cases cover maxBound validity endpoint and too-large encoded coin value with exact structured errors. Account empty bound pair remains native invalid, lower>=upper is not newly rejected.
+
+Signed declared budget audit: parent native evaluator returns outer budgets only; stored signed sub budgets could be stale despite successful script execution. Internal.BatchValidation evaluates every nonempty sub target against finalTx and complete dedup resolved union, verifies actual memory/CPU <= stored declared budgets, and never modifies intent bytes. Top Builder now invokes this after ordinary decode/result limits; configured evaluator must support SubTransaction target, default uses Native.Config with original schedule/protocol/models. Native evaluator recomputes the complete batch for each target; repeated native work is a correctness cost, not hidden mutations. Actual imported V4 guard unit0 budget regression fails while adequate declared budget retains exact supplied sub CBOR; signed mint fixture supplied separately by subagent.
+
+Native selector surplus evidence: coin_selection/internals/random_improve_coin_selector.c150/176 deliberately requires a nonempty outer selection and falls back to a single Ada pick even when no value is required. Empty-wallet surplus batch is expected InsufficientBalance; retained as regression. Success case supplies an independent fee-payer wallet input and verifies exact conservation: outer10m plus party surplus5m equals outer outputs14.8m plus fee0.2m; deficit test outer10m+party10m equals suboutputs12m+outeroutputs7.8m+fee0.2m. This matches native tests7951/8008, both of which supply batcher UTxOs. Public guide states default selector needs outer input.
+
+
+#### Integrated validation and next phase
+
+All 432 tests pass (307 public-package tests and 125 runtime tests). All 31
+offline executables run, including local signing, signed batch assembly and
+complete-batch conservation. The complete runtime suite passes Valgrind with
+zero errors, zero definitely/indirectly/possibly lost bytes and no suppressed
+allocations. Public declarations have complete Haddock coverage; strict guide
+HTML/link checks, HLint, Ormolu, ClangFormat, package/inventory and key/credential
+role checks pass. Source-package consumer and full public-suite Valgrind results
+are recorded on the PR alongside hosted compiler/platform results.
+
+Signed scripted intents are reevaluated in their final enclosing context before
+the outer builder returns. Both budget components must fit the unchanged declared
+limits. The native evaluator currently recomputes the whole batch for each target;
+a future bulk-result API could avoid that repeated work without weakening the
+check. Injected evaluators must implement subtransaction targets for such batches.
+
+Next is the Blockfrost provider and applicable native example workflows (P13),
+followed by the remaining symbol/inspection audit and release hardening. This
+batch does not establish live-network Dijkstra acceptance. The ToPlutusData
+ergonomics proposal remains deferred to a separate API review.

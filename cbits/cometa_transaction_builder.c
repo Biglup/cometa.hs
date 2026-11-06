@@ -37,6 +37,7 @@ typedef struct
     cometa_runtime_t* runtime;
     uint64_t          index;
     bool              deferred_mint;
+    bool              deferred_vote;
 } deferred_context_t;
 
 /* STATIC FUNCTIONS **********************************************************/
@@ -86,6 +87,13 @@ READ_OBJECT(read_script, cardano_script_t, cardano_script_from_cbor)
 READ_OBJECT(read_data, cardano_plutus_data_t, cardano_plutus_data_from_cbor)
 READ_OBJECT(read_certificate, cardano_certificate_t, cardano_certificate_from_cbor)
 READ_OBJECT(read_metadata, cardano_metadatum_t, cardano_metadatum_from_cbor)
+READ_OBJECT(read_credential, cardano_credential_t, cardano_credential_from_cbor)
+READ_OBJECT(read_interval, cardano_account_balance_interval_t, cardano_account_balance_interval_from_cbor)
+READ_OBJECT(read_proposal, cardano_proposal_procedure_t, cardano_proposal_procedure_from_cbor)
+READ_OBJECT(read_voter, cardano_voter_t, cardano_voter_from_cbor)
+READ_OBJECT(read_action_id, cardano_governance_action_id_t, cardano_governance_action_id_from_cbor)
+READ_OBJECT(read_procedure, cardano_voting_procedure_t, cardano_voting_procedure_from_cbor)
+READ_OBJECT(read_sub, cardano_sub_transaction_t, cardano_sub_transaction_from_cbor)
 #undef READ_OBJECT
 
 /** \brief Address factories copy their byte-string input before buffer release. */
@@ -204,27 +212,156 @@ cleanup:
   return result;
 }
 
+/* Proposal conversion/getters return retained references; each helper releases
+ * them after the native builder has retained its independently built proposal.
+ * The placeholder serialized deposit is intentionally replaced by protocol state. */
+static cardano_error_t
+apply_proposal(cardano_tx_builder_t* builder, cardano_proposal_procedure_t* proposal)
+{
+  cardano_reward_address_t*        account = cardano_proposal_procedure_get_reward_address(proposal);
+  cardano_anchor_t*                anchor  = cardano_proposal_procedure_get_anchor(proposal);
+  cardano_governance_action_type_t kind;
+  cardano_error_t                  result = cardano_proposal_procedure_get_action_type(proposal, &kind);
+  if (result == CARDANO_SUCCESS)
+  {
+    switch (kind)
+    {
+      case 0:
+      {
+        cardano_parameter_change_action_t* action = NULL;
+        result                                    = cardano_proposal_procedure_to_parameter_change_action(proposal, &action);
+        if (result == CARDANO_SUCCESS)
+        {
+          cardano_protocol_param_update_t* protocol_param_update = cardano_parameter_change_action_get_protocol_param_update(action);
+          cardano_governance_action_id_t*  governance_action_id  = cardano_parameter_change_action_get_governance_action_id(action);
+          cardano_blake2b_hash_t*          policy_hash           = cardano_parameter_change_action_get_policy_hash(action);
+          cardano_tx_builder_propose_parameter_change(builder, account, anchor, protocol_param_update, governance_action_id, policy_hash);
+          cardano_protocol_param_update_unref(&protocol_param_update);
+          cardano_governance_action_id_unref(&governance_action_id);
+          cardano_blake2b_hash_unref(&policy_hash);
+        }
+        cardano_parameter_change_action_unref(&action);
+        break;
+      }
+      case 1:
+      {
+        cardano_hard_fork_initiation_action_t* action = NULL;
+        result                                        = cardano_proposal_procedure_to_hard_fork_initiation_action(proposal, &action);
+        if (result == CARDANO_SUCCESS)
+        {
+          cardano_protocol_version_t*     protocol_version     = cardano_hard_fork_initiation_action_get_protocol_version(action);
+          cardano_governance_action_id_t* governance_action_id = cardano_hard_fork_initiation_action_get_governance_action_id(action);
+          cardano_tx_builder_propose_hardfork(builder, account, anchor, protocol_version, governance_action_id);
+          cardano_protocol_version_unref(&protocol_version);
+          cardano_governance_action_id_unref(&governance_action_id);
+        }
+        cardano_hard_fork_initiation_action_unref(&action);
+        break;
+      }
+      case 2:
+      {
+        cardano_treasury_withdrawals_action_t* action = NULL;
+        result                                        = cardano_proposal_procedure_to_treasury_withdrawals_action(proposal, &action);
+        if (result == CARDANO_SUCCESS)
+        {
+          cardano_withdrawal_map_t* withdrawals = cardano_treasury_withdrawals_action_get_withdrawals(action);
+          cardano_blake2b_hash_t*   policy_hash = cardano_treasury_withdrawals_action_get_policy_hash(action);
+          cardano_tx_builder_propose_treasury_withdrawals(builder, account, anchor, withdrawals, policy_hash);
+          cardano_withdrawal_map_unref(&withdrawals);
+          cardano_blake2b_hash_unref(&policy_hash);
+        }
+        cardano_treasury_withdrawals_action_unref(&action);
+        break;
+      }
+      case 3:
+      {
+        cardano_no_confidence_action_t* action = NULL;
+        result                                 = cardano_proposal_procedure_to_no_confidence_action(proposal, &action);
+        if (result == CARDANO_SUCCESS)
+        {
+          cardano_governance_action_id_t* governance_action_id = cardano_no_confidence_action_get_governance_action_id(action);
+          cardano_tx_builder_propose_no_confidence(builder, account, anchor, governance_action_id);
+          cardano_governance_action_id_unref(&governance_action_id);
+        }
+        cardano_no_confidence_action_unref(&action);
+        break;
+      }
+      case 4:
+      {
+        cardano_update_committee_action_t* action = NULL;
+        result                                    = cardano_proposal_procedure_to_update_committee_action(proposal, &action);
+        if (result == CARDANO_SUCCESS)
+        {
+          cardano_governance_action_id_t*  governance_action_id  = cardano_update_committee_action_get_governance_action_id(action);
+          cardano_credential_set_t*        members_to_be_removed = cardano_update_committee_action_get_members_to_be_removed(action);
+          cardano_committee_members_map_t* members_to_be_added   = cardano_update_committee_action_get_members_to_be_added(action);
+          cardano_unit_interval_t*         quorum                = cardano_update_committee_action_get_quorum(action);
+          cardano_tx_builder_propose_update_committee(builder, account, anchor, governance_action_id, members_to_be_removed, members_to_be_added, quorum);
+          cardano_governance_action_id_unref(&governance_action_id);
+          cardano_credential_set_unref(&members_to_be_removed);
+          cardano_committee_members_map_unref(&members_to_be_added);
+          cardano_unit_interval_unref(&quorum);
+        }
+        cardano_update_committee_action_unref(&action);
+        break;
+      }
+      case 5:
+      {
+        cardano_new_constitution_action_t* action = NULL;
+        result                                    = cardano_proposal_procedure_to_constitution_action(proposal, &action);
+        if (result == CARDANO_SUCCESS)
+        {
+          cardano_governance_action_id_t* governance_action_id = cardano_new_constitution_action_get_governance_action_id(action);
+          cardano_constitution_t*         constitution         = cardano_new_constitution_action_get_constitution(action);
+          cardano_tx_builder_propose_new_constitution(builder, account, anchor, governance_action_id, constitution);
+          cardano_governance_action_id_unref(&governance_action_id);
+          cardano_constitution_unref(&constitution);
+        }
+        cardano_new_constitution_action_unref(&action);
+        break;
+      }
+      case 6:
+        cardano_tx_builder_propose_info(builder, account, anchor);
+        break;
+      default:
+        result = CARDANO_ERROR_DECODING;
+        break;
+    }
+  }
+  cardano_reward_address_unref(&account);
+  cardano_anchor_unref(&anchor);
+  return result;
+}
+
 /** \brief Apply one instruction, releasing local references after builder retention. */
 static cardano_error_t
 instruction(cardano_tx_builder_t* builder, cardano_cbor_reader_t* reader, cardano_utxo_list_t* resolved, deferred_context_t* contexts, size_t position)
 {
-  deferred_context_t*           context   = &contexts[position];
-  static const int64_t          arities[] = { 2, 4, 2, 2, 5, 3, 2, 3, 4, 2, 2, 2, 4, 5, 3, 4 };
-  int64_t                       count     = 0;
-  uint64_t                      tag = 0U, number = 0U;
-  int64_t                       signed_number = 0;
-  cardano_transaction_output_t* output        = NULL;
-  cardano_utxo_t*               utxo          = NULL;
-  cardano_script_t*             script        = NULL;
-  cardano_plutus_data_t*        redeemer      = NULL;
-  cardano_plutus_data_t*        datum         = NULL;
-  cardano_certificate_t*        certificate   = NULL;
-  cardano_metadatum_t*          metadata      = NULL;
-  cardano_blake2b_hash_t*       hash          = NULL;
-  cardano_asset_name_t*         asset_name    = NULL;
-  cardano_reward_address_t*     reward        = NULL;
-  cardano_buffer_t*             bytes         = NULL;
-  cardano_error_t               result        = cardano_cbor_reader_read_start_array(reader, &count);
+  deferred_context_t*                 context   = &contexts[position];
+  static const int64_t                arities[] = { 2, 4, 2, 2, 5, 3, 2, 3, 4, 2, 2, 2, 4, 5, 3, 4, 3, 0, 3, 3, 3, 2, 2, 5, 5, 3 };
+  int64_t                             count     = 0;
+  uint64_t                            tag = 0U, number = 0U;
+  int64_t                             signed_number = 0;
+  cardano_transaction_output_t*       output        = NULL;
+  cardano_utxo_t*                     utxo          = NULL;
+  cardano_script_t*                   script        = NULL;
+  cardano_plutus_data_t*              redeemer      = NULL;
+  cardano_plutus_data_t*              datum         = NULL;
+  cardano_certificate_t*              certificate   = NULL;
+  cardano_metadatum_t*                metadata      = NULL;
+  cardano_blake2b_hash_t*             hash          = NULL;
+  cardano_asset_name_t*               asset_name    = NULL;
+  cardano_reward_address_t*           reward        = NULL;
+  cardano_credential_t*               credential    = NULL;
+  cardano_account_balance_interval_t* interval      = NULL;
+  cardano_proposal_procedure_t*       proposal      = NULL;
+  cardano_voter_t*                    voter         = NULL;
+  cardano_governance_action_id_t*     action_id     = NULL;
+  cardano_voting_procedure_t*         procedure     = NULL;
+  cardano_sub_transaction_t*          sub           = NULL;
+  cardano_utxo_list_t*                sub_resolved  = NULL;
+  cardano_buffer_t*                   bytes         = NULL;
+  cardano_error_t                     result        = cardano_cbor_reader_read_start_array(reader, &count);
   if (result == CARDANO_SUCCESS)
   {
     result = cardano_cbor_reader_read_uint(reader, &tag);
@@ -376,6 +513,100 @@ instruction(cardano_tx_builder_t* builder, cardano_cbor_reader_t* reader, cardan
       TRY(cardano_cbor_reader_read_uint(reader, &number));
       cardano_tx_builder_set_invalid_after(builder, number);
       break;
+    case 16:
+      TRY(read_credential(reader, &credential));
+      TRY(read_data(reader, &redeemer));
+      if (redeemer == NULL)
+      {
+        cardano_tx_builder_add_guard(builder, credential);
+      }
+      else
+      {
+        cardano_tx_builder_add_guard_with_redeemer(builder, credential, redeemer);
+      }
+      break;
+    case 18:
+    case 19:
+    case 20:
+      TRY(cardano_cbor_reader_read_bytestring(reader, &bytes));
+      TRY(cardano_reward_address_from_bytes(cardano_buffer_get_data(bytes), cardano_buffer_get_size(bytes), &reward));
+      if (tag == 18)
+      {
+        TRY(cardano_cbor_reader_read_uint(reader, &number));
+        cardano_tx_builder_add_direct_deposit(builder, reward, number);
+      }
+      else
+      {
+        TRY(read_interval(reader, &interval));
+        if (tag == 19)
+        {
+          cardano_tx_builder_add_account_balance_interval(builder, reward, interval);
+        }
+        else
+        {
+          cardano_tx_builder_add_starting_account_balance_interval(builder, reward, interval);
+        }
+      }
+      break;
+    case 21:
+      TRY(cardano_cbor_reader_read_uint(reader, &number));
+      cardano_tx_builder_set_donation(builder, number);
+      break;
+    case 22:
+      TRY(read_proposal(reader, &proposal));
+      TRY(apply_proposal(builder, proposal));
+      break;
+    case 23:
+    case 24:
+      TRY(read_voter(reader, &voter));
+      TRY(read_action_id(reader, &action_id));
+      TRY(read_procedure(reader, &procedure));
+      if (tag == 24)
+      {
+        TRY(cardano_cbor_reader_read_uint(reader, &context->index));
+        bool registered = false;
+        for (size_t i = 0; i < position; ++i)
+        {
+          if (contexts[i].deferred_vote && contexts[i].index == context->index)
+          {
+            registered = true;
+          }
+        }
+        context->deferred_vote = true;
+        if (registered)
+        {
+          cardano_tx_builder_vote(builder, voter, action_id, procedure, NULL);
+        }
+        else
+        {
+          cardano_tx_builder_vote_with_deferred_redeemer(builder, voter, action_id, procedure, deferred_callback, context);
+        }
+      }
+      else
+      {
+        TRY(read_data(reader, &redeemer));
+        cardano_tx_builder_vote(builder, voter, action_id, procedure, redeemer);
+      }
+      break;
+    case 25:
+      TRY(read_sub(reader, &sub));
+      TRY(read_utxos(reader, &sub_resolved));
+      for (size_t i = 0; i < cardano_utxo_list_get_length(sub_resolved); ++i)
+      {
+        cardano_utxo_t* item = NULL;
+        result               = cardano_utxo_list_get(sub_resolved, i, &item);
+        if (result == CARDANO_SUCCESS)
+        {
+          result = cardano_utxo_list_add(resolved, item);
+        }
+        cardano_utxo_unref(&item);
+        if (result != CARDANO_SUCCESS)
+        {
+          goto cleanup;
+        }
+      }
+      cardano_tx_builder_add_sub_transaction(builder, sub, sub_resolved);
+      break;
     default:
       result = CARDANO_ERROR_DECODING;
   }
@@ -384,6 +615,14 @@ instruction(cardano_tx_builder_t* builder, cardano_cbor_reader_t* reader, cardan
     result = cardano_cbor_reader_read_end_array(reader);
   }
 cleanup:
+  cardano_credential_unref(&credential);
+  cardano_account_balance_interval_unref(&interval);
+  cardano_proposal_procedure_unref(&proposal);
+  cardano_voter_unref(&voter);
+  cardano_governance_action_id_unref(&action_id);
+  cardano_voting_procedure_unref(&procedure);
+  cardano_sub_transaction_unref(&sub);
+  cardano_utxo_list_unref(&sub_resolved);
   cardano_transaction_output_unref(&output);
   cardano_utxo_unref(&utxo);
   cardano_script_unref(&script);

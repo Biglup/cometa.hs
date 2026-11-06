@@ -18,13 +18,16 @@ module Main (main) where
 -- IMPORTS --------------------------------------------------------------------
 
 import qualified CoinSelection
+import qualified ContextualTransaction
 import qualified DeferredRedeemer
+import qualified DijkstraBuilder
 import qualified Evaluation
 import qualified NativeCoinSelection
 import qualified NativeEvaluation
 import qualified ParameterSnapshot
 import qualified Provider
 import qualified Runtime
+import qualified SubTransactionBuilder
 import Test.Tasty (defaultMain, localOption, testGroup)
 import Test.Tasty.Runners (NumThreads (..))
 import qualified TransactionBuilder
@@ -49,5 +52,8 @@ main =
           NativeEvaluation.tests,
           DeferredRedeemer.tests,
           TransactionIndices.tests,
+          ContextualTransaction.tests,
+          SubTransactionBuilder.tests,
+          DijkstraBuilder.tests,
           Evaluation.tests
         ]

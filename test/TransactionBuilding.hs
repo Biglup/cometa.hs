@@ -25,14 +25,19 @@ module TransactionBuilding (tests) where
 import qualified Cometa.Address as Address
 import qualified Cometa.Address.Reward as Reward
 import qualified Cometa.Address.Shelley as Shelley
+import qualified Cometa.AssetId as Asset
+import qualified Cometa.AssetName as AssetName
 import qualified Cometa.Certificate as Certificate
 import qualified Cometa.Certificate.Collection as Certificates
 import qualified Cometa.Credential as Credential
 import Cometa.Error (Error (NativeError))
 import qualified Cometa.Error.Code as Code
 import qualified Cometa.Internal.Building as Internal
+import qualified Cometa.Internal.ParameterSnapshot as Snapshot
 import qualified Cometa.NetworkId as Network
 import qualified Cometa.PlutusData as Data
+import qualified Cometa.PolicyId as Policy
+import qualified Cometa.Pool.Parameters as Pool
 import qualified Cometa.Protocol.CostModels as Models
 import qualified Cometa.Protocol.ExUnits as Ex
 import qualified Cometa.Protocol.Parameters as Parameters
@@ -52,10 +57,12 @@ import qualified Cometa.Transaction.Redeemer as Redeemer
 import qualified Cometa.Transaction.Utxo as Utxo
 import qualified Cometa.Transaction.Witnesses as Witnesses
 import qualified Cometa.TransactionId as Id
+import qualified Cometa.UnitInterval as Unit
 import qualified Cometa.Value as Value
 import Control.Monad (forM_, replicateM_)
 import qualified Data.ByteString as B
 import Data.Either (isLeft)
+import qualified Data.Set as Set
 import qualified Data.Text
 import qualified Fixtures.ProtocolParameters as Fixture
 import Test.Tasty (TestTree, testGroup)
@@ -67,7 +74,11 @@ tests :: TestTree
 tests =
   testGroup
     "Transaction building utilities"
-    [ testCase "fee uses actual ledger frame size and checked arithmetic" checkBaseFee,
+    [ testCase "outer, local intent and complete batch accounting agree" checkBalance,
+      testCase "balance includes mint, withdrawals and direct account deposits" checkAccountBalance,
+      testCase "pool deposits are charged once across a batch" checkPoolBatch,
+      testCase "balance rejects unresolved, duplicate and overflowing inputs" checkBalanceErrors,
+      testCase "fee uses actual ledger frame size and checked arithmetic" checkBaseFee,
       testCase "minimum Ada adjusts coin width and rejects multiplication overflow" checkMinimumAda,
       testCase "exact rational reference tiers and execution fees agree" checkFees,
       testCase "reference coverage includes subtransactions and rejects duplicates" checkCoverage,
@@ -211,11 +222,18 @@ checkImplicit = do
 
 checkMalformed :: IO ()
 checkMalformed = do
-  forM_ [0 .. 5] $ \operation -> replicateM_ 20 $ do
+  forM_ [0 .. 8] $ \operation -> replicateM_ 20 $ do
     Internal.runUnchecked operation (B.pack [0x82, 0xa0, 0xa0, 0xff]) >>= assertBool "malformed request" . isLeft
   Internal.runUnchecked 99 (B.pack [0x82, 0xa0, 0xa0]) >>= assertBool "unknown operation" . isLeft
   tx <- transaction (Body.body [] [] 0)
   replicateM_ 20 (Building.baseFee 1 1 tx >>= assertBool "fresh native scope after failures" . not . isLeft)
+  (parameters, _) <- fixture
+  local <- Sub.fromBody <$> must (SubBody.fromBody (SubBody.body [] []))
+  forM_ [(6, Tx.encodeCbor tx), (7, Sub.encodeCbor local), (8, Tx.encodeCbor tx)] $ \(operation, encoded) ->
+    replicateM_ 20 $
+      Internal.runUnchecked operation (B.singleton 0x83 <> encoded <> Snapshot.encodeSnapshot parameters <> B.pack [0x81, 0x80])
+        >>= assertBool "partial imbalance request accepted" . isLeft
+  Building.batchImbalance parameters [] tx >>= (@?= Right mempty)
 
 assertOverflow :: Either Error a -> IO ()
 assertOverflow result = case result of
@@ -224,3 +242,80 @@ assertOverflow result = case result of
     assertBool "copied native diagnostic is available" (not (Data.Text.null diagnostic))
   Left failure -> assertFailure (show failure)
   Right _ -> assertFailure "Expected native integer overflow"
+
+checkBalance :: IO ()
+checkBalance = do
+  (parameters, input) <- fixture
+  output <- must (Output.mkOutput (Output.address (Utxo.output input)) (Value.lovelace 1800000) Datum.NoDatum Nothing)
+  balanced <- transaction (Body.body [Utxo.input input] [output] 200000)
+  Building.imbalance parameters [input] balanced >>= (@?= Right mempty)
+  Building.isBalanced parameters [input] balanced >>= (@?= Right True)
+
+  localOutput <- must (Output.mkOutput (Output.address output) (Value.lovelace 1000000) Datum.NoDatum Nothing)
+  localBody <- must (SubBody.fromBody (SubBody.body [Utxo.input input] [localOutput]))
+  let intent = Sub.fromBody localBody
+  Building.subTransactionImbalance parameters [input] intent >>= (@?= Right (Value.lovelace 1000000))
+
+  change <- must (Output.mkOutput (Output.address output) (Value.lovelace 800000) Datum.NoDatum Nothing)
+  batch <- transaction (Body.body [] [change] 200000) {Body.bodySubTransactions = Just [intent]}
+  let before = Tx.encodeCbor batch
+  Building.imbalance parameters [input] batch >>= (@?= Right (Value.lovelace (-1000000)))
+  Building.batchImbalance parameters [input] batch >>= (@?= Right mempty)
+  Building.isBalanced parameters [input] batch >>= (@?= Right True)
+  Tx.encodeCbor batch @?= before
+
+checkAccountBalance :: IO ()
+checkAccountBalance = do
+  (parameters, funding) <- fixture
+  policy <- must (Policy.fromBytes (B.replicate 28 1))
+  key <- must (Credential.keyHashFromBytes (B.replicate 28 2))
+  let token = Asset.Native policy AssetName.empty
+      account = Reward.fromCredential Network.testnet (Credential.KeyCredential key)
+      address = Output.address (Utxo.output funding)
+  source <- must (Output.mkOutput address (Value.lovelace 2000000 <> Value.singleton token 5) Datum.NoDatum Nothing)
+  output <- must (Output.mkOutput address (Value.lovelace 2000000 <> Value.singleton token 3) Datum.NoDatum Nothing)
+  mint <- must (Fields.mkMint (Value.singleton token (-2)))
+  withdrawals <- must (Fields.mkEntries [(account, 17)])
+  deposits <- must (Fields.mkEntries [(account, 7)])
+  let input = Utxo.utxo (Utxo.input funding) source
+      fields =
+        (Fields.fields [Utxo.input input] [output])
+          { Fields.fieldMint = Just mint,
+            Fields.fieldWithdrawals = Just withdrawals,
+            Fields.fieldDirectDeposits = Just deposits,
+            Fields.fieldDonation = Just 3
+          }
+  tx <- transaction (Body.body [] [] 7) {Body.bodyFields = fields}
+  Building.batchImbalance parameters [input] tx >>= (@?= Right mempty)
+
+checkPoolBatch :: IO ()
+checkPoolBatch = do
+  (raw, input) <- fixture
+  operator <- must (Credential.keyHashFromBytes (B.replicate 28 3))
+  stake <- must (Credential.keyHashFromBytes (B.replicate 28 4))
+  vrf <- must (Pool.vrfKeyHashFromBytes (B.replicate 32 5))
+  margin <- must (Unit.mkUnitInterval 0 1)
+  let pool = Pool.PoolParameters operator vrf Nothing 0 0 margin (Reward.fromCredential Network.testnet (Credential.KeyCredential stake)) Set.empty [] Nothing
+      certificates = Just (Certificates.fromList [Certificate.PoolRegistration pool])
+      parameters = raw {Parameters.parameterPoolDeposit = 100}
+  output <- must (Output.mkOutput (Output.address (Utxo.output input)) (Value.lovelace 1999900) Datum.NoDatum Nothing)
+  localBody <- must (SubBody.fromBody (SubBody.fromFields (Fields.fields [] []) {Fields.fieldCertificates = certificates}))
+  let intent = Sub.fromBody localBody
+      fields = (Fields.fields [Utxo.input input] [output]) {Fields.fieldCertificates = certificates}
+  batch <- transaction (Body.body [] [] 0) {Body.bodyFields = fields, Body.bodySubTransactions = Just [intent]}
+  Building.imbalance parameters [input] batch >>= (@?= Right mempty)
+  Building.subTransactionImbalance parameters [input] intent >>= (@?= Right (Value.lovelace (-100)))
+  Building.batchImbalance parameters [input] batch >>= (@?= Right mempty)
+
+checkBalanceErrors :: IO ()
+checkBalanceErrors = do
+  (parameters, input) <- fixture
+  tx <- transaction (Body.body [Utxo.input input] [] 0)
+  Building.imbalance parameters [] tx >>= assertBool "missing resolution accepted" . isLeft
+  Building.imbalance parameters [input, input] tx >>= assertBool "duplicate resolution accepted" . isLeft
+  large <- must (Output.mkOutput (Output.address (Utxo.output input)) (Value.lovelace 9223372036854775807) Datum.NoDatum Nothing)
+  otherId <- must (Id.fromBytes (B.replicate 32 9))
+  let first = Utxo.utxo (Utxo.input input) large
+      second = Utxo.utxo (Input.input otherId 0) large
+  overflow <- transaction (Body.body [Utxo.input first, Utxo.input second] [] 0)
+  Building.batchImbalance parameters [first, second] overflow >>= assertBool "overflow accepted" . isLeft

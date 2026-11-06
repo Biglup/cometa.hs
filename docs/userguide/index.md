@@ -54,6 +54,8 @@ coin-selection
 building-utilities
 transaction-building
 deferred-redeemers
+subtransaction-building
+dijkstra-building
 evaluation-and-signing
 api-reference
 ```

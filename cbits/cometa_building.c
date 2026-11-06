@@ -101,12 +101,31 @@ write_script_hash(cardano_cbor_reader_t* reader, cardano_cbor_writer_t* writer)
   return result;
 }
 
+/** \brief Encode signed imbalance coin and assets without unsigned ledger Value encoding. */
+static cardano_error_t
+write_imbalance(cardano_cbor_writer_t* writer, cardano_value_t* value)
+{
+  cardano_multi_asset_t* assets = cardano_value_get_multi_asset(value);
+  cardano_error_t        result = cardano_cbor_writer_write_start_array(writer, 2);
+  if (result == CARDANO_SUCCESS)
+  {
+    result = cardano_cbor_writer_write_signed_int(writer, cardano_value_get_coin(value));
+  }
+  if (result == CARDANO_SUCCESS)
+  {
+    result = cardano_multi_asset_to_cbor(assets, writer);
+  }
+  cardano_multi_asset_unref(&assets);
+  return result;
+}
+
 /* DEFINITIONS ***************************************************************/
 
 unsigned int
 cometa_building_compute(unsigned int operation, const unsigned char* bytes, size_t size, cardano_buffer_t** output)
 {
   *output                                    = NULL;
+  cardano_value_t*               imbalance   = NULL;
   cardano_sub_transaction_t*     sub_tx      = NULL;
   cardano_transaction_t*         tx          = NULL;
   cardano_protocol_parameters_t* parameters  = NULL;
@@ -119,7 +138,7 @@ cometa_building_compute(unsigned int operation, const unsigned char* bytes, size
   uint64_t                       coefficient = 0U;
   cardano_implicit_coin_t        implicit    = { 0 };
   cardano_error_t                result      = reader == NULL || writer == NULL ? CARDANO_ERROR_MEMORY_ALLOCATION_FAILED : cardano_cbor_reader_read_start_array(reader, &count);
-  if (result == CARDANO_SUCCESS && (operation > 5U || count != ((operation == 0U || operation == 4U) ? 3 : 2)))
+  if (result == CARDANO_SUCCESS && (operation > 8U || count != ((operation == 0U || operation == 4U || operation >= 6U) ? 3 : 2)))
   {
     result = CARDANO_ERROR_INVALID_ARGUMENT;
   }
@@ -127,19 +146,19 @@ cometa_building_compute(unsigned int operation, const unsigned char* bytes, size
   {
     result = write_script_hash(reader, writer);
   }
-  if (result == CARDANO_SUCCESS && operation != 1U && operation != 3U && operation != 5U)
+  if (result == CARDANO_SUCCESS && operation != 1U && operation != 3U && operation != 5U && operation != 7U)
   {
     result = cardano_transaction_from_cbor(reader, &tx);
   }
-  if (result == CARDANO_SUCCESS && operation == 5U)
+  if (result == CARDANO_SUCCESS && (operation == 5U || operation == 7U))
   {
     result = cardano_sub_transaction_from_cbor(reader, &sub_tx);
   }
-  if (result == CARDANO_SUCCESS && (operation < 3U || operation == 5U))
+  if (result == CARDANO_SUCCESS && (operation < 3U || operation >= 5U))
   {
     result = read_parameters(reader, &parameters);
   }
-  if (result == CARDANO_SUCCESS && operation < 2U)
+  if (result == CARDANO_SUCCESS && (operation < 2U || operation >= 6U))
   {
     result = read_utxos(reader, &references);
   }
@@ -167,6 +186,15 @@ cometa_building_compute(unsigned int operation, const unsigned char* bytes, size
       case 5U:
         result = cardano_compute_sub_transaction_implicit_coin(sub_tx, parameters, &implicit);
         break;
+      case 6U:
+        result = cardano_compute_transaction_imbalance(tx, references, parameters, &imbalance);
+        break;
+      case 7U:
+        result = cardano_compute_sub_transaction_imbalance(sub_tx, references, parameters, &imbalance);
+        break;
+      case 8U:
+        result = cardano_compute_transaction_batch_imbalance(tx, references, parameters, &imbalance);
+        break;
       case 4U:
         result = cardano_compute_min_fee_without_scripts(tx, constant, coefficient, &amount);
         break;
@@ -176,7 +204,11 @@ cometa_building_compute(unsigned int operation, const unsigned char* bytes, size
   }
   if (result == CARDANO_SUCCESS && operation != 3U)
   {
-    if (operation == 2U || operation == 5U)
+    if (operation >= 6U)
+    {
+      result = write_imbalance(writer, imbalance);
+    }
+    else if (operation == 2U || operation == 5U)
     {
       result = cardano_cbor_writer_write_start_array(writer, 3);
       if (result == CARDANO_SUCCESS)
@@ -214,6 +246,7 @@ cometa_building_compute(unsigned int operation, const unsigned char* bytes, size
   {
     result = cardano_cbor_writer_encode_in_buffer(writer, output);
   }
+  cardano_value_unref(&imbalance);
   cardano_utxo_list_unref(&references);
   cardano_protocol_parameters_unref(&parameters);
   cardano_transaction_unref(&tx);
