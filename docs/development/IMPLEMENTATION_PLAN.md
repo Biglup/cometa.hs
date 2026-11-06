@@ -2305,11 +2305,11 @@ results are checked on the PR separately from this local evidence.
 
 ### P09 runtime extension points
 
-# P09 API research (read-only, 2026-11-06)
+#### API research (2026-11-06)
 
-This is a design proposal, not an implemented API or a P09 completion claim. No repository files were changed. Native source inspected at `eadb95cd3ca7f711c203d7f2f4ee21c150d4d7f1` in `/tmp/cardano-c-key-scratch`; Cometa's existing private provider/callback prototype was also reviewed.
+The following source review informed the implemented contracts. Native source was audited at `eadb95cd3ca7f711c203d7f2f4ee21c150d4d7f1`, together with the existing private provider/callback prototype.
 
-## Primary sources and what their callers do
+#### Primary sources and what their callers do
 
 1. **cardano-api `5e63165a4bb7481a03d2e50464dc9c4f106c9fa5`**:
    * [Query/Internal/Convenience.hs](https://github.com/IntersectMBO/cardano-api/blob/5e63165a4bb7481a03d2e50464dc9c4f106c9fa5/cardano-api/src/Cardano/Api/Query/Internal/Convenience.hs), `executeQueryAnyMode`, `executeQueryCardanoMode`, `queryStateForBalancedTx`; [Query/Internal/Expr.hs](https://github.com/IntersectMBO/cardano-api/blob/5e63165a4bb7481a03d2e50464dc9c4f106c9fa5/cardano-api/src/Cardano/Api/Query/Internal/Expr.hs), `queryUtxo`, `queryProtocolParameters`, `queryEraHistory`, `querySystemStart`. A local-state query acquires node state, reports acquisition/version/era errors, and queries the complete context needed for balancing. The convenience boundary collapses nested protocol errors into one `ExceptT QueryConvenienceError IO` result. Cometa should retain structured errors and offer a standard Either/ExceptT boundary, without importing era/typeclass ceremony that its runtime schema does not provide. Separate provider requests cannot promise the same acquired ledger snapshot: freshness/consistency must be explicit.
@@ -2322,7 +2322,7 @@ This is a design proposal, not an implemented API or a P09 completion claim. No 
 
 Sources were read, not merely located. Fresh copies are `/tmp/p09-api-{query,convenience,expr,fee}.hs`, `/tmp/p09-atlas-{select,select-types,select-tests}.hs`, `/tmp/p09-lucid-types.ts`; cached pinned Atlas provider/class sources are under `/tmp/cometa-haskell-review/`.
 
-## Proposed public contracts
+#### Proposed public contracts
 
 Use records of functions, not a provider/signer class hierarchy or mandatory custom monad. Records describe user capabilities; native adapter handles, callback marshaling and close state stay private. Ordinary direct Haskell use need not acquire a C handle. A scoped native adapter is needed when those functions are passed to the native builder/evaluator, and must cover the entire native operation, including repeated callbacks.
 
@@ -2339,9 +2339,9 @@ Proposed complete caller workflow, using standard `ExceptT` and one outer failur
 4. Invoke the evaluator with that exact transaction and required resolved UTxOs; explicitly apply the returned budgets, recompute commitments/fees and finish balancing through the later builder layer. Iteration is deliberate and bounded, not a hidden one-pass guarantee.
 5. Invoke a scoped signer closure, merge partial witnesses preserving exact body identity, then optionally call explicit provider submission/confirmation operations.
 
-Steps involving complete balancing belong to P10+, not to a P09 implementation claim. P09 examples should demonstrate query -> selection/evaluation with deterministic snapshots and failures, plus the existing offline signer, without network credentials.
+Complete balancing belongs to P10+. The compiled P09 examples demonstrate queries, selection, evaluation and scoped signing with deterministic fixtures, without network credentials.
 
-## Native contracts and lifetime risks
+#### Native contracts and lifetime risks
 
 Primary native source links all use pin `eadb95cd3ca7f711c203d7f2f4ee21c150d4d7f1`:
 
@@ -2373,7 +2373,7 @@ Caller workflow: query/receive Parameters and resolved typed UTxOs; validate Sel
 Selection validation: unique refs in each input/output list, nonconflicting identical overlap; chosen subset of eligible union with exact snapshots; all mandatory refs included; remaining exactly available minus chosen; selected value = authoritative target + change componentwise; all change at requested address; actual native min-Ada per output. Order is retained but does not affect accounting. Target includes externally assessed fees/deposits; output hints cannot replace it. Chain-state spendability, strategy algorithms, max-value-size splitting and global balancing remain outside P09.
 
 
-## Evaluation and signer API evidence
+#### Evaluation and signer API evidence
 
 Reviewed actual sources before design, at the task's pinned revisions:
 
@@ -2381,7 +2381,7 @@ Reviewed actual sources before design, at the task's pinned revisions:
 * Atlas `c3adfb416242ea25a244bfaa1614213eecdc55d9`, https://github.com/geniusyield/atlas/blob/c3adfb416242ea25a244bfaa1614213eecdc55d9/src/GeniusYield/TxBuilder/Class.hs (`signTxBodyImpl`290+, `signAndSubmitConfirmed`405+). A signing action obtains a scoped signing capability, signs a completed body and leaves submission explicit. Cometa's Signer captures existing scoped Ed25519/Software closures and returns partial EncodedWitnesses; addWitnesses remains explicit. No class hierarchy or key export is needed.
 * Native `eadb95cd3ca7f711c203d7f2f4ee21c150d4d7f1`, https://github.com/Biglup/cardano-c/blob/eadb95cd3ca7f711c203d7f2f4ee21c150d4d7f1/lib/include/cardano/transaction_builder/evaluation/tx_evaluator_impl.h and corresponding lib/src/.../tx_evaluator.c, plus provider_tx_evaluator.c and native_tx_evaluator.c. Impl context is adopted without ref by constructor, released at final evaluator destruction; evaluate callback borrows tx/additional list and transfers redeemer list on success. Wrapper does not sanitize partial outputs. Provider-backed evaluator retains provider explicitly before adopting context. Native VM creation binds a level but evaluates complete transaction context; its completeness/phase2/slot/cost-model behavior is P11, not part of injectable P09 completion.
 
-## Public caller contract and deliberate differences
+#### Public caller contract and deliberate differences
 
 `Evaluator {evaluateTransaction :: Target -> Transaction -> [Utxo] -> IO(Either Error Budgets)}` exposes ordinary IO injection. `evaluate` is checked direct Haskell dispatch, with no forced C roundtrip. Target is TopLevel or SubTransaction Word64, checked by bounded-list traversal before any Int conversion. Complete enclosing Tx is always supplied. Resolution duplicates are rejected, but all-input completeness is evaluator-specific: provider-backed evaluation may fetch other inputs and treats supplied UTxOs as additional context.
 
@@ -2391,15 +2391,15 @@ Reviewed actual sources before design, at the task's pinned revisions:
 
 Workflow example examples/Evaluation.hs validates/assembles transaction -> invokes deterministic fake evaluator -> captures scoped signer -> returns partial witnesses -> explicitly merges, all through one ExceptT match. It does not pretend to execute a VM or balance a transaction. The public guide explains target, units, absence, completeness, expected errors and scope behavior in domain terms.
 
-## Native adapter ownership and lifecycle
+#### Native adapter ownership and lifecycle
 
 cbits/cometa_evaluation.c creates a real cardano_tx_evaluator_t, refs runtime context before native constructor adopts it, and releases that extra obligation on constructor failure. Callback inputs are borrowed throughout synchronous native call. All indexed UTxO getters retain children, released once each after serialization. Request/reply writers/readers/buffers and partial redeemer outputs are independently initialized null and unref'd on every exit. Reply parse failures—including a valid allocated list followed by trailing bytes—release that list before failure. Native evaluator run uses a retained alias across repeated native dispatch, then releases final alias after callbacks unwind. No public close handles exist; private runtime scopes join callback/native workers before registration destruction. Shared Runtime controls exception/lazy-result forcing, expected Error identity, async cancellation, reentry and group activation; no separate callback lifecycle implementation duplicates it.
 
 Direct evaluation receives the original exact Haskell Tx. The private generic native adapter necessarily snapshots cardano_transaction_to_cbor; native serialization can normalize the outer definite/indefinite array header, while preserving exact body/witness/script/data child bytes. Inputs remain immutable. This implementation detail is recorded internally; it does not change the direct public dispatch contract.
 
-## Tests and coverage boundaries
+#### Tests and coverage boundaries
 
-`test/Evaluation.hs`: direct vs actual C dispatch correspondence for all7purposes, explicit subtarget/maxWord32index, unchanged original transaction/budgets and exact nonminimal arguments; empty scripts; duplicate/missing/unknown budget IDs; changed exact argument rejection; invalid targets/duplicate resolution rejected before callback; repeated real C callbacks/retained aliases/GC/root-registration baseline; original expected Error longer than C diagnostic buffer; user IO exception and lazy-poison result; same-runtime reentry; cancellation joins callback cleanup and permits reuse; partial transaction/UTxO/redeemer parsing and trailing reply; Ed25519/Software/BIP32 signer scope composition and closed key; original Hedgehog fullWord32 index/fullWord64 units native roundtrips. No imported execution vectors or live network/keys. Root coordinates cabal/test/Haddock/Valgrind. Local Ormolu/HLint/ClangFormat18/C11 warning checks run separately; not a claim of full suite execution.
+`test/Evaluation.hs`: direct vs actual C dispatch correspondence for all7purposes, explicit subtarget/maxWord32index, unchanged original transaction/budgets and exact nonminimal arguments; empty scripts; duplicate/missing/unknown budget IDs; changed exact argument rejection; invalid targets/duplicate resolution rejected before callback; repeated real C callbacks/retained aliases/GC/root-registration baseline; original expected Error longer than C diagnostic buffer; user IO exception and lazy-poison result; same-runtime reentry; cancellation joins callback cleanup and permits reuse; partial transaction/UTxO/redeemer parsing and trailing reply; Ed25519/Software/BIP32 signer scope composition and closed key; original Hedgehog fullWord32 index/fullWord64 units native roundtrips. No imported execution vectors or live network/keys. Integrated validation is recorded below.
 
 The actual native provider evaluator factory is additionally adapted privately:
 cometa_evaluation_run_provider creates a real provider using the shared provider
@@ -2450,7 +2450,10 @@ run sequentially. CI runs both suites under Valgrind and compiles/runs all three
 new offline examples.
 
 Local integrated evidence: 304 public-package tests and 46 runtime tests pass;
-all public declarations have Haddock documentation and the strict Sphinx HTML
-build passes. The complete runtime suite passes Valgrind with zero errors, zero
-definitely/indirectly/possibly lost bytes and zero suppressions. Hosted matrix
-results and final aggregate verification are recorded on the PR.
+all 25 offline examples run, and a fresh source-distribution consumer builds and
+passes both suites. Public declarations have complete Haddock coverage; strict
+Sphinx HTML and link checks pass. Both complete test suites pass Valgrind with
+zero errors, zero definitely/indirectly/possibly lost bytes and zero suppressions.
+External compile checks confirm all four typed native adapters remain hidden.
+Formatter, lint, package and native-inventory checks pass. Hosted compiler/platform
+results are tracked on the PR separately from this local evidence.
