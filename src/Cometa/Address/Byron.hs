@@ -57,7 +57,7 @@ import Data.ByteString (ByteString)
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Lazy as L
 import Data.Int (Int64)
-import Data.List (foldl', unfoldr)
+import qualified Data.List as List
 import Data.Maybe (isNothing)
 import Data.Text (Text)
 import qualified Data.Text as Text
@@ -234,14 +234,14 @@ decode parser bytes = case R.deserialiseFromBytes parser (L.fromStrict bytes) of
 crc32 :: ByteString -> Word32
 crc32 = complement . B.foldl' step maxBound
   where
-    step checksum byte = foldl' (\value _ -> bit value) (checksum `xor` fromIntegral byte) [1 :: Int .. 8]
+    step checksum byte = List.foldl' (\value _ -> bit value) (checksum `xor` fromIntegral byte) [1 :: Int .. 8]
     bit value = if value .&. 1 == 1 then (value `shiftR` 1) `xor` 0xedb88320 else value `shiftR` 1
 
 alphabet :: String
 alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 
 encodeBase58 :: ByteString -> Text
-encodeBase58 bytes = Text.pack (replicate zeros '1' ++ reverse (unfoldr digit number))
+encodeBase58 bytes = Text.pack (replicate zeros '1' ++ reverse (List.unfoldr digit number))
   where
     zeros = B.length (B.takeWhile (== 0) bytes)
     number = B.foldl' (\n byte -> n * 256 + toInteger byte) 0 bytes
