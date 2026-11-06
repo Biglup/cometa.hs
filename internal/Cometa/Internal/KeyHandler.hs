@@ -30,6 +30,7 @@ module Cometa.Internal.KeyHandler
     name,
     accountPublicKey,
     publicKey,
+    signTransaction,
   )
 where
 
@@ -49,8 +50,9 @@ import Data.ByteString (ByteString)
 import qualified Data.ByteString as ByteString
 import Data.Text (Text)
 import Data.Word (Word32, Word8)
-import Foreign.C.Types (CSize)
+import Foreign.C.Types (CSize, CUInt)
 import Foreign.Marshal.Alloc (alloca, allocaBytes)
+import Foreign.Marshal.Array (withArray)
 import Foreign.Marshal.Utils (copyBytes)
 import Foreign.Ptr (FunPtr, Ptr, castPtr, freeHaskellFunPtr, nullPtr)
 import Foreign.Storable (peek, poke)
@@ -233,6 +235,27 @@ serialize handler = withOperation handler $ \pointer -> alloca $ \slot ->
             size <- Buffer.cSize buffer
             bytes <- Buffer.cData buffer
             Right <$> ByteString.packCStringLen (castPtr bytes, fromIntegral size)
+
+-- | Reuse the established callback worker, cancellation join and state lock.
+-- Every result buffer is copied before deterministic release; no transaction or
+-- witness pointer survives the native call. kind is the adapter-private dispatch.
+signTransaction :: Handler -> CUInt -> [[Word32]] -> ByteString -> IO (Either Failure ByteString)
+signTransaction handler kind paths bytes = withOperation handler $ \pointer ->
+  withBytes bytes $ \input size -> withArray (concat paths) $ \components ->
+    alloca $ \slot -> bracket (poke slot nullPtr >> pure slot) Buffer.cRelease $ \output -> do
+      result <- checkStatus "keyHandler.signTransaction" (Native.cSign pointer input size kind components (fromIntegral (length paths)) output)
+      case result of
+        Left failure -> pure (Left failure)
+        Right () -> do
+          buffer <- peek output
+          if buffer == nullPtr
+            then pure (contractFailure "keyHandler.signTransaction")
+            else do
+              count <- Buffer.cSize buffer
+              source <- Buffer.cData buffer
+              if source == nullPtr || count == 0 || toInteger count > toInteger (maxBound :: Int)
+                then pure (contractFailure "keyHandler.signTransaction")
+                else Right <$> ByteString.packCStringLen (castPtr source, fromIntegral count)
 
 copyOutput :: Text -> Int -> (Ptr Word8 -> IO Status.NativeCode) -> IO (Either Failure ByteString)
 copyOutput operation size call = allocaBytes size $ \output -> do

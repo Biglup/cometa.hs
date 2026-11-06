@@ -99,3 +99,52 @@ cleanup:
   cardano_cbor_reader_unref(&reader);
   return (unsigned int)result;
 }
+
+/* Independently sign the native top/sub body ID with the supplied public test
+ * seed. The seed and CBOR are borrowed; all acquired objects are scoped here.
+ * output has 96 bytes: verification key followed by signature. */
+unsigned int
+cometa_test_transaction_sign(const unsigned char* bytes, size_t size, unsigned int sub, const unsigned char* seed, unsigned char* output)
+{
+  cardano_cbor_reader_t*         reader          = cardano_cbor_reader_new(bytes, size);
+  cardano_transaction_t*         transaction     = NULL;
+  cardano_sub_transaction_t*     sub_transaction = NULL;
+  cardano_blake2b_hash_t*        hash            = NULL;
+  cardano_ed25519_private_key_t* key             = NULL;
+  cardano_ed25519_public_key_t*  public_key      = NULL;
+  cardano_ed25519_signature_t*   signature       = NULL;
+  cardano_error_t                result          = reader == NULL ? CARDANO_ERROR_MEMORY_ALLOCATION_FAILED : CARDANO_SUCCESS;
+  if (result == CARDANO_SUCCESS)
+  {
+    result = sub != 0U ? cardano_sub_transaction_from_cbor(reader, &sub_transaction) : cardano_transaction_from_cbor(reader, &transaction);
+  }
+  if (result == CARDANO_SUCCESS)
+  {
+    hash   = sub != 0U ? cardano_sub_transaction_get_id(sub_transaction) : cardano_transaction_get_id(transaction);
+    result = hash == NULL ? CARDANO_ERROR_GENERIC : cardano_ed25519_private_key_from_normal_bytes(seed, 32U, &key);
+  }
+  if (result == CARDANO_SUCCESS)
+  {
+    result = cardano_ed25519_private_key_get_public_key(key, &public_key);
+  }
+  if (result == CARDANO_SUCCESS)
+  {
+    result = cardano_ed25519_private_key_sign(key, cardano_blake2b_hash_get_data(hash), cardano_blake2b_hash_get_bytes_size(hash), &signature);
+  }
+  if (result == CARDANO_SUCCESS)
+  {
+    result = cardano_ed25519_public_key_to_bytes(public_key, output, 32U);
+  }
+  if (result == CARDANO_SUCCESS)
+  {
+    result = cardano_ed25519_signature_to_bytes(signature, output + 32U, 64U);
+  }
+  cardano_cbor_reader_unref(&reader);
+  cardano_transaction_unref(&transaction);
+  cardano_sub_transaction_unref(&sub_transaction);
+  cardano_blake2b_hash_unref(&hash);
+  cardano_ed25519_private_key_unref(&key);
+  cardano_ed25519_public_key_unref(&public_key);
+  cardano_ed25519_signature_unref(&signature);
+  return (unsigned int)result;
+}

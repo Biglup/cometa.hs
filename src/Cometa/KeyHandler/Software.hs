@@ -51,6 +51,10 @@ module Cometa.KeyHandler.Software
     publicKey,
     name,
     serialize,
+    signTransaction,
+    signTransactionAt,
+    signSubTransaction,
+    signSubTransactionAt,
   )
 where
 
@@ -65,10 +69,17 @@ import Cometa.Error (Error (..))
 import Cometa.Internal.Ed25519SigningKey (SigningKey (..))
 import Cometa.Internal.Error (fromNativeFailure)
 import qualified Cometa.Internal.KeyHandler as Internal
+import qualified Cometa.SubTransaction as SubTransaction
+import qualified Cometa.Transaction as Transaction
+import qualified Cometa.Transaction.Witnesses as Witnesses
 import Control.Monad (join)
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as ByteString
+import Data.List.NonEmpty (NonEmpty)
+import qualified Data.List.NonEmpty as NonEmpty
 import Data.Text (Text)
+import Data.Word (Word32)
+import Foreign.C.Types (CUInt)
 
 -- TYPES ----------------------------------------------------------------------
 
@@ -156,6 +167,39 @@ name (Handler handler) = mapFailure <$> Internal.name handler
 -- the scope; protect it against unauthorized modification and password guessing.
 serialize :: Handler mode -> IO (Either Error ByteString)
 serialize (Handler handler) = mapFailure <$> Internal.serialize handler
+
+-- | Sign the exact transaction-body hash using the encrypted Ed25519 key.
+-- Requests a password once and returns partial witnesses, without changing the
+-- transaction. Merge with 'Transaction.addWitnesses' to retain existing signatures.
+-- Closed, busy, password and native failures follow the ordinary handler contract.
+signTransaction :: Handler Ed25519 -> Transaction.Transaction -> IO (Either Error Witnesses.EncodedWitnesses)
+signTransaction (Handler handler) = signEncoded handler 0 [] . Transaction.encodeCbor
+
+-- | Derive each nonempty five-level path and sign the exact body hash. Requests
+-- a password once for the whole batch. Returns only the generated witnesses;
+-- duplicate paths are idempotent. No transaction bytes are changed.
+signTransactionAt :: Handler Bip32 -> NonEmpty Path.DerivationPath -> Transaction.Transaction -> IO (Either Error Witnesses.EncodedWitnesses)
+signTransactionAt (Handler handler) paths = signEncoded handler 1 (map pathComponents (NonEmpty.toList paths)) . Transaction.encodeCbor
+
+-- | Sign a sub-transaction's own exact body hash using the encrypted Ed25519 key.
+-- The enclosing body and its signatures are independent of this operation.
+signSubTransaction :: Handler Ed25519 -> SubTransaction.SubTransaction -> IO (Either Error Witnesses.EncodedWitnesses)
+signSubTransaction (Handler handler) = signEncoded handler 2 [] . SubTransaction.encodeCbor
+
+-- | Derive the supplied paths and sign this sub-transaction's own body hash.
+-- Requests a password once and returns partial witnesses without changing input.
+signSubTransactionAt :: Handler Bip32 -> NonEmpty Path.DerivationPath -> SubTransaction.SubTransaction -> IO (Either Error Witnesses.EncodedWitnesses)
+signSubTransactionAt (Handler handler) paths = signEncoded handler 3 (map pathComponents (NonEmpty.toList paths)) . SubTransaction.encodeCbor
+
+signEncoded :: Internal.Handler -> CUInt -> [[Word32]] -> ByteString -> IO (Either Error Witnesses.EncodedWitnesses)
+signEncoded handler kind paths bytes = do
+  result <- Internal.signTransaction handler kind paths bytes
+  pure (mapFailure result >>= Witnesses.decodeCbor)
+
+pathComponents :: Path.DerivationPath -> [Word32]
+pathComponents path =
+  let account = Path.accountPrefix path
+   in map Path.indexValue [Path.purpose account, Path.coinType account, Path.account account, Path.role path, Path.index path]
 
 flatten :: Either Internal.Failure (Either Error value) -> Either Error value
 flatten = join . mapFailure

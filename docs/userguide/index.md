@@ -1,6 +1,7 @@
 # Cometa.hs
 
-Cometa.hs provides Cardano protocol values, staking certificates, pool registrations,
+Cometa.hs provides typed transactions and signing, Cardano protocol values,
+staking certificates, pool registrations,
 governance proposals and votes, scripts and metadata, addresses and assets,
 and key management and cryptography,
 backed by [cardano-c](https://github.com/Biglup/cardano-c). Operations report
@@ -17,7 +18,8 @@ Start with [installation](installation.md), then read the
 [script guide](scripts.md), [protocol values](protocol-values.md),
 [protocol parameters](protocol-parameters.md), [governance votes](governance.md),
 [stake pools](stake-pools.md), [certificates](certificates.md), and
-[governance proposals](governance-proposals.md).
+[governance proposals](governance-proposals.md). For transaction workflows, see
+[transaction bodies](transaction-bodies.md), [transactions](transactions.md), and [witnesses](transaction-witnesses.md).
 The [API reference](api-reference.md) explains how to browse the declarations for the revision you build.
 
 ```{toctree}
@@ -43,6 +45,9 @@ governance
 stake-pools
 certificates
 governance-proposals
+transaction-bodies
+transactions
+transaction-witnesses
 api-reference
 ```
 

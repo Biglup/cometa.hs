@@ -85,6 +85,9 @@ jobs:
           cabal run cometa-certificates
           cabal run cometa-stake-pools
           cabal run cometa-governance-proposals
+          cabal run cometa-transaction-bodies
+          cabal run cometa-transactions
+          cabal run cometa-transaction-witnesses
           python tools/check-key-handler-roles.py
           python tools/check-credential-roles.py
       - name: Exercise optimized pure crypto evaluation and concurrency

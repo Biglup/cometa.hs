@@ -29,6 +29,7 @@ module Cometa.Internal.FFI.KeyHandler
     cSerialize,
     cAccount,
     cPublic,
+    cSign,
   )
 where
 
@@ -77,3 +78,8 @@ foreign import ccall safe "cometa_handler_public"
 -- | Borrowed diagnostic name copied under the operation lock.
 foreign import ccall unsafe "cardano_secure_key_handler_get_name"
   cName :: Ptr NativeHandler -> IO CString
+
+-- | Borrow the handler, transaction bytes and flat path components through the
+-- complete callback-capable call. Success transfers one public witness buffer.
+foreign import ccall safe "cometa_handler_sign"
+  cSign :: Ptr NativeHandler -> Ptr Word8 -> CSize -> CUInt -> Ptr Word32 -> CSize -> Ptr (Ptr Buffer) -> IO NativeCode

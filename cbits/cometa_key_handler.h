@@ -41,4 +41,15 @@ unsigned int cometa_handler_account(cardano_secure_key_handler_t* handler, uint3
  * \return Native status; output valid only on success.
  */
 unsigned int cometa_handler_public(cardano_secure_key_handler_t* handler, unsigned char* output);
+/** \brief Sign one exact top/sub transaction body and return a fresh encoded witness map.
+ * \param handler Borrowed live handler; callbacks may run until return.
+ * \param bytes Borrowed complete transaction CBOR.
+ * \param size CBOR length in bytes.
+ * \param kind Private dispatch: 0 Ed25519/top, 1 BIP32/top, 2 Ed25519/sub, 3 BIP32/sub.
+ * \param components Borrowed flattened unencoded purpose/coin/account/role/index arrays.
+ * \param count Number of five-component paths; positive for BIP32.
+ * \param output Owned buffer on success; null on failure. Caller releases it.
+ * \return Native status. All temporary native references are released on every exit.
+ */
+unsigned int cometa_handler_sign(cardano_secure_key_handler_t* handler, const unsigned char* bytes, size_t size, unsigned int kind, const uint32_t* components, size_t count, cardano_buffer_t** output);
 #endif
