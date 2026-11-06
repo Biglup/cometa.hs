@@ -33,6 +33,7 @@ import qualified Cometa.Credential as Credential
 import Cometa.Error (Error (..))
 import qualified Cometa.Evaluation as Evaluation
 import qualified Cometa.Internal.Runtime as Runtime
+import qualified Cometa.Internal.TransactionPlan as InternalPlan
 import qualified Cometa.Metadata as Metadata
 import qualified Cometa.NetworkId as Network
 import qualified Cometa.PlutusData as Data
@@ -351,6 +352,6 @@ laws = property $ do
   b <- forAll (Gen.word64 (Range.linear 0 100000))
   c <- forAll (Gen.word64 (Range.linear 0 100000))
   let x = Plan.validFrom a; y = Plan.validUntil b; z = Plan.validFrom c
-  ((x <> y) <> z) === (x <> (y <> z))
-  (mempty <> x) === x
-  (x <> mempty) === x
+  InternalPlan.encodePlan ((x <> y) <> z) === InternalPlan.encodePlan (x <> (y <> z))
+  InternalPlan.encodePlan (mempty <> x) === InternalPlan.encodePlan x
+  InternalPlan.encodePlan (x <> mempty) === InternalPlan.encodePlan x

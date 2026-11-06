@@ -24,7 +24,20 @@
 #include "cometa_evaluation.h"
 #include "cometa_parameters.h"
 #include <limits.h>
+#include <stdlib.h>
 #include <string.h>
+
+/* TYPES *********************************************************************/
+
+/* Deferred contexts borrow the grouped runtime. Storage is allocated before
+ * registration and freed only after builder destruction; native lists neither
+ * retain nor release user_context. Each reply transfers a fresh payload. */
+typedef struct
+{
+    cometa_runtime_t* runtime;
+    uint64_t          index;
+    bool              deferred_mint;
+} deferred_context_t;
 
 /* STATIC FUNCTIONS **********************************************************/
 
@@ -120,11 +133,83 @@ read_utxos(cardano_cbor_reader_t* reader, cardano_utxo_list_t** output)
   return result;
 }
 
+/** \brief Copy a balanced draft into the protected callback and transfer its argument. */
+static cardano_error_t
+deferred_callback(void* opaque, cardano_transaction_t* transaction, cardano_utxo_list_t* inputs, cardano_plutus_data_t** output)
+{
+  deferred_context_t*    context = (deferred_context_t*)opaque;
+  cardano_cbor_writer_t* writer  = cardano_cbor_writer_new();
+  cardano_cbor_reader_t* reader  = NULL;
+  cardano_buffer_t*      request = NULL;
+  cardano_buffer_t*      reply   = NULL;
+  cardano_error_t        result  = CARDANO_ERROR_MEMORY_ALLOCATION_FAILED;
+  *output                        = NULL;
+  if (writer == NULL)
+  {
+    goto cleanup;
+  }
+  result = cardano_cbor_writer_write_start_array(writer, 3);
+  if (result == CARDANO_SUCCESS)
+  {
+    result = cardano_cbor_writer_write_uint(writer, context->index);
+  }
+  if (result == CARDANO_SUCCESS)
+  {
+    result = cardano_transaction_to_cbor(transaction, writer);
+  }
+  if (result == CARDANO_SUCCESS)
+  {
+    result = cardano_cbor_writer_write_start_array(writer, (int64_t)cardano_utxo_list_get_length(inputs));
+  }
+  for (size_t i = 0; result == CARDANO_SUCCESS && i < cardano_utxo_list_get_length(inputs); ++i)
+  {
+    cardano_utxo_t* input = NULL;
+    result                = cardano_utxo_list_get(inputs, i, &input);
+    if (result == CARDANO_SUCCESS)
+    {
+      result = cardano_utxo_to_cbor(input, writer);
+    }
+    cardano_utxo_unref(&input);
+  }
+  if (result == CARDANO_SUCCESS)
+  {
+    result = cardano_cbor_writer_encode_in_buffer(writer, &request);
+  }
+  if (result == CARDANO_SUCCESS)
+  {
+    result = (cardano_error_t)cometa_runtime_dispatch(context->runtime, 110, cardano_buffer_get_data(request), cardano_buffer_get_size(request), &reply, NULL, 0);
+  }
+  if (result == CARDANO_SUCCESS && reply == NULL)
+  {
+    result = CARDANO_ERROR_POINTER_IS_NULL;
+  }
+  if (result == CARDANO_SUCCESS)
+  {
+    reader = cardano_cbor_reader_new(cardano_buffer_get_data(reply), cardano_buffer_get_size(reply));
+    result = reader == NULL ? CARDANO_ERROR_MEMORY_ALLOCATION_FAILED : cardano_plutus_data_from_cbor(reader, output);
+  }
+  if (result == CARDANO_SUCCESS)
+  {
+    result = complete(reader);
+  }
+cleanup:
+  if (result != CARDANO_SUCCESS)
+  {
+    cardano_plutus_data_unref(output);
+  }
+  cardano_cbor_reader_unref(&reader);
+  cardano_cbor_writer_unref(&writer);
+  cardano_buffer_unref(&request);
+  cardano_buffer_unref(&reply);
+  return result;
+}
+
 /** \brief Apply one instruction, releasing local references after builder retention. */
 static cardano_error_t
-instruction(cardano_tx_builder_t* builder, cardano_cbor_reader_t* reader, cardano_utxo_list_t* resolved)
+instruction(cardano_tx_builder_t* builder, cardano_cbor_reader_t* reader, cardano_utxo_list_t* resolved, deferred_context_t* contexts, size_t position)
 {
-  static const int64_t          arities[] = { 2, 4, 2, 2, 5, 3, 2, 3, 4, 2, 2, 2 };
+  deferred_context_t*           context   = &contexts[position];
+  static const int64_t          arities[] = { 2, 4, 2, 2, 5, 3, 2, 3, 4, 2, 2, 2, 4, 5, 3, 4 };
   int64_t                       count     = 0;
   uint64_t                      tag = 0U, number = 0U;
   int64_t                       signed_number = 0;
@@ -157,7 +242,9 @@ instruction(cardano_tx_builder_t* builder, cardano_cbor_reader_t* reader, cardan
   {                                \
     result = (CALL);               \
     if (result != CARDANO_SUCCESS) \
+    {                              \
       goto cleanup;                \
+    }                              \
   }                                \
   while (0)
   switch (tag)
@@ -166,12 +253,27 @@ instruction(cardano_tx_builder_t* builder, cardano_cbor_reader_t* reader, cardan
       TRY(read_output(reader, &output));
       cardano_tx_builder_add_output(builder, output);
       break;
+    case 12:
     case 1:
       TRY(read_utxo(reader, &utxo));
-      TRY(read_data(reader, &redeemer));
+      if (tag == 12)
+      {
+        TRY(cardano_cbor_reader_read_uint(reader, &context->index));
+      }
+      else
+      {
+        TRY(read_data(reader, &redeemer));
+      }
       TRY(read_data(reader, &datum));
       TRY(cardano_utxo_list_add(resolved, utxo));
-      cardano_tx_builder_add_input(builder, utxo, redeemer, datum);
+      if (tag == 12)
+      {
+        cardano_tx_builder_add_input_with_deferred_redeemer(builder, utxo, deferred_callback, context, datum);
+      }
+      else
+      {
+        cardano_tx_builder_add_input(builder, utxo, redeemer, datum);
+      }
       break;
     case 2:
       TRY(read_utxo(reader, &utxo));
@@ -182,6 +284,7 @@ instruction(cardano_tx_builder_t* builder, cardano_cbor_reader_t* reader, cardan
       TRY(read_script(reader, &script));
       cardano_tx_builder_add_script(builder, script);
       break;
+    case 13:
     case 4:
       TRY(cardano_cbor_reader_read_bytestring(reader, &bytes));
       TRY(cardano_blake2b_hash_from_bytes(cardano_buffer_get_data(bytes), cardano_buffer_get_size(bytes), &hash));
@@ -189,8 +292,32 @@ instruction(cardano_tx_builder_t* builder, cardano_cbor_reader_t* reader, cardan
       TRY(cardano_cbor_reader_read_bytestring(reader, &bytes));
       TRY(cardano_asset_name_from_bytes(cardano_buffer_get_data(bytes), cardano_buffer_get_size(bytes), &asset_name));
       TRY(cardano_cbor_reader_read_int(reader, &signed_number));
-      TRY(read_data(reader, &redeemer));
-      cardano_tx_builder_mint_token(builder, hash, asset_name, signed_number, redeemer);
+      if (tag == 13)
+      {
+        TRY(cardano_cbor_reader_read_uint(reader, &context->index));
+        bool registered = false;
+        for (size_t i = 0; i < position; ++i)
+        {
+          if (contexts[i].deferred_mint && contexts[i].index == context->index)
+          {
+            registered = true;
+          }
+        }
+        context->deferred_mint = true;
+        if (registered)
+        {
+          cardano_tx_builder_mint_token(builder, hash, asset_name, signed_number, NULL);
+        }
+        else
+        {
+          cardano_tx_builder_mint_token_with_deferred_redeemer(builder, hash, asset_name, signed_number, deferred_callback, context);
+        }
+      }
+      else
+      {
+        TRY(read_data(reader, &redeemer));
+        cardano_tx_builder_mint_token(builder, hash, asset_name, signed_number, redeemer);
+      }
       break;
     case 5:
       TRY(cardano_cbor_reader_read_uint(reader, &number));
@@ -201,11 +328,21 @@ instruction(cardano_tx_builder_t* builder, cardano_cbor_reader_t* reader, cardan
       TRY(read_data(reader, &datum));
       cardano_tx_builder_add_datum(builder, datum);
       break;
+    case 14:
     case 7:
       TRY(read_certificate(reader, &certificate));
-      TRY(read_data(reader, &redeemer));
-      cardano_tx_builder_add_certificate(builder, certificate, redeemer);
+      if (tag == 14)
+      {
+        TRY(cardano_cbor_reader_read_uint(reader, &context->index));
+        cardano_tx_builder_add_certificate_with_deferred_redeemer(builder, certificate, deferred_callback, context);
+      }
+      else
+      {
+        TRY(read_data(reader, &redeemer));
+        cardano_tx_builder_add_certificate(builder, certificate, redeemer);
+      }
       break;
+    case 15:
     case 8:
       TRY(cardano_cbor_reader_read_bytestring(reader, &bytes));
       TRY(cardano_reward_address_from_bytes(cardano_buffer_get_data(bytes), cardano_buffer_get_size(bytes), &reward));
@@ -215,8 +352,16 @@ instruction(cardano_tx_builder_t* builder, cardano_cbor_reader_t* reader, cardan
         result = CARDANO_ERROR_INTEGER_OVERFLOW;
         goto cleanup;
       }
-      TRY(read_data(reader, &redeemer));
-      cardano_tx_builder_withdraw_rewards(builder, reward, (int64_t)number, redeemer);
+      if (tag == 15)
+      {
+        TRY(cardano_cbor_reader_read_uint(reader, &context->index));
+        cardano_tx_builder_withdraw_rewards_with_deferred_redeemer(builder, reward, (int64_t)number, deferred_callback, context);
+      }
+      else
+      {
+        TRY(read_data(reader, &redeemer));
+        cardano_tx_builder_withdraw_rewards(builder, reward, (int64_t)number, redeemer);
+      }
       break;
     case 9:
       TRY(cardano_cbor_reader_read_bytestring(reader, &bytes));
@@ -256,7 +401,7 @@ cleanup:
 /* DEFINITIONS ***************************************************************/
 
 unsigned int
-cometa_transaction_builder_build(cometa_runtime_t* selector_runtime, cometa_runtime_t* evaluator_runtime, const unsigned char* config, size_t config_size, const unsigned char* plan, size_t plan_size, cardano_buffer_t** output, cardano_buffer_t** diagnostic, uint64_t* key_count)
+cometa_transaction_builder_build(cometa_runtime_t* selector_runtime, cometa_runtime_t* evaluator_runtime, cometa_runtime_t* deferred_runtime, const unsigned char* config, size_t config_size, const unsigned char* plan, size_t plan_size, cardano_buffer_t** output, cardano_buffer_t** diagnostic, uint64_t* key_count)
 {
   if (output == NULL || diagnostic == NULL || key_count == NULL)
   {
@@ -281,8 +426,9 @@ cometa_transaction_builder_build(cometa_runtime_t* selector_runtime, cometa_runt
   cardano_coin_selector_t*       selector          = NULL;
   cardano_tx_evaluator_t*        evaluator         = NULL;
   uint64_t                       fee = 0U, padding = 0U;
-  cardano_slot_config_t          slots = { 0 };
-  int64_t                        count = 0;
+  cardano_slot_config_t          slots    = { 0 };
+  int64_t                        count    = 0;
+  deferred_context_t*            contexts = NULL;
   cardano_network_id_t           network;
   cardano_error_t                result = reader == NULL ? CARDANO_ERROR_MEMORY_ALLOCATION_FAILED : array(reader, 10);
   if (result != CARDANO_SUCCESS)
@@ -359,9 +505,21 @@ cometa_transaction_builder_build(cometa_runtime_t* selector_runtime, cometa_runt
     result = CARDANO_ERROR_DECODING;
     goto cleanup;
   }
+  if ((uint64_t)count > SIZE_MAX / sizeof(deferred_context_t))
+  {
+    result = CARDANO_ERROR_INTEGER_OVERFLOW;
+    goto cleanup;
+  }
+  contexts = calloc(count == 0 ? 1U : (size_t)count, sizeof(deferred_context_t));
+  if (contexts == NULL)
+  {
+    result = CARDANO_ERROR_MEMORY_ALLOCATION_FAILED;
+    goto cleanup;
+  }
   for (int64_t i = 0; i < count; ++i)
   {
-    TRY(instruction(builder, instructions, resolved));
+    contexts[i].runtime = deferred_runtime;
+    TRY(instruction(builder, instructions, resolved, contexts, (size_t)i));
   }
   TRY(cardano_cbor_reader_read_end_array(instructions));
   TRY(complete(instructions));
@@ -396,6 +554,7 @@ cleanup:
   cardano_blake2b_hash_set_unref(&unique_signers);
   cardano_utxo_list_unref(&resolved);
   cardano_tx_builder_unref(&builder);
+  free(contexts);
   cardano_transaction_unref(&transaction);
   cardano_coin_selector_unref(&selector);
   cardano_tx_evaluator_unref(&evaluator);
