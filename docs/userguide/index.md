@@ -48,6 +48,9 @@ governance-proposals
 transaction-bodies
 transactions
 transaction-witnesses
+providers
+coin-selection
+evaluation-and-signing
 api-reference
 ```
 
