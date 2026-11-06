@@ -89,6 +89,8 @@ jobs:
           cabal run cometa-transactions
           cabal run cometa-providers
           cabal run cometa-evaluation
+          cabal run cometa-native-evaluation
+          cabal run cometa-deferred-redeemers
           cabal run cometa-transaction-building
           cabal run cometa-building-utilities
           cabal run cometa-coin-selection

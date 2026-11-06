@@ -27,6 +27,7 @@
  * \brief Build a fresh transaction with scoped native callback adapters.
  * \param selector Borrowed active runtime, or NULL for the native default.
  * \param evaluator Borrowed active runtime, or NULL for the native default.
+ * \param deferred Borrowed active deferred-argument runtime.
  * \param config Borrowed complete configuration snapshot.
  * \param config_size Configuration byte length.
  * \param plan Borrowed validated instruction snapshot.
@@ -37,5 +38,5 @@
  * \return Native status. All factories, callbacks and owner destruction finish
  * before return. Context gates must stay active for this entire operation.
  */
-unsigned int cometa_transaction_builder_build(cometa_runtime_t* selector, cometa_runtime_t* evaluator, const unsigned char* config, size_t config_size, const unsigned char* plan, size_t plan_size, cardano_buffer_t** output, cardano_buffer_t** diagnostic, uint64_t* key_count);
+unsigned int cometa_transaction_builder_build(cometa_runtime_t* selector, cometa_runtime_t* evaluator, cometa_runtime_t* deferred, const unsigned char* config, size_t config_size, const unsigned char* plan, size_t plan_size, cardano_buffer_t** output, cardano_buffer_t** diagnostic, uint64_t* key_count);
 #endif

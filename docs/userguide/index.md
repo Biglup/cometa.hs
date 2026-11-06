@@ -53,6 +53,7 @@ providers
 coin-selection
 building-utilities
 transaction-building
+deferred-redeemers
 evaluation-and-signing
 api-reference
 ```

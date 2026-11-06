@@ -2601,3 +2601,320 @@ Standalone set-valued required-authority inspection remains pending in the nativ
 ledger: using its native signer analysis internally for witness sizing does not
 expose that entire public capability. Other outstanding building/evaluation and
 Dijkstra operations retain their explicit pending entries.
+
+
+### P11: native evaluation and deferred redeemers
+
+#### Native evaluator API and source review
+
+Established Haskell source inspected before API design: cardano-api commit
+`5e63165a4bb7481a03d2e50464dc9c4f106c9fa5`,
+[Tx/Internal/Fee.hs](https://github.com/IntersectMBO/cardano-api/blob/5e63165a4bb7481a03d2e50464dc9c4f106c9fa5/cardano-api/src/Cardano/Api/Tx/Internal/Fee.hs),
+local snapshot `/tmp/p09-api-fee.hs`: evaluateTransactionExecutionUnits 721–775;
+auto-balance caller 1100–1155. Caller obtains system start/era history/protocol
+parameters/resolved UTxO/body, executes scripts, inspects indexed per-script
+failures and logs, substitutes budgets explicitly, and computes fees. Cometa
+preserves explicit context, identifier-keyed results and separate mutation;
+its synchronous native ABI reports all-or-error, so partial successes/logs are
+not invented. Native slot config is a constant-duration schedule, not ledger
+epoch history. Minor protocol version does not enter the native constructor.
+
+Reviewed pinned native source/header at `eadb95cd3ca7f711c203d7f2f4ee21c150d4d7f1`:
+`lib/include/cardano/transaction_builder/evaluation/native_tx_evaluator.h`,
+`lib/src/transaction_builder/evaluation/native_tx_evaluator.c` constructors
+2287–2360, evaluate_transaction 2190+, select_cost_model 1570+. Config is a total
+record of validated SlotConfig, Word64 protocolMajor and validated CostModels;
+`evaluator :: Config -> Evaluator` preserves the existing per-request Target.
+A new evaluator is constructed per call so operations share no mutable handle.
+Missing cost model lookup (including an empty map, not only NULL) selects native
+version defaults. Native uses fixed shared CPU100000000000/mem100000000 ceilings;
+these are not configurable protocol transaction limits. Every requested target
+reevaluates all levels, fails for failures elsewhere, and returns only selected
+level budgets. V1–V3 cannot execute at sublevels. Models and programs remain
+subject to native protocol/language checks.
+
+Haskell preflight checks ordinary Evaluation target+duplicate resolution rules,
+then every top/sub spending+reference input resolves and every explicit validity
+endpoint passes checked slotToTime (including reference-slot underflow and
+Word64 time overflow). Additional unrelated UTxOs are allowed. Collateral is
+not executed/resolved by ScriptContext input construction and is not required.
+Inputs/outputs and returned redeemers traverse public typed values; output
+budgets are checked against exact original redeemer arguments and identifiers.
+Original input transaction and every encoding remain untouched.
+
+Native boundary ownership: operation owns transaction, UTxO list, cost model map,
+evaluator, redeemer list, readers/writer. Constructors copy schedule, retain
+cost map, adopt context internally; C adapter separately releases evaluator and
+its original map reference. List insert retains; child ownership released each
+iteration. Partial parsed output is released on every failure. Output/diagnostic
+slots initialize NULL before work. On native failure diagnostic is copied from
+evaluator before unref; static status text is fallback. Haskell bracket owns both
+buffers throughout safe FFI, status inspection and copy. Pending cancellation
+unwinds only after synchronous safe C completion; no native worker escapes the
+scope. Safe import leaves unrelated Haskell capabilities schedulable. No public
+C internals, UPLC AST builders, handles or reference-count operations exposed.
+
+Test fixture provenance: Apache-2.0 cardano-c pinned commit above,
+`lib/tests/uplc/native_tx_evaluator.cpp`: build_succeeds_program_cbor (157+),
+build_v3_script (109+), build_v4_script (2083+), uniform V4 cost test (3450+).
+Flat programs reconstructed as minimal serialized compiled programs, then
+imported as PlutusScript public values; policies derive via real script hashing,
+Mint/Fields/Witnesses/Transaction assemble typed fixtures. No private AST FFI.
+Test cases in NativeEvaluation exercise V1–V4 mint execution, exact indefinite
+input CBOR/no implicit budget mutation, V4 exact defaults/custom coefficient
+budgets, malformed/unavailable scripts with copied diagnostics, phase2 failures,
+subtarget bounds/language/failure anywhere, fast cross-level budget exhaustion,
+complete resolution/duplicates/slots, repeated success and partial transport
+errors. Native allocation checks use Valgrind in addition to operation-repeat tests.
+
+#### Deferred redeemer API and source review
+
+Reviewed before design against native eadb95cd3ca7f711c203d7f2f4ee21c150d4d7f1:
+
+* `lib/include/cardano/transaction_builder/balancing/deferred_redeemer_list.h`, `lib/src/transaction_builder/balancing/deferred_redeemer_list.c`: list add retains the redeemer but borrows callback/context; destruction releases retained redeemers only. Resolve invokes registrations in order each balancing iteration, transfers one fresh payload from callback, sets data on the witness-set's shared redeemer and unreferences payload on success/failure. Null list is no-op, empty list has no invocations; duplicate list entries are permitted by C. Successful callback with null output is failure. Haskell does not expose native registration plumbing or null payloads.
+* `transaction_builder.h`, `transaction_builder.c`, internals `builder_inputs.c`, `builder_mint.c`, `builder_withdrawals.c`, `builder_certs.c`, `builder_redeemers.c`: deferred convenience calls construct Constr 0 [] placeholder, register callback against existing purpose map object. Deferred input duplicate registration latches builder failure. Mint policy map duplicate insertion preserves original redeemer; therefore grouped multiasset mint registers a callback for its first normalized nonzero asset and uses ordinary mint with NULL redeemer for other assets. This avoids registering several callbacks for one policy. Ordered normalization determines the first asset reproducibly.
+* Native tests `lib/tests/transaction_builder/balancing/deferred_redeemer_list.cpp` and `lib/tests/transaction_builder/transaction_builder.cpp` around lines12768-13690: actual self-index spend workflow; callback failure/null payload; mint, zero withdrawal and certificate registration; allocation failure. Upstream deferred builder success uses provider-backed evaluator fakes, independently of VM validation. Cometa tests reproduce caller workflows with owned typed values and injected evaluator, plus a real VM V4 mint. No upstream test source copied. License Apache-2.0.
+* `examples/src/deferred_redeemer_self_index_example.c`, `deferred_redeemer_batch_example.c`, `deferred_redeemer_withdraw_zero_example.c`: caller captures resolved identity, obtains canonical draft indices and returns a data payload; zero withdrawal is a script authorization purpose. Native documentation requires deterministic callbacks and states subbuilder callback timing differs (one invocation with local sorted draft, not top-level balancing).
+
+Haskell API review:
+
+* Atlas c3adfb416242ea25a244bfaa1614213eecdc55d9 [Types/Redeemer.hs](https://github.com/geniusyield/atlas/blob/c3adfb416242ea25a244bfaa1614213eecdc55d9/src/GeniusYield/Types/Redeemer.hs), source cached `/tmp/p11-atlas-redeemer.hs`; [TxBuilder/Class.hs](https://github.com/geniusyield/atlas/blob/c3adfb416242ea25a244bfaa1614213eecdc55d9/src/GeniusYield/TxBuilder/Class.hs) cached `/tmp/cometa-haskell-review/atlas-class.txt`: GYRedeemer is immediate BuiltinData, conversion to cardano-api HashableScriptData; mustMint takes a script, one redeemer, name and quantity, stores policy -> (asset quantities,redeemer), and zero amount is mempty. mustHaveInput/output assemble skeletons. No late redeemer callback appears in these reviewed APIs. Do not claim an established Atlas late workflow. Cometa follows typed immutable data and grouped policy semantics while adding native-supported deferred resolution explicitly, returning Either rather than implicit bottom/user exceptions for expected failures.
+* cardano-api 5e63165a4bb7481a03d2e50464dc9c4f106c9fa5 [Tx/Internal/Body.hs](https://github.com/IntersectMBO/cardano-api/blob/5e63165a4bb7481a03d2e50464dc9c4f106c9fa5/cardano-api/src/Cardano/Api/Tx/Internal/Body.hs), cached `/tmp/p11-cardano-api-body.hs`: indexTxIns sorts TxIn before zip; indexTxMintValue enumerates policy map, indexTxWithdrawals ordered addresses; script-purpose index comes from body collections rather than redeemer argument. [Fee.hs](https://github.com/IntersectMBO/cardano-api/blob/5e63165a4bb7481a03d2e50464dc9c4f106c9fa5/cardano-api/src/Cardano/Api/Tx/Internal/Fee.hs), cached `/tmp/p09-api-fee.hs`, estimateBalancedTxBody substitutes execution units before balancing. This supports distinguishing purpose index from body-dependent argument; it does not establish a pure late-argument API identical to Cometa's. Reviewed source licenses Apache-2.0; none copied.
+
+Approved workflow: validate input values once; construct a Plan using `type DeferredRedeemer = Transaction -> [Utxo] -> Either Error EncodedPlutusData`; `Builder.build config plan` is the one effect/error boundary; inspect/reuse resulting owned transaction. Spend/withdraw/certificate variants attach pure callbacks. `mintWithDeferredRedeemer :: PolicyId -> [(AssetName,Int64)] -> DeferredRedeemer -> Plan` groups one callback per policy, allows empty/netzero no-op groups. No raw pointer, FunPtr, StablePtr, manual cleanup or effectful callback appears publicly.
+
+Plan keeps ordered composition but removes Eq/Show because functions have no lawful structural equality or printable representation. Internally arguments contain pure immediate data or callback-table indices (both lawful Eq/Show); composition appends closure tables and rebases right indices. Associativity follows concatenation plus additive rebase; identity preserves indices. Function comparison is never attempted. Duplicate deferred spending/reward/policy registrations (including p<>p with same closure) are explicit conflicts. Same-policy assets within one group share one table slot. Static idempotence and mint combination remain unchanged. Observational monoid tests compare encoded normalized operations, including deferred indices; successful repeated builds check retained closure ordering and output behavior. Follow-up: broader properties may compare successful builds under deterministic selection.
+
+Lifetime/exception contract: a third grouped Runtime owns the dispatcher closure table. Native contexts are allocated in one fixed array before instruction registration, borrow active runtime, and remain valid until after native builder destruction. Builder destruction releases native deferred entries before context array free. All factories, callbacks, transaction serialization, native cleanup and context free occur inside one joined safe FFI operation. Cancellation signals every callback control and joins native worker before freeing any registration. Callback request copies draft and selected UTxOs to CBOR; Haskell decodes owned immutable values. Complete pure callback result evaluation, CBOR materialization, lazy error forcing and native reply copying execute in Runtime's protected callback worker. Typed callback errors survive native failure; exceptions propagate after unwind. Callback result is deterministic by public type/contract; Haskell cannot prevent unsafePerformIO abuse, so captured mutable state is explicitly outside contract. Plans/builds share no mutable registration state.
+
+P12 pending contracts: subbuilder native invokes once with a transaction-shaped draft containing only the local sub body and local sorted resolved inputs, before parent balancing; top-level interpretation must never accidentally be used. Its borrowed context must live through subbuilder destruction and any retry, and owned snapshot decoding/error/cancellation rules must match top-level. Vote callback registration requires a separate public voting-plan workflow and is pending with governance builder integration. No public raw deferred list is needed: its lifecycle/registration/resolve operations are internal infrastructure; low-level list failure behavior remains native upstream evidence, with Haskell boundary tests covering impossible public nulls via type invariants.
+
+
+### P11 transaction index helpers: API and ordering review
+
+Reviewed cardano-api `5e63165a4bb7481a03d2e50464dc9c4f106c9fa5`,
+[Cardano.Api.Tx.Internal.Body](https://github.com/IntersectMBO/cardano-api/blob/5e63165a4bb7481a03d2e50464dc9c4f106c9fa5/cardano-api/src/Cardano/Api/Tx/Internal/Body.hs),
+actual downloaded source `/tmp/p11-cardano-api-body.hs` (downloaded at the revision above). `indexTxIns` lines351–363 sorts by `TxIn` and zips zero-based
+indices, including key witnesses; `indexTxMintValue` lines720–735 enumerates
+ordered policies; `collectTxBodyScriptWitnesses` lines2296+ uses those indices
+to associate scripts with transaction objects. Witness indices change when their
+body collections change. Also reviewed the current rendered
+[source](https://cardano-api.cardano.intersectmbo.org/cardano-api/src/Cardano.Api.Tx.Internal.Body.html)
+on 2026-11-06.
+
+Caller workflow: validate/import the input, address or policy once; assemble or
+receive the complete `Transaction`; call qualified `Indices.findInput`,
+`findReferenceInput`, `findOutput address minimumLovelace`, or `findMintPolicy`;
+handle legitimate absence with `Maybe`; assemble the redeemer data inside an
+existing deferred callback. These helpers inspect immutable values and introduce
+no IO or additional error layer. Cometa uses its existing `Input` key rather than
+the C hash/index argument pair, returns `Maybe Word64` matching native index
+width, and avoids era/witness wrappers because these queries do not require them.
+The four functions inspect the top level; nested transaction indices remain
+independent.
+
+Native audit at `eadb95cd3ca7f711c203d7f2f4ee21c150d4d7f1`:
+
+* `lib/src/transaction/transaction.c`786–985: input helpers scan the stored input
+  set; output helper returns the first address match meeting minimum Ada; mint
+  helper enumerates sorted policy keys.
+* `transaction_body/transaction_input_set.c`208–236 and377–396 sorts parsed/added
+  inputs using `cardano_transaction_input_compare`. The comparator
+  (`transaction_input.c`363+) orders hash bytes then numeric index. Duplicate
+  input references are retained, so later positions must not deduplicate them.
+* `assets/multi_asset.c` inserts policy map entries without discarding empty maps,
+  sorts them by hash and exposes those keys. Imported zero-only and empty policy
+  maps affect native policy positions even though public semantic `Value`
+  normalizes zero quantities. The pure helper reads only policy keys from exact
+  validated body CBOR using existing private CBOR combinators, then sorts them.
+  Public decoding already rejects duplicate policy keys in
+  `Internal.TransactionValue.decodeAssets`; a regression asserts that boundary.
+* `address/address.c`546+ compares address type and bytes; Cometa compares the
+  exact validated address bytes. Output order is retained.
+
+Intentional native correction: native output lookup casts the unsigned minimum
+lovelace to signed `int64_t` (`transaction.c`918), causing thresholds above
+`2^63-1` to match ordinary outputs after wrapping on the supported platform.
+Cometa compares as `Integer`, retaining the documented unsigned threshold meaning.
+Outputs are nonnegative and bounded by `2^63-1`, so larger thresholds correctly
+return `Nothing`. Ordinary thresholds through `2^63-1` have native oracle tests;
+the two larger boundaries have independent public tests. No native changes are included here.
+
+Tests assemble typed transactions through public decoding/assembly, including a
+noncanonical unsorted input list with duplicate references, numeric indices24/256,
+output address/amount ties and absent matches, a burning policy plus empty and
+zero-only policies, duplicate-policy rejection, empty collections, and threshold
+boundaries. The independent C oracle invokes all four installed native index APIs
+and releases reader/transaction/hash/address owners on every path. Fixtures are
+newly authored here; no external vectors were copied. Native source is
+Copyright Biglup Labs, Apache-2.0, at the pinned revision.
+
+
+### P11: native evaluation and deferred redeemers
+
+#### Native evaluator API and source review
+
+Established Haskell source inspected before API design: cardano-api commit
+`5e63165a4bb7481a03d2e50464dc9c4f106c9fa5`,
+[Tx/Internal/Fee.hs](https://github.com/IntersectMBO/cardano-api/blob/5e63165a4bb7481a03d2e50464dc9c4f106c9fa5/cardano-api/src/Cardano/Api/Tx/Internal/Fee.hs),
+local snapshot `/tmp/p09-api-fee.hs`: evaluateTransactionExecutionUnits 721–775;
+auto-balance caller 1100–1155. Caller obtains system start/era history/protocol
+parameters/resolved UTxO/body, executes scripts, inspects indexed per-script
+failures and logs, substitutes budgets explicitly, and computes fees. Cometa
+preserves explicit context, identifier-keyed results and separate mutation;
+its synchronous native ABI reports all-or-error, so partial successes/logs are
+not invented. Native slot config is a constant-duration schedule, not ledger
+epoch history. Minor protocol version does not enter the native constructor.
+
+Reviewed pinned native source/header at `eadb95cd3ca7f711c203d7f2f4ee21c150d4d7f1`:
+`lib/include/cardano/transaction_builder/evaluation/native_tx_evaluator.h`,
+`lib/src/transaction_builder/evaluation/native_tx_evaluator.c` constructors
+2287–2360, evaluate_transaction 2190+, select_cost_model 1570+. Config is a total
+record of validated SlotConfig, Word64 protocolMajor and validated CostModels;
+`evaluator :: Config -> Evaluator` preserves the existing per-request Target.
+A new evaluator is constructed per call so operations share no mutable handle.
+Missing cost model lookup (including an empty map, not only NULL) selects native
+version defaults. Native uses fixed shared CPU100000000000/mem100000000 ceilings;
+these are not configurable protocol transaction limits. Every requested target
+reevaluates all levels, fails for failures elsewhere, and returns only selected
+level budgets. V1–V3 cannot execute at sublevels. Models and programs remain
+subject to native protocol/language checks.
+
+Haskell preflight checks ordinary Evaluation target+duplicate resolution rules,
+then every top/sub spending+reference input resolves and every explicit validity
+endpoint passes checked slotToTime (including reference-slot underflow and
+Word64 time overflow). Additional unrelated UTxOs are allowed. Collateral is
+not executed/resolved by ScriptContext input construction and is not required.
+Inputs/outputs and returned redeemers traverse public typed values; output
+budgets are checked against exact original redeemer arguments and identifiers.
+Original input transaction and every encoding remain untouched.
+
+Native boundary ownership: operation owns transaction, UTxO list, cost model map,
+evaluator, redeemer list, readers/writer. Constructors copy schedule, retain
+cost map, adopt context internally; C adapter separately releases evaluator and
+its original map reference. List insert retains; child ownership released each
+iteration. Partial parsed output is released on every failure. Output/diagnostic
+slots initialize NULL before work. On native failure diagnostic is copied from
+evaluator before unref; static status text is fallback. Haskell bracket owns both
+buffers throughout safe FFI, status inspection and copy. Pending cancellation
+unwinds only after synchronous safe C completion; no native worker escapes the
+scope. Safe import leaves unrelated Haskell capabilities schedulable. No public
+C internals, UPLC AST builders, handles or reference-count operations exposed.
+
+Test fixture provenance: Apache-2.0 cardano-c pinned commit above,
+`lib/tests/uplc/native_tx_evaluator.cpp`: build_succeeds_program_cbor (157+),
+build_v3_script (109+), build_v4_script (2083+), uniform V4 cost test (3450+).
+Flat programs reconstructed as minimal serialized compiled programs, then
+imported as PlutusScript public values; policies derive via real script hashing,
+Mint/Fields/Witnesses/Transaction assemble typed fixtures. No private AST FFI.
+Test cases in NativeEvaluation exercise V1–V4 mint execution, exact indefinite
+input CBOR/no implicit budget mutation, V4 exact defaults/custom coefficient
+budgets, malformed/unavailable scripts with copied diagnostics, phase2 failures,
+subtarget bounds/language/failure anywhere, fast cross-level budget exhaustion,
+complete resolution/duplicates/slots, repeated success and partial transport
+errors. Native allocation checks use Valgrind in addition to operation-repeat tests.
+
+#### Deferred redeemer API and source review
+
+Reviewed before design against native eadb95cd3ca7f711c203d7f2f4ee21c150d4d7f1:
+
+* `lib/include/cardano/transaction_builder/balancing/deferred_redeemer_list.h`, `lib/src/transaction_builder/balancing/deferred_redeemer_list.c`: list add retains the redeemer but borrows callback/context; destruction releases retained redeemers only. Resolve invokes registrations in order each balancing iteration, transfers one fresh payload from callback, sets data on the witness-set's shared redeemer and unreferences payload on success/failure. Null list is no-op, empty list has no invocations; duplicate list entries are permitted by C. Successful callback with null output is failure. Haskell does not expose native registration plumbing or null payloads.
+* `transaction_builder.h`, `transaction_builder.c`, internals `builder_inputs.c`, `builder_mint.c`, `builder_withdrawals.c`, `builder_certs.c`, `builder_redeemers.c`: deferred convenience calls construct Constr 0 [] placeholder, register callback against existing purpose map object. Deferred input duplicate registration latches builder failure. Mint policy map duplicate insertion preserves original redeemer; therefore grouped multiasset mint registers a callback for its first normalized nonzero asset and uses ordinary mint with NULL redeemer for other assets. This avoids registering several callbacks for one policy. Ordered normalization determines the first asset reproducibly.
+* Native tests `lib/tests/transaction_builder/balancing/deferred_redeemer_list.cpp` and `lib/tests/transaction_builder/transaction_builder.cpp` around lines12768-13690: actual self-index spend workflow; callback failure/null payload; mint, zero withdrawal and certificate registration; allocation failure. Upstream deferred builder success uses provider-backed evaluator fakes, independently of VM validation. Cometa tests reproduce caller workflows with owned typed values and injected evaluator, plus a real VM V4 mint. No upstream test source copied. License Apache-2.0.
+* `examples/src/deferred_redeemer_self_index_example.c`, `deferred_redeemer_batch_example.c`, `deferred_redeemer_withdraw_zero_example.c`: caller captures resolved identity, obtains canonical draft indices and returns a data payload; zero withdrawal is a script authorization purpose. Native documentation requires deterministic callbacks and states subbuilder callback timing differs (one invocation with local sorted draft, not top-level balancing).
+
+Haskell API review:
+
+* Atlas c3adfb416242ea25a244bfaa1614213eecdc55d9 [Types/Redeemer.hs](https://github.com/geniusyield/atlas/blob/c3adfb416242ea25a244bfaa1614213eecdc55d9/src/GeniusYield/Types/Redeemer.hs), source cached `/tmp/p11-atlas-redeemer.hs`; [TxBuilder/Class.hs](https://github.com/geniusyield/atlas/blob/c3adfb416242ea25a244bfaa1614213eecdc55d9/src/GeniusYield/TxBuilder/Class.hs) cached `/tmp/cometa-haskell-review/atlas-class.txt`: GYRedeemer is immediate BuiltinData, conversion to cardano-api HashableScriptData; mustMint takes a script, one redeemer, name and quantity, stores policy -> (asset quantities,redeemer), and zero amount is mempty. mustHaveInput/output assemble skeletons. No late redeemer callback appears in these reviewed APIs. Do not claim an established Atlas late workflow. Cometa follows typed immutable data and grouped policy semantics while adding native-supported deferred resolution explicitly, returning Either rather than implicit bottom/user exceptions for expected failures.
+* cardano-api 5e63165a4bb7481a03d2e50464dc9c4f106c9fa5 [Tx/Internal/Body.hs](https://github.com/IntersectMBO/cardano-api/blob/5e63165a4bb7481a03d2e50464dc9c4f106c9fa5/cardano-api/src/Cardano/Api/Tx/Internal/Body.hs), cached `/tmp/p11-cardano-api-body.hs`: indexTxIns sorts TxIn before zip; indexTxMintValue enumerates policy map, indexTxWithdrawals ordered addresses; script-purpose index comes from body collections rather than redeemer argument. [Fee.hs](https://github.com/IntersectMBO/cardano-api/blob/5e63165a4bb7481a03d2e50464dc9c4f106c9fa5/cardano-api/src/Cardano/Api/Tx/Internal/Fee.hs), cached `/tmp/p09-api-fee.hs`, estimateBalancedTxBody substitutes execution units before balancing. This supports distinguishing purpose index from body-dependent argument; it does not establish a pure late-argument API identical to Cometa's. Reviewed source licenses Apache-2.0; none copied.
+
+Approved workflow: validate input values once; construct a Plan using `type DeferredRedeemer = Transaction -> [Utxo] -> Either Error EncodedPlutusData`; `Builder.build config plan` is the one effect/error boundary; inspect/reuse resulting owned transaction. Spend/withdraw/certificate variants attach pure callbacks. `mintWithDeferredRedeemer :: PolicyId -> [(AssetName,Int64)] -> DeferredRedeemer -> Plan` groups one callback per policy, allows empty/netzero no-op groups. No raw pointer, FunPtr, StablePtr, manual cleanup or effectful callback appears publicly.
+
+Plan keeps ordered composition but removes Eq/Show because functions have no lawful structural equality or printable representation. Internally arguments contain pure immediate data or callback-table indices (both lawful Eq/Show); composition appends closure tables and rebases right indices. Associativity follows concatenation plus additive rebase; identity preserves indices. Function comparison is never attempted. Duplicate deferred spending/reward/policy registrations (including p<>p with same closure) are explicit conflicts. Same-policy assets within one group share one table slot. Static idempotence and mint combination remain unchanged. Observational monoid tests compare encoded normalized operations, including deferred indices; successful repeated builds check retained closure ordering and output behavior. Follow-up: broader properties may compare successful builds under deterministic selection.
+
+Lifetime/exception contract: a third grouped Runtime owns the dispatcher closure table. Native contexts are allocated in one fixed array before instruction registration, borrow active runtime, and remain valid until after native builder destruction. Builder destruction releases native deferred entries before context array free. All factories, callbacks, transaction serialization, native cleanup and context free occur inside one joined safe FFI operation. Cancellation signals every callback control and joins native worker before freeing any registration. Callback request copies draft and selected UTxOs to CBOR; Haskell decodes owned immutable values. Complete pure callback result evaluation, CBOR materialization, lazy error forcing and native reply copying execute in Runtime's protected callback worker. Typed callback errors survive native failure; exceptions propagate after unwind. Callback result is deterministic by public type/contract; Haskell cannot prevent unsafePerformIO abuse, so captured mutable state is explicitly outside contract. Plans/builds share no mutable registration state.
+
+P12 pending contracts: subbuilder native invokes once with a transaction-shaped draft containing only the local sub body and local sorted resolved inputs, before parent balancing; top-level interpretation must never accidentally be used. Its borrowed context must live through subbuilder destruction and any retry, and owned snapshot decoding/error/cancellation rules must match top-level. Vote callback registration requires a separate public voting-plan workflow and is pending with governance builder integration. No public raw deferred list is needed: its lifecycle/registration/resolve operations are internal infrastructure; low-level list failure behavior remains native upstream evidence, with Haskell boundary tests covering impossible public nulls via type invariants.
+
+
+### P11 transaction index helpers: API and ordering review
+
+Reviewed cardano-api `5e63165a4bb7481a03d2e50464dc9c4f106c9fa5`,
+[Cardano.Api.Tx.Internal.Body](https://github.com/IntersectMBO/cardano-api/blob/5e63165a4bb7481a03d2e50464dc9c4f106c9fa5/cardano-api/src/Cardano/Api/Tx/Internal/Body.hs),
+actual downloaded source `/tmp/p11-cardano-api-body.hs` (downloaded at the revision above). `indexTxIns` lines351–363 sorts by `TxIn` and zips zero-based
+indices, including key witnesses; `indexTxMintValue` lines720–735 enumerates
+ordered policies; `collectTxBodyScriptWitnesses` lines2296+ uses those indices
+to associate scripts with transaction objects. Witness indices change when their
+body collections change. Also reviewed the current rendered
+[source](https://cardano-api.cardano.intersectmbo.org/cardano-api/src/Cardano.Api.Tx.Internal.Body.html)
+on 2026-11-06.
+
+Caller workflow: validate/import the input, address or policy once; assemble or
+receive the complete `Transaction`; call qualified `Indices.findInput`,
+`findReferenceInput`, `findOutput address minimumLovelace`, or `findMintPolicy`;
+handle legitimate absence with `Maybe`; assemble the redeemer data inside an
+existing deferred callback. These helpers inspect immutable values and introduce
+no IO or additional error layer. Cometa uses its existing `Input` key rather than
+the C hash/index argument pair, returns `Maybe Word64` matching native index
+width, and avoids era/witness wrappers because these queries do not require them.
+The four functions inspect the top level; nested transaction indices remain
+independent.
+
+Native audit at `eadb95cd3ca7f711c203d7f2f4ee21c150d4d7f1`:
+
+* `lib/src/transaction/transaction.c`786–985: input helpers scan the stored input
+  set; output helper returns the first address match meeting minimum Ada; mint
+  helper enumerates sorted policy keys.
+* `transaction_body/transaction_input_set.c`208–236 and377–396 sorts parsed/added
+  inputs using `cardano_transaction_input_compare`. The comparator
+  (`transaction_input.c`363+) orders hash bytes then numeric index. Duplicate
+  input references are retained, so later positions must not deduplicate them.
+* `assets/multi_asset.c` inserts policy map entries without discarding empty maps,
+  sorts them by hash and exposes those keys. Imported zero-only and empty policy
+  maps affect native policy positions even though public semantic `Value`
+  normalizes zero quantities. The pure helper reads only policy keys from exact
+  validated body CBOR using existing private CBOR combinators, then sorts them.
+  Public decoding already rejects duplicate policy keys in
+  `Internal.TransactionValue.decodeAssets`; a regression asserts that boundary.
+* `address/address.c`546+ compares address type and bytes; Cometa compares the
+  exact validated address bytes. Output order is retained.
+
+Intentional native correction: native output lookup casts the unsigned minimum
+lovelace to signed `int64_t` (`transaction.c`918), causing thresholds above
+`2^63-1` to match ordinary outputs after wrapping on the supported platform.
+Cometa compares as `Integer`, retaining the documented unsigned threshold meaning.
+Outputs are nonnegative and bounded by `2^63-1`, so larger thresholds correctly
+return `Nothing`. Ordinary thresholds through `2^63-1` have native oracle tests;
+the two larger boundaries have independent public tests. No native changes are included here.
+
+Tests assemble typed transactions through public decoding/assembly, including a
+noncanonical unsorted input list with duplicate references, numeric indices24/256,
+output address/amount ties and absent matches, a burning policy plus empty and
+zero-only policies, duplicate-policy rejection, empty collections, and threshold
+boundaries. The independent C oracle invokes all four installed native index APIs
+and releases reader/transaction/hash/address owners on every path. Fixtures are
+newly authored here; no external vectors were copied. Native source is
+Copyright Biglup Labs, Apache-2.0, at the pinned revision.
+
+
+Canonical-order correction found by the strengthened two-input workflow: native `transaction_balancing.c` calls set_transaction_inputs(body,selection,...) to canonically order the body, then passes the original selection list to deferred_redeemer_list_resolve at line2995. Thus the actual list can remain selection/insertion order despite deferred_redeemer_list.h claiming canonical resolved order. The Haskell dispatcher sorts owned UTxOs by Utxo.input, verifies their reference multiset exactly equals the draft body spending inputs, and only then calls user code. A native mismatch becomes NativeContractViolation builder.deferredInputs. The nontrivial test registers script input first, a key input with lexically smaller txid second; callback receives canonical snapshots and final script index1. This is required adapter normalization, not reliance on header prose.
+
+
+#### Integrated checks and remaining scope
+
+The integrated suite passes 404 tests (307 public-package tests and 97 runtime
+and builder tests). All 29 offline executables run, including native V4 evaluation
+and a balanced deferred mint. Public Haddock declarations have complete coverage;
+strict guide HTML/link checks, formatters, HLint, package metadata, native inventory
+and key/credential compile-fail checks pass. The full runtime suite passes
+Valgrind with zero errors and zero definitely, indirectly or possibly lost bytes;
+no suppressions were used. Source-package and public-suite Valgrind results are
+recorded on the PR alongside hosted compiler/platform checks.
+
+This batch covers the installed native evaluator constructors, top-level deferred
+spending/minting/withdrawal/certificate operations and four transaction-index
+queries. UPLC parser, AST and CEK declarations are private native headers, not
+missing installed APIs. Voting callbacks, subtransaction building and deferred
+local drafts remain P12 work. Remaining contextual authority/index queries and
+JSON inspection retain explicit pending ledger entries; this is not a claim
+of complete Dijkstra building or live-network conformance.

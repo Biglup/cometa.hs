@@ -1,4 +1,3 @@
-{-# LANGUAGE LambdaCase #-}
 -- Copyright 2026 Biglup Labs
 -- SPDX-License-Identifier: Apache-2.0
 --
@@ -13,6 +12,7 @@
 -- WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TupleSections #-}
 {-# OPTIONS_HADDOCK hide #-}
@@ -30,6 +30,7 @@ module Cometa.Internal.TransactionBuilder (Config (..), defaultConfig, build) wh
 
 -- IMPORTS --------------------------------------------------------------------
 
+import qualified Codec.CBOR.Decoding as D
 import qualified Codec.CBOR.Encoding as E
 import Cometa.Address (Address)
 import qualified Cometa.Address as Address
@@ -48,6 +49,7 @@ import qualified Cometa.Internal.ParameterSnapshot as Parameters
 import qualified Cometa.Internal.Runtime as Runtime
 import qualified Cometa.Internal.TransactionCbor as C
 import qualified Cometa.Internal.TransactionPlan as Plan
+import qualified Cometa.PlutusData as Data
 import qualified Cometa.Protocol.ExUnitPrices as Prices
 import qualified Cometa.Protocol.ExUnits as Ex
 import Cometa.Protocol.Parameters (Parameters)
@@ -71,8 +73,10 @@ import Control.Monad (unless)
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as B
 import Data.Int (Int64)
+import Data.List (sort, sortOn)
 import qualified Data.Map.Strict as Map
 import Data.Maybe (fromMaybe, isJust)
+import qualified Data.Sequence as Seq
 import qualified Data.Set as Set
 import qualified Data.Text.Encoding as Text
 import Data.Word (Word64)
@@ -130,26 +134,28 @@ build config plan = case validate config plan of
 buildNative :: Config -> Plan -> IO (Either Error Transaction)
 buildNative config plan =
   Runtime.withRuntime selectDispatch $ \selection ->
-    Runtime.withRuntime evaluateDispatch $ \evaluation -> do
-      result <- Runtime.withOperations [selection, evaluation] $ \case
-        [selectContext, evaluateContext] ->
-          Runtime.withBytes (encodeConfig plan config) $ \configBytes configSize ->
-            Runtime.withBytes (Plan.encodePlan plan) $ \planBytes planSize ->
-              withResult
-                ( FFI.cBuild
-                    (if isJust (selector config) then selectContext else nullPtr)
-                    (if isJust (evaluator config) then evaluateContext else nullPtr)
-                    configBytes
-                    configSize
-                    planBytes
-                    planSize
-                )
-        _ -> pure (Left (NativeContractViolation "builder.contexts"))
-      pure $ do
-        (bytes, keyCount) <- result
-        transaction <- Transaction.decodeCbor bytes
-        validateBuilt config plan keyCount transaction
-        pure transaction
+    Runtime.withRuntime evaluateDispatch $ \evaluation ->
+      Runtime.withRuntime (deferredDispatch plan) $ \deferred -> do
+        result <- Runtime.withOperations [selection, evaluation, deferred] $ \case
+          [selectContext, evaluateContext, deferredContext] ->
+            Runtime.withBytes (encodeConfig plan config) $ \configBytes configSize ->
+              Runtime.withBytes (Plan.encodePlan plan) $ \planBytes planSize ->
+                withResult
+                  ( FFI.cBuild
+                      (if isJust (selector config) then selectContext else nullPtr)
+                      (if isJust (evaluator config) then evaluateContext else nullPtr)
+                      deferredContext
+                      configBytes
+                      configSize
+                      planBytes
+                      planSize
+                  )
+          _ -> pure (Left (NativeContractViolation "builder.contexts"))
+        pure $ do
+          (bytes, keyCount) <- result
+          transaction <- Transaction.decodeCbor bytes
+          validateBuilt config plan keyCount transaction
+          pure transaction
   where
     selectDispatch = maybe unavailable Selection.dispatch (selector config)
     evaluateDispatch = maybe unavailable (\backend -> Evaluation.dispatch (checkedEvaluator config backend) TopLevel) (evaluator config)
@@ -349,3 +355,22 @@ withResult call = alloca $ \output -> alloca $ \diagnostic -> alloca $ \keyCount
               pure $ case copied of
                 Left failure -> Left failure
                 Right bytes -> Left (NativeError "builder.build" (Code.fromNumber (toInteger status)) (Text.decodeUtf8With (\_ _ -> Just '\xfffd') bytes))
+
+-- The runtime protects decoding, pure callback evaluation, complete reply
+-- encoding and native copying together. Lazy failures therefore unwind through
+-- the ordinary callback exception/cancellation boundary before C sees success.
+deferredDispatch :: Plan -> Runtime.Dispatch
+deferredDispatch plan operation bytes
+  | operation /= 110 = pure (Left (UnsupportedOperation "Unknown deferred redeemer callback operation"))
+  | otherwise = pure $ do
+      (index, transaction, inputs) <- C.decodeAs InvalidTransactionPlan parser bytes
+      callback <- maybe (Left (NativeContractViolation "builder.deferredIndex")) Right (Seq.lookup index (Plan.deferredRedeemers plan))
+      -- The pinned native balancer supplies selection order despite its header
+      -- promising canonical order. Normalize the owned snapshot and verify that
+      -- every spending input resolves exactly once before invoking user code.
+      let canonical = sortOn Utxo.input inputs
+          references = sort (Fields.fieldInputs (Body.bodyFields (Body.toBody (Transaction.body transaction))))
+      unless (map Utxo.input canonical == references) (Left (NativeContractViolation "builder.deferredInputs"))
+      Data.toCbor <$> callback transaction canonical
+  where
+    parser = C.array 3 ((,,) <$> D.decodeInt <*> C.nested bytes Transaction.decodeCbor <*> C.list (C.nested bytes Utxo.decodeCbor))

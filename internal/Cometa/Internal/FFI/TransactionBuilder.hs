@@ -28,4 +28,4 @@ import Foreign.C.Types (CSize (..), CUInt (..))
 import Foreign.Ptr (Ptr)
 
 foreign import ccall safe "cometa_transaction_builder_build"
-  cBuild :: Ptr Context -> Ptr Context -> Ptr Word8 -> CSize -> Ptr Word8 -> CSize -> Ptr (Ptr Buffer) -> Ptr (Ptr Buffer) -> Ptr Word64 -> IO NativeCode
+  cBuild :: Ptr Context -> Ptr Context -> Ptr Context -> Ptr Word8 -> CSize -> Ptr Word8 -> CSize -> Ptr (Ptr Buffer) -> Ptr (Ptr Buffer) -> Ptr Word64 -> IO NativeCode
