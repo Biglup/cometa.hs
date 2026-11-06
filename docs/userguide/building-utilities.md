@@ -56,3 +56,24 @@ for one subtransaction. These are body calculations, not queries of account or
 registration state. They exclude minting and do not establish whether a refund
 is currently available on chain. The outer calculation excludes nested bodies;
 interpret batch-level effects in their transaction context.
+
+
+## Check conservation across a batch
+
+Use `Building.imbalance parameters resolved transaction` for the outer body,
+`Building.subTransactionImbalance parameters resolved intent` for a local intent,
+and `Building.batchImbalance parameters resolved transaction` for the complete
+batch. A positive coin or asset quantity is surplus; a negative quantity is a
+deficit. Intents can deliberately contribute surplus or deficit for the batcher
+to match. `Building.isBalanced` checks that the whole-batch result is zero.
+
+These calculations include withdrawals, deposits and refunds, minting/burning,
+outputs, donation and direct account deposits. Only the outer body pays a fee.
+Pool registration deposits are charged once per pool across the whole batch.
+Resolve every spending input; additional resolved entries are allowed, but
+duplicate entries are rejected. Reference and collateral inputs do not contribute
+to conservation. The checks preserve the supplied transaction and witnesses.
+
+Zero imbalance does not establish valid signatures, scripts, current input
+availability or other ledger rules. See the [signed batching example](subtransaction-building.md)
+for a complete offline workflow.

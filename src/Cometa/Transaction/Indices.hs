@@ -13,9 +13,9 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
--- | Locate objects in the top-level transaction for deferred redeemers and
--- script arguments. Indices start at zero and can change when the body changes.
--- Missing objects return 'Nothing'. Subtransaction contents are independent.
+-- | Locate objects in a top-level transaction for deferred redeemers and script
+-- arguments. Indices start at zero and can change when the body changes.
+-- Missing objects return 'Nothing'. Nested levels remain independent.
 --
 -- @
 -- import qualified Cometa.Transaction.Indices as Indices
@@ -27,71 +27,79 @@ module Cometa.Transaction.Indices
     findReferenceInput,
     findOutput,
     findMintPolicy,
+    findWithdrawal,
+    findCertificate,
+    findVote,
+    findRedeemer,
   )
 where
 
 -- IMPORTS --------------------------------------------------------------------
 
-import qualified Codec.CBOR.Decoding as D
-import qualified Codec.CBOR.Term as T
 import Cometa.Address (Address)
-import qualified Cometa.Address as Address
-import Cometa.AssetId (AssetId (Ada))
-import qualified Cometa.Internal.TransactionCbor as Cbor
+import Cometa.Address.Reward (RewardAddress)
+import Cometa.Certificate (EncodedCertificate)
+import Cometa.Error (Error)
+import Cometa.Evaluation (RedeemerId)
+import Cometa.Governance.Voting (Voter)
+import qualified Cometa.Internal.ContextualTransaction as Native
+import qualified Cometa.Internal.TransactionIndices as Indices
 import Cometa.PolicyId (PolicyId)
-import qualified Cometa.PolicyId as Policy
-import Cometa.Transaction (Transaction)
 import qualified Cometa.Transaction as Tx
 import qualified Cometa.Transaction.Body as Body
 import qualified Cometa.Transaction.Fields as Fields
 import Cometa.Transaction.Input (Input)
-import qualified Cometa.Transaction.Output as Output
-import qualified Cometa.Value as Value
-import Data.List (sort)
-import qualified Data.Map.Strict as Map
-import Data.Maybe (fromMaybe)
+import qualified Cometa.Transaction.Witnesses as Witnesses
+import Data.ByteString (ByteString)
 import Data.Word (Word64)
 
 -- DEFINITIONS ----------------------------------------------------------------
 
--- | First spending-input position, ordered by transaction hash bytes and then
--- numeric output index. Duplicate references occupy separate positions.
-findInput :: Input -> Transaction -> Maybe Word64
-findInput reference = position (== reference) . sort . Fields.fieldInputs . fields
+-- | First spending reference in hash-byte then numeric-index order. Duplicates
+-- occupy separate positions.
+findInput :: Input -> Tx.Transaction -> Maybe Word64
+findInput reference = Indices.findInput reference . fields
 
--- | First reference-input position in the same hash/index order as 'findInput'.
--- An absent reference-input field has no matching position.
-findReferenceInput :: Input -> Transaction -> Maybe Word64
-findReferenceInput reference = position (== reference) . sort . fromMaybe [] . Fields.fieldReferenceInputs . fields
+-- | First reference input in the same order as 'findInput'.
+findReferenceInput :: Input -> Tx.Transaction -> Maybe Word64
+findReferenceInput reference = Indices.findReferenceInput reference . fields
 
--- | First output at the address containing at least the minimum lovelace.
--- Outputs retain their creation order. Other assets, datums and reference
--- scripts do not affect the match. The minimum spans the unsigned 64-bit range.
-findOutput :: Address -> Word64 -> Transaction -> Maybe Word64
-findOutput destination minimumLovelace = position matches . Fields.fieldOutputs . fields
-  where
-    matches output =
-      Address.toBytes (Output.address output) == Address.toBytes destination
-        && Value.quantity Ada (Output.value output) >= toInteger minimumLovelace
+-- | First output at the exact address containing at least the minimum lovelace.
+-- Output creation order is retained; the minimum spans unsigned 64-bit values.
+findOutput :: Address -> Word64 -> Tx.Transaction -> Maybe Word64
+findOutput destination minimumLovelace = Indices.findOutput destination minimumLovelace . fields
 
--- | Minting-policy position in ascending policy-hash byte order. Each policy
--- counts once, regardless of its asset names or whether it mints or burns.
--- Imported policies with only zero quantities or an empty asset map still count.
-findMintPolicy :: PolicyId -> Transaction -> Maybe Word64
-findMintPolicy policy transaction = do
-  let bytes = Body.toCbor (Tx.body transaction)
-  bodyFields <- either (const Nothing) Just (Cbor.decode (Cbor.mapFields bytes) bytes)
-  mint <- Map.lookup 9 bodyFields
-  policies <- either (const Nothing) Just (Cbor.decode (Cbor.entries (D.decodeBytes <* T.decodeTerm)) mint)
-  position (== Policy.toBytes policy) (sort policies)
+-- | Policy position in ascending hash-byte order. Imported policies with only
+-- zero quantities or an empty asset map still occupy positions.
+findMintPolicy :: PolicyId -> Tx.Transaction -> Maybe Word64
+findMintPolicy policy = Indices.findMintPolicy policy . bodyBytes
 
-fields :: Transaction -> Fields.Fields
+-- | Withdrawal position in ledger reward-account order: test networks before
+-- mainnet, then script credentials before key credentials, then hash bytes.
+-- All network tags other than 1 belong to the same test-network class.
+findWithdrawal :: RewardAddress -> Tx.Transaction -> Maybe Word64
+findWithdrawal account = Indices.findWithdrawal account . fields
+
+-- | First certificate with the same native canonical encoding. Certificate
+-- list order and duplicates count. Imported representation differences are
+-- normalized by the native certificate codecs; no transaction bytes change.
+findCertificate :: EncodedCertificate -> Tx.Transaction -> IO (Either Error (Maybe Word64))
+findCertificate certificate = Native.findCertificate certificate . Indices.certificateBytes . bodyBytes
+
+-- | Voter position in ledger role order: committee, DRep, stake pool. Within
+-- each role script credentials precede key credentials, then hash bytes order
+-- each kind. Multiple action votes by one voter occupy a single position.
+findVote :: Voter -> Tx.Transaction -> Maybe Word64
+findVote voter = Indices.findVote voter . fields
+
+-- | Redeemer rank ordered by purpose then purpose index, independently of its
+-- imported witness collection order. This is its position among all redeemers,
+-- rather than its position in the body collection authorized by the script.
+findRedeemer :: RedeemerId -> Tx.Transaction -> Maybe Word64
+findRedeemer identifier = Indices.findRedeemer identifier . Witnesses.redeemers . Witnesses.toWitnesses . Tx.witnesses
+
+fields :: Tx.Transaction -> Fields.Fields
 fields = Body.bodyFields . Body.toBody . Tx.body
 
-position :: (a -> Bool) -> [a] -> Maybe Word64
-position matches = go 0
-  where
-    go _ [] = Nothing
-    go index (value : rest)
-      | matches value = Just index
-      | otherwise = go (index + 1) rest
+bodyBytes :: Tx.Transaction -> ByteString
+bodyBytes = Body.toCbor . Tx.body

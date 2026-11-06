@@ -31,12 +31,17 @@ module Cometa.Transaction.Building
     ImplicitCoin (..),
     implicitCoin,
     subTransactionImplicitCoin,
+    imbalance,
+    subTransactionImbalance,
+    batchImbalance,
+    isBalanced,
   )
 where
 
 -- IMPORTS --------------------------------------------------------------------
 
 import Cometa.Error (Error)
+import qualified Cometa.Internal.Balance as Balance
 import Cometa.Internal.Building (ImplicitCoin (..))
 import qualified Cometa.Internal.Building as Internal
 import Cometa.Protocol.CostModels (CostModels)
@@ -47,6 +52,7 @@ import Cometa.Transaction.Datum (Hash32)
 import Cometa.Transaction.Output (Output)
 import Cometa.Transaction.Utxo (Utxo)
 import Cometa.Transaction.Witnesses (EncodedWitnesses)
+import Cometa.Value (Value)
 import Data.Word (Word64)
 
 -- DEFINITIONS ----------------------------------------------------------------
@@ -106,3 +112,30 @@ implicitCoin = Internal.implicitCoin
 -- bodies in a batch; this does not compute the deduplicated batch balance.
 subTransactionImplicitCoin :: Parameters -> SubTransaction -> IO (Either Error ImplicitCoin)
 subTransactionImplicitCoin = Internal.subTransactionImplicitCoin
+
+-- | Top-level consumed value minus produced value. Positive quantities are a
+-- surplus; negative quantities are a deficit. Includes mint/burn, withdrawals,
+-- refunds, deposits, fee, donation and direct deposits; excludes nested bodies.
+-- Resolve every spending input exactly once. Extra resolved UTxOs are allowed;
+-- reference and collateral inputs do not contribute. Signed 64-bit intermediate
+-- overflow or missing/duplicate resolution returns 'Cometa.Error.InvalidBuildingRequest'.
+imbalance :: Parameters -> [Utxo] -> Transaction -> IO (Either Error Value)
+imbalance = Balance.imbalance
+
+-- | The same accounting for one subtransaction, which has no fee. A nonzero
+-- result is normal for an intent awaiting matching in a batch.
+subTransactionImbalance :: Parameters -> [Utxo] -> SubTransaction -> IO (Either Error Value)
+subTransactionImbalance = Balance.subTransactionImbalance
+
+-- | Whole-batch surplus or deficit, charging each registered pool's deposit
+-- once across all bodies. Supply a unique resolved snapshot covering spending
+-- inputs at every level. Positive and negative intermediate totals must each
+-- fit signed 64-bit bounds. This checks value conservation, not ledger admission,
+-- signatures, script success or availability of inputs on chain.
+batchImbalance :: Parameters -> [Utxo] -> Transaction -> IO (Either Error Value)
+batchImbalance = Balance.batchImbalance
+
+-- | Whether the complete batch has zero coin and asset imbalance. Does not
+-- validate other ledger rules. Resolution and arithmetic errors remain explicit.
+isBalanced :: Parameters -> [Utxo] -> Transaction -> IO (Either Error Bool)
+isBalanced = Balance.isBalanced

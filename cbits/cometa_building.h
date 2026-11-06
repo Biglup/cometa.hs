@@ -30,7 +30,9 @@
 /**
  * \brief Marshal standalone building utilities through fresh native values.
  * \param operation 0 minimum fee, 1 reference fee, 2 implicit coin, 3 script
- * data hash, 4 base fee, 5 subtransaction implicit coin. Internal CBOR tuples carry domain values, never pointers.
+ * data hash, 4 base fee, 5 subtransaction implicit coin, 6 top-level imbalance,
+ * 7 local subtransaction imbalance, 8 whole-batch imbalance. Internal CBOR tuples
+ * carry domain values, never pointers.
  * \param bytes Borrowed request bytes until synchronous return.
  * \param size Complete request byte count; trailing input is rejected.
  * \param output Owned CBOR result buffer on success; NULL on failure. All native

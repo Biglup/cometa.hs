@@ -73,6 +73,8 @@ library core
     Cometa.Internal.FFI.Evaluation
     Cometa.Internal.FFI.NativeEvaluation
     Cometa.Internal.FFI.Building
+    Cometa.Internal.FFI.SubTransactionBuilder
+    Cometa.Internal.FFI.ContextualTransaction
     Cometa.Internal.FFI.TransactionBuilder
   build-depends:
     base >=4.18 && <4.22,
@@ -101,6 +103,8 @@ library core
     cbits/cometa_evaluation.c
     cbits/cometa_native_evaluation.c
     cbits/cometa_building.c
+    cbits/cometa_sub_transaction_builder.c
+    cbits/cometa_contextual_transaction.c
     cbits/cometa_transaction_builder.c
   include-dirs: cbits
   includes: cometa_provider.h
@@ -120,6 +124,10 @@ library
     Cometa.Transaction.Signing
     Cometa.Transaction.Input
     Cometa.Transaction.Indices
+    Cometa.Transaction.Authority
+    Cometa.SubTransaction.Indices
+    Cometa.SubTransaction.Plan
+    Cometa.SubTransaction.Builder
     Cometa.Transaction.Utxo
     Cometa.Transaction.Output
     Cometa.Transaction.Datum
@@ -200,6 +208,12 @@ library
     Cometa.Internal.Evaluation
     Cometa.Internal.Evaluation.Native
     Cometa.Internal.Building
+    Cometa.Internal.Balance
+    Cometa.Internal.BatchValidation
+    Cometa.Internal.SubTransactionPlan
+    Cometa.Internal.SubTransactionBuilder
+    Cometa.Internal.TransactionIndices
+    Cometa.Internal.ContextualTransaction
     Cometa.Internal.TransactionPlan
     Cometa.Internal.TransactionBuilder
     Cometa.Internal.EvaluationNative
@@ -535,6 +549,7 @@ test-suite cometa-runtime-test
     test/cbits/parameter_snapshot_oracle.c
     test/cbits/runtime_oracle.c
     test/cbits/transaction_indices_oracle.c
+    test/cbits/contextual_transaction_oracle.c
   include-dirs: cbits
   cc-options: -std=c11 -Wall -Wextra
   ghc-options: -threaded -rtsopts
@@ -550,6 +565,9 @@ test-suite cometa-runtime-test
     NativeEvaluation
     DeferredRedeemer
     TransactionIndices
+    ContextualTransaction
+    SubTransactionBuilder
+    DijkstraBuilder
     Fixtures.ProtocolParameters
     Cometa
     Cometa.Address
@@ -597,6 +615,12 @@ test-suite cometa-runtime-test
     Cometa.Internal.Evaluation
     Cometa.Internal.Evaluation.Native
     Cometa.Internal.Building
+    Cometa.Internal.Balance
+    Cometa.Internal.BatchValidation
+    Cometa.Internal.SubTransactionPlan
+    Cometa.Internal.SubTransactionBuilder
+    Cometa.Internal.TransactionIndices
+    Cometa.Internal.ContextualTransaction
     Cometa.Internal.TransactionPlan
     Cometa.Internal.TransactionBuilder
     Cometa.Internal.EvaluationNative
@@ -648,6 +672,10 @@ test-suite cometa-runtime-test
     Cometa.Transaction.Fields
     Cometa.Transaction.Input
     Cometa.Transaction.Indices
+    Cometa.Transaction.Authority
+    Cometa.SubTransaction.Indices
+    Cometa.SubTransaction.Plan
+    Cometa.SubTransaction.Builder
     Cometa.Transaction.Output
     Cometa.Transaction.Redeemer
     Cometa.Transaction.Signing
@@ -747,5 +775,28 @@ executable cometa-deferred-redeemers
   build-depends:
     base >=4.18 && <4.22,
     bytestring >=0.11 && <0.13,
+    transformers >=0.6 && <0.7,
+    cometa
+
+executable cometa-dijkstra-building
+  import: language
+  hs-source-dirs: examples test
+  main-is: DijkstraBuilding.hs
+  other-modules: Fixtures.ProtocolParameters
+  build-depends:
+    base >=4.18 && <4.22,
+    bytestring >=0.11 && <0.13,
+    transformers >=0.6 && <0.7,
+    cometa
+
+executable cometa-subtransaction-building
+  import: language
+  hs-source-dirs: examples test
+  main-is: SubTransactionBuilding.hs
+  other-modules: Fixtures.ProtocolParameters
+  build-depends:
+    base >=4.18 && <4.22,
+    bytestring >=0.11 && <0.13,
+    text >=2.0 && <2.2,
     transformers >=0.6 && <0.7,
     cometa

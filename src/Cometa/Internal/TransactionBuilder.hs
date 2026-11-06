@@ -34,13 +34,16 @@ import qualified Codec.CBOR.Decoding as D
 import qualified Codec.CBOR.Encoding as E
 import Cometa.Address (Address)
 import qualified Cometa.Address as Address
+import Cometa.AssetId (AssetId (Ada))
 import Cometa.CoinSelection (Selector)
 import Cometa.Error (Error (..))
 import qualified Cometa.Error.Code as Code
 import Cometa.Evaluation (Evaluator, Target (TopLevel))
 import qualified Cometa.Evaluation as Eval
+import qualified Cometa.Internal.BatchValidation as Batch
 import qualified Cometa.Internal.Building as Building
 import qualified Cometa.Internal.CoinSelection.Native as Selection
+import qualified Cometa.Internal.Evaluation.Native as NativeEvaluation
 import qualified Cometa.Internal.EvaluationNative as Evaluation
 import qualified Cometa.Internal.FFI.Native as Native
 import qualified Cometa.Internal.FFI.Runtime as Raw
@@ -49,14 +52,19 @@ import qualified Cometa.Internal.ParameterSnapshot as Parameters
 import qualified Cometa.Internal.Runtime as Runtime
 import qualified Cometa.Internal.TransactionCbor as C
 import qualified Cometa.Internal.TransactionPlan as Plan
+import qualified Cometa.Internal.TransactionValue as ValueCbor
 import qualified Cometa.PlutusData as Data
+import qualified Cometa.Protocol.CostModels as Models
 import qualified Cometa.Protocol.ExUnitPrices as Prices
 import qualified Cometa.Protocol.ExUnits as Ex
 import Cometa.Protocol.Parameters (Parameters)
 import qualified Cometa.Protocol.Parameters as P
 import qualified Cometa.Protocol.Rational as Rational
+import qualified Cometa.Protocol.Version as Version
 import Cometa.SlotConfig (SlotConfig)
 import qualified Cometa.SlotConfig as Slot
+import qualified Cometa.SubTransaction as Sub
+import qualified Cometa.SubTransaction.Body as SubBody
 import Cometa.Transaction (Transaction)
 import qualified Cometa.Transaction as Transaction
 import qualified Cometa.Transaction.Body as Body
@@ -103,7 +111,9 @@ data Config = Config
     collateralChangeAddress :: Maybe Address,
     -- | Optional selector; absence uses the native random-improve selector.
     selector :: Maybe Selector,
-    -- | Optional evaluator; absence uses the built-in evaluator.
+    -- | Optional evaluator; absence uses the built-in evaluator. For batches,
+    -- the evaluator must also support subtransaction targets to verify that
+    -- signed execution budgets cover the final batch context.
     evaluator :: Maybe Evaluator,
     -- | Lower bound on the fee in lovelace; zero permits ordinary calculation.
     minimumFee :: Word64,
@@ -151,12 +161,20 @@ buildNative config plan =
                       planSize
                   )
           _ -> pure (Left (NativeContractViolation "builder.contexts"))
-        pure $ do
-          (bytes, keyCount) <- result
-          transaction <- Transaction.decodeCbor bytes
-          validateBuilt config plan keyCount transaction
-          pure transaction
+        case result >>= decodeBuilt of
+          Left failure -> pure (Left failure)
+          Right transaction -> do
+            checked <- Batch.validateSubBudgets (fromMaybe nativeEvaluator (evaluator config)) resolved transaction
+            pure (transaction <$ checked)
   where
+    decodeBuilt (bytes, keyCount) = do
+      transaction <- Transaction.decodeCbor bytes
+      validateBuilt config plan keyCount transaction
+      pure transaction
+    resolved = Map.elems (Map.fromList [(Utxo.input input, input) | input <- availableUtxos config <> collateralUtxos config <> Plan.resolvedInputs plan])
+    nativeEvaluator =
+      let Version.ProtocolVersion major _ = P.parameterProtocolVersion (parameters config)
+       in NativeEvaluation.evaluator (NativeEvaluation.Config (slotConfig config) major (fromMaybe Models.empty (P.parameterCostModels (parameters config))))
     selectDispatch = maybe unavailable Selection.dispatch (selector config)
     evaluateDispatch = maybe unavailable (\backend -> Evaluation.dispatch (checkedEvaluator config backend) TopLevel) (evaluator config)
     unavailable _ _ = pure (Left (NativeContractViolation "builder.unconfiguredCallback"))
@@ -164,16 +182,20 @@ buildNative config plan =
 validate :: Config -> Plan -> Either Error ()
 validate config plan = do
   Plan.validatePlan plan
+  Plan.validateTopLevel plan
+  mapM_
+    (checkSubOutputSize (P.parameterMaxValueSize (parameters config)))
+    [output | (transaction, _) <- Plan.subTransactions plan, output <- Fields.fieldOutputs (SubBody.fields (SubBody.toBody (Sub.body transaction)))]
   mapM_ (Slot.slotToTime (slotConfig config)) (Plan.validitySlots plan)
   Parameters.validateNative (parameters config)
   consistent (availableUtxos config <> collateralUtxos config <> Plan.resolvedInputs plan)
   unique (availableUtxos config)
   unique (collateralUtxos config)
   bounded "Fee exceeds signed native balance bounds" (toInteger (minimumFee config))
-  let funds = Map.elems (Map.fromList [(Utxo.input u, u) | u <- availableUtxos config <> Plan.spendingInputs plan])
+  let funds = Map.elems (Map.fromList [(Utxo.input u, u) | u <- eligible plan (availableUtxos config) <> Plan.spendingInputs plan])
       inputValue = foldMap (Output.value . Utxo.output) funds
       outputValue = foldMap Output.value (Plan.planOutputs plan)
-      collateralValue = foldMap (Output.value . Utxo.output) (collateralUtxos config)
+      collateralValue = foldMap (Output.value . Utxo.output) (eligible plan (collateralUtxos config))
       witnessBytes values =
         sum
           [ case Output.address (Utxo.output u) of
@@ -200,6 +222,7 @@ validate config plan = do
   boundedValue (outputValue <> Plan.sinkExtras (parameters config) plan <> Value.lovelace maximumFee)
   boundedValue collateralValue
   bounded "Stake key deposit exceeds signed native bounds" (toInteger (P.parameterKeyDeposit (parameters config)))
+  bounded "Governance proposal deposit exceeds signed native bounds" (toInteger (fromMaybe 0 (P.parameterGovernanceActionDeposit (parameters config))))
   bounded "Pool deposit exceeds signed native bounds" (toInteger (P.parameterPoolDeposit (parameters config)))
   unless
     (toInteger (extraSigners config) <= toInteger (P.parameterMaxTxSize (parameters config)) `div` 101)
@@ -221,9 +244,11 @@ validate config plan = do
 -- lines128/134 and2249); injected budgets are capped by the supplied protocol.
 validateFees :: Config -> Plan -> IO (Either Error ())
 validateFees config plan = do
-  let possible = Map.elems (Map.fromList [(Utxo.input u, u) | u <- availableUtxos config <> Plan.resolvedInputs plan])
-      hasReferenceScript = any (isJust . Output.referenceScript . Utxo.output) possible
-  reference <- if hasReferenceScript then Building.referenceScriptFee (parameters config) possible else pure (Right 0)
+  let possible = Map.elems (Map.fromList [(Utxo.input u, u) | u <- eligible plan (availableUtxos config) <> Plan.outerResolvedInputs plan])
+      subPriced = concatMap pricedSub (Plan.subTransactions plan)
+      allPriced = possible <> subPriced
+      hasReferenceScript = any (isJust . Output.referenceScript . Utxo.output) allPriced
+  reference <- if hasReferenceScript then pricedReferenceFee (parameters config) allPriced else pure (Right 0)
   pure $ do
     referenceFee <- reference
     executionFee <- executionLimitFee config plan
@@ -305,7 +330,11 @@ validateBuilt config plan keyCount transaction = do
           ]
       reserve = 101 * toInteger keyCount + sum [180 + toInteger (B.length bytes) | bytes <- Set.toList byronAddresses] + 32
       size = toInteger (B.length (Transaction.encodeCbor transaction)) + reserve
-  validateBudget config (map Redeemer.executionUnits (Witnesses.redeemers (Witnesses.toWitnesses (Transaction.witnesses transaction))))
+  validateBudget
+    config
+    ( map Redeemer.executionUnits (Witnesses.redeemers (Witnesses.toWitnesses (Transaction.witnesses transaction)))
+        <> concatMap (map Redeemer.executionUnits . Witnesses.redeemers . Witnesses.toWitnesses . Sub.witnesses . fst) (Plan.subTransactions plan)
+    )
   unless
     (size <= toInteger (P.parameterMaxTxSize (parameters config)))
     (Left (InvalidBuildingRequest "Transaction and required witness reserve exceed maximum transaction size"))
@@ -317,8 +346,8 @@ encodeConfig plan config =
         <> mconcat
           [ E.encodeBytes (Parameters.encodeSnapshot (parameters config)),
             E.encodeBytes (Address.toBytes (changeAddress config)),
-            utxos (filter (\u -> Utxo.input u `notElem` map Utxo.input (Plan.spendingInputs plan)) (availableUtxos config)),
-            utxos (collateralUtxos config),
+            utxos (filter (\u -> Utxo.input u `notElem` map Utxo.input (Plan.spendingInputs plan)) (eligible plan (availableUtxos config))),
+            utxos (eligible plan (collateralUtxos config)),
             E.encodeBytes (maybe mempty Address.toBytes (collateralChangeAddress config)),
             E.encodeWord64 (minimumFee config),
             E.encodeWord64 (extraSigners config),
@@ -374,3 +403,49 @@ deferredDispatch plan operation bytes
       Data.toCbor <$> callback transaction canonical
   where
     parser = C.array 3 ((,,) <$> D.decodeInt <*> C.nested bytes Transaction.decodeCbor <*> C.list (C.nested bytes Utxo.decodeCbor))
+
+-- A subtransaction reserves both its spending and reference inputs against
+-- parent spending/collateral selection. Explicit parent reference inputs remain
+-- independently priced; each level counts its own referenced scripts once.
+eligible :: Plan -> [Utxo] -> [Utxo]
+eligible plan = filter (\input -> Utxo.input input `notElem` Plan.reservedInputs plan)
+
+pricedSub :: (Sub.SubTransaction, [Utxo]) -> [Utxo]
+pricedSub (transaction, resolved) =
+  let fields = SubBody.fields (SubBody.toBody (Sub.body transaction))
+      references = Fields.fieldInputs fields <> fromMaybe [] (Fields.fieldReferenceInputs fields)
+   in filter (\input -> Utxo.input input `elem` references) resolved
+
+-- The public standalone reference-fee helper rejects duplicate identities, but
+-- batch pricing deliberately counts a shared script once for each level using
+-- it. The private native transport accepts that multiplicity and applies the
+-- pricing tiers to the complete byte total, avoiding a sum of underpriced tiers.
+pricedReferenceFee :: Parameters -> [Utxo] -> IO (Either Error Word64)
+pricedReferenceFee params inputs = case P.parameterRefScriptCostPerByte params of
+  Nothing -> pure (Left (InvalidBuildingRequest "Reference script byte price is required"))
+  Just _ -> do
+    result <-
+      Building.runUnchecked
+        1
+        ( C.encode
+            ( E.encodeListLen 2
+                <> C.raw (Parameters.encodeSnapshot params)
+                <> E.encodeListLen (fromIntegral (length inputs))
+                <> foldMap (C.raw . Utxo.encodeCbor) inputs
+            )
+        )
+    pure (result >>= C.decodeAs InvalidBuildingRequest D.decodeWord64)
+
+-- Imported/signed subtransactions bypass local building, so validate their
+-- immutable output values against the same configured limit before attachment.
+checkSubOutputSize :: Maybe Word64 -> Output.Output -> Either Error ()
+checkSubOutputSize Nothing _ = pure ()
+checkSubOutputSize (Just limit) output =
+  unless
+    (toInteger (B.length (C.encode encoding)) <= toInteger limit)
+    (Left (InvalidBuildingRequest "Attached subtransaction output exceeds maximum value size"))
+  where
+    value = Output.value output
+    coin = E.encodeInteger (Value.quantity Ada value)
+    assets = Value.toList (Value.difference value (Value.lovelace (Value.quantity Ada value)))
+    encoding = if null assets then coin else E.encodeListLen 2 <> coin <> ValueCbor.encodeAssets value
