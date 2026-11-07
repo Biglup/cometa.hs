@@ -3575,3 +3575,67 @@ Haddock references pass; public declarations retain 100% documentation coverage.
 The source-package manifest contains the new sources, fixtures, notices, guides
 and examples. Hosted CI results are reviewed on the PR before another slice;
 these local checks do not by themselves establish the platform matrix.
+
+### P14 example parity and upstream capability audit
+
+The next review slice ports all 21 examples from Cometa.cpp revision
+`824ae8e8ac9adf113d957265532ae7ea37a628a3`. The exact source-to-entrypoint mapping,
+intentional configuration differences and execution evidence live in
+[the example parity record](EXAMPLE_PARITY.md). Connected runners require an
+explicit `--submit`; ordinary CI compiles them and exercises their credential-free
+usage paths. Staking/governance recipes have offline tests, but ledger state and
+on-chain acceptance must be validated independently on the selected network.
+
+The [Haskell capability audit](HASKELL_API_PARITY.md) compares pinned current
+sc-tools, Atlas, cardano-api and cardano-addresses sources. It extends the native
+symbol ledger: that ledger cannot establish parity with a node client, emulator,
+query service or code generator. Forty-two capability groups identify concrete
+implemented, partial and missing workflows. These are review groups, not a
+percentage denominator. Current cardano-api already includes experimental
+Dijkstra support; the comparison does not claim otherwise.
+
+Before claiming full upstream parity, expand each group into exported operations
+and supported-version contracts, with a named acceptance test and provenance.
+Matching names or successfully building the C++ examples does not satisfy this
+release gate. Preserve missing functionality until it is implemented or the
+maintainer explicitly changes the target scope.
+
+Follow-up work should proceed in these reviewable slices:
+
+1. Finish domain codecs and interchange: governance identifiers, standalone Value
+   algebra/CBOR, JSON and text envelopes. Include upstream vectors, malformed-input
+   cases, exact encoding and round-trip properties.
+2. Add application helpers: per-address balance changes and tracked chained
+   transaction funding. Validate full caller workflows and failure behavior;
+   aggregate conservation and parallel independent builds are not substitutes.
+3. Add provider query capabilities for datum lookup, current registration/deposit,
+   DRep/pool/action/constitution state, epoch history and mempool needs. Keep custom
+   endpoints and optional authentication. Test deterministic HTTP fixtures and
+   authorized live responses separately.
+4. Design optional typed-data, blueprint and ledger/cardano-api interoperability.
+   Keep dependency-heavy integrations separable. General UPLC constant application
+   needs a reviewed backend extension; Data-only parameter application is not full
+   equivalence. The previously deferred redeemer ergonomics remain deferred.
+5. Address native/backend gaps: VM limits and diagnostic traces, signer analysis,
+   legacy wallet derivation and consensus-key operations. Add public native APIs
+   only where the capability belongs there; do not expose private VM structures.
+6. Specify and implement the larger service capabilities if literal union parity
+   remains the target: local-node transport, chain synchronization/rollback,
+   ledger-backed emulation, development networks and associated tooling. They
+   remain gaps rather than silently being excluded from the requested scope.
+
+For each slice, review upstream source before API design, use idiomatic public
+values, preserve cancellation/resource safety, and add cross-library or independent
+vectors where possible. Native-oracle tests establish binding correspondence;
+independent ledger acceptance and upstream behavior need their own evidence.
+
+Local validation for this slice: GHC 9.6.7 builds every component. The 352 public,
+131 runtime and 48 Blockfrost tests pass; the HTTP tests require loopback sockets.
+The public suite passes Valgrind with zero errors and zero definitely, indirectly
+or possibly lost bytes. After the deferred recipe alignment, all 31 matching
+native tests pass again and the changed end-to-end workflows pass Valgrind again.
+All 17 connected entrypoints print usage without credentials, and the five
+recovery/swap/evaluation/deferred/Dijkstra offline programs run successfully.
+Ormolu, HLint, package checks, source manifest, native inventory, strict Sphinx
+HTML/link checks and both public Haddock references pass. Live execution results
+are maintained separately in the example parity record.

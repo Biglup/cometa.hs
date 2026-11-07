@@ -31,6 +31,7 @@ import qualified Cometa.Crypto.Blake2b as Blake2b
 import Cometa.Error (Error (..))
 import qualified Cometa.Error.Code as Code
 import qualified CompleteAddress
+import qualified ConnectedGovernance
 import Control.Concurrent (forkFinally, killThread, newEmptyMVar, putMVar, takeMVar, threadDelay, yield)
 import Control.Exception (AsyncException (ThreadKilled), fromException)
 import Control.Monad (forever, replicateM_)
@@ -88,6 +89,7 @@ main =
         Scripts.tests,
         Metadata.tests,
         NativeWorkflows.tests,
+        ConnectedGovernance.tests,
         PlutusData.tests,
         Value.tests,
         Address.tests,

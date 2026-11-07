@@ -370,6 +370,8 @@ test-suite cometa-test
   cc-options: -std=c11 -Wall -Wextra
   other-modules:
     NativeWorkflows
+    ConnectedGovernance
+    Connected.Governance
     Workflows.Native
     Workflows.NativeScripts
     Workflows.Fixture
@@ -967,3 +969,92 @@ executable cometa-transaction-inspection
     bytestring >=0.11 && <0.13,
     transformers >=0.6 && <0.7,
     cometa
+
+common connected-example
+  import: language
+  hs-source-dirs: examples
+  ghc-options: -threaded -rtsopts
+  other-modules:
+    Blockfrost.Common
+    Connected.Support
+    Connected.Transactions
+    Connected.Governance
+    Connected.GovernanceMain
+    Workflows.Native
+    Workflows.NativeScripts
+  build-depends:
+    base >=4.18 && <4.22,
+    bytestring >=0.11 && <0.13,
+    containers >=0.6.7 && <0.8,
+    text >=2.0 && <2.2,
+    transformers >=0.6 && <0.7,
+    cometa,
+    cometa:blockfrost
+
+executable cometa-send-lovelace
+  import: connected-example
+  main-is: Connected/SendLovelace.hs
+
+executable cometa-mint-burn-native-script
+  import: connected-example
+  main-is: Connected/MintBurnNativeScript.hs
+
+executable cometa-mint-burn-plutus-script
+  import: connected-example
+  main-is: Connected/MintBurnPlutusScript.hs
+
+executable cometa-spend-from-native-script
+  import: connected-example
+  main-is: Connected/SpendFromNativeScript.hs
+
+executable cometa-spend-from-validator
+  import: connected-example
+  main-is: Connected/SpendFromValidator.hs
+
+executable cometa-deferred-self-index
+  import: connected-example
+  main-is: Connected/DeferredRedeemerSelfIndex.hs
+
+executable cometa-deferred-batch
+  import: connected-example
+  main-is: Connected/DeferredRedeemerBatch.hs
+
+executable cometa-reward-account-pubkey
+  import: connected-example
+  main-is: Connected/RewardAccountPubkey.hs
+
+executable cometa-reward-account-script
+  import: connected-example
+  main-is: Connected/RewardAccountScript.hs
+
+executable cometa-drep-pubkey
+  import: connected-example
+  main-is: Connected/DRepPubkey.hs
+
+executable cometa-drep-script
+  import: connected-example
+  main-is: Connected/DRepScript.hs
+
+executable cometa-vote-for-proposal-pubkey
+  import: connected-example
+  main-is: Connected/VoteForProposalPubkey.hs
+
+executable cometa-vote-for-proposal-script
+  import: connected-example
+  main-is: Connected/VoteForProposalScript.hs
+
+executable cometa-donate-to-treasury
+  import: connected-example
+  main-is: Connected/DonateToTreasury.hs
+
+executable cometa-propose-treasury-withdrawal
+  import: connected-example
+  main-is: Connected/ProposeTreasuryWithdrawal.hs
+
+executable cometa-deferred-withdraw-zero
+  import: connected-example
+  main-is: Connected/DeferredWithdrawZero.hs
+
+executable cometa-plutus-v4-guarded-subtransaction
+  import: connected-example
+  main-is: Connected/PlutusV4GuardedSubTransaction.hs
