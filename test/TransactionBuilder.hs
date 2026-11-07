@@ -90,6 +90,7 @@ tests =
       testCase "injected selection crosses actual balancing callbacks repeatedly" callbacks,
       testCase "native script minting, metadata, certificates and withdrawal" fields,
       testCase "composed script attachments are unique by language and exact program" uniqueScripts,
+      testCase "datum witnesses are shared across explicit attachments and inputs" uniqueDatums,
       testCase "injected evaluator installs budgets in a complete script spend" scripts,
       testCase "preflight conflicts and native insufficient funds" invalid,
       testCase "surplus withdrawals and minted change cross injected selection" surplus,
@@ -244,7 +245,8 @@ scripts = do
               ]
           )
       injected = config {Builder.availableUtxos = [], Builder.collateralUtxos = [Utxo.utxo (Input.input collateralId 0) collateralOutput], Builder.evaluator = Just evaluate, Builder.parameters = (Builder.parameters config) {P.parameterCostModels = Just (Models.fromList [model])}}
-  tx <- Builder.build injected (Plan.spendWith scriptInput (Just datum) Nothing <> Plan.attachScript script <> Plan.attachScript script <> Plan.payTo output) >>= must
+  tx <- Builder.build injected (Plan.spendWith scriptInput (Just datum) Nothing <> Plan.attachScript script <> Plan.attachScript script <> Plan.attachDatum datum <> Plan.attachDatum datum <> Plan.payTo output) >>= must
+  Witnesses.datums (Witnesses.toWitnesses (Tx.witnesses tx)) @?= [datum]
   Witnesses.scripts (Witnesses.toWitnesses (Tx.witnesses tx)) @?= [script]
   assertBool "evaluator not called" . (> 0) =<< readIORef calls
   map Redeemer.executionUnits (Witnesses.redeemers (Witnesses.toWitnesses (Tx.witnesses tx))) @?= [ExUnits 100 200]
@@ -382,3 +384,24 @@ uniqueScripts = do
     actual <- Builder.build config repeated >>= must
     Tx.encodeCbor actual @?= Tx.encodeCbor expected
     length (Witnesses.scripts (Witnesses.toWitnesses (Tx.witnesses actual))) @?= 2
+
+uniqueDatums :: IO ()
+uniqueDatums = do
+  (config, output, first) <- fixture
+  let second = Utxo.utxo (Input.input (Input.transactionId (Utxo.input first)) 1) (Utxo.output first)
+      canonical = Data.fromData (Data.Integer 0)
+  imported <- must (Data.decodeCbor (B.pack [0x18, 0]))
+  Data.toData imported @?= Data.toData canonical
+  let requirements = Plan.payTo output
+      attachments = Plan.attachDatum imported <> Plan.attachDatum canonical <> Plan.attachDatum imported <> Plan.attachDatum canonical
+  explicit <- Builder.build config (attachments <> requirements) >>= must
+  Witnesses.datums (Witnesses.toWitnesses (Tx.witnesses explicit)) @?= [imported, canonical]
+  forM_ [False, True] $ \attachFirst -> do
+    let spends = Plan.spendWith first Nothing (Just imported) <> Plan.spendWith second Nothing (Just imported)
+        plan = if attachFirst then attachments <> spends <> requirements else spends <> attachments <> requirements
+    tx <- Builder.build config plan >>= must
+    Fields.fieldInputs (semantic tx) @?= [Utxo.input first, Utxo.input second]
+    Witnesses.datums (Witnesses.toWitnesses (Tx.witnesses tx)) @?= [imported, canonical]
+  -- Conflicting declarations for one input still fail before deduplication.
+  Builder.build config (Plan.spendWith first Nothing (Just imported) <> Plan.spendWith first Nothing (Just canonical) <> requirements)
+    >>= (@?= Left (InvalidTransactionPlan "Conflicting requirements for one spending input"))

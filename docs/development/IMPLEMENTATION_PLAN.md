@@ -3654,3 +3654,12 @@ After the script-attachment fix, all components rebuild and all 533 tests pass
 connected governance recipe tests pass Valgrind with zero errors and zero lost
 allocations. The public full-suite result above remains the broader lifecycle
 baseline; these targeted reruns exercise the changed normalization and live recipe.
+
+The related datum path also appended repeated witness data. Normalization now
+coalesces exact datum CBOR across explicit attachments and input arguments, after
+checking the original per-input declarations. Distinct hash-bearing encodings,
+input order and deferred callback indices remain unchanged. All components build
+and all 535 tests pass (352 public, 135 runtime, 48 Blockfrost). The 135-test
+runtime suite passes Valgrind with zero errors and zero lost allocations. The
+[PR validation record](https://github.com/Biglup/cometa.hs/pull/22) holds per-run
+preprod transaction and cleanup evidence separately from these deterministic checks.

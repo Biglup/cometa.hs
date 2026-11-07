@@ -97,11 +97,21 @@ identity discovery. The fixture does not emulate ledger registration, pool or
 governance state. Source, formatting and test results must be recorded alongside
 actual execution evidence; source parity alone is not live validation.
 
-Live execution evidence for this C++ parity pass is **pending**. Record network,
-protocol version, selected public identities, transaction IDs, confirmation and
-cleanup results for each applicable flow here after execution. Earlier provider
-endpoint validation does not establish successful execution of these workflows.
+The [PR #22 validation record](https://github.com/Biglup/cometa.hs/pull/22)
+tracks this pass's network/protocol, transaction IDs, ledger validity and cleanup
+results. Its live status is separate from the source mapping above. Earlier
+provider endpoint validation does not establish successful execution of these
+workflows. Registration deposits must be distinguished from a governance
+proposal deposit, which remains locked until the proposal reaches its outcome.
 
 Protocol 11 preprod cannot validate the Dijkstra transaction bodies. The offline
 atomic-swap and guarded-subtransaction tests remain applicable; a protocol gate
 or offline pass must not be reported as a successful live Dijkstra submission.
+
+Live V2 staking found that repeated script attachments produced duplicate CBOR
+witness-set elements despite successful local evaluation. Shared plan normalization
+now makes repeated script attachments idempotent by language and script identity.
+The related datum path coalesces exact datum bytes across explicit attachments and
+spending inputs, preserving each input and deferred callback. Builder regressions
+cover both top-level and subtransaction plans; the live validation record includes
+the corrected staking cycle. No funded-wallet fixture was added to the tests.

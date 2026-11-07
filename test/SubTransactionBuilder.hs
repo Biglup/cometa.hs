@@ -94,6 +94,7 @@ tests =
     [ testCase "intent preserves exact inputs/outputs without balancing" intent,
       testCase "actual V4 execution commits immediate and deferred arguments" scripts,
       testCase "composed script attachments preserve first identity and language failures" uniqueScripts,
+      testCase "datum witnesses are shared across explicit attachments and local inputs" uniqueDatums,
       testCase "outer evaluation rejects underbudget signed intents and retains adequate bytes" attachedBudgets,
       testCase "reference scripts resolve from explicit reference inputs" references,
       testCase "guards, account operations and treasury donation survive building" dijkstraFields,
@@ -183,13 +184,14 @@ localDraft = do
           else case elemIndex (Utxo.input scriptInput) localInputs of
             Nothing -> Left (InvalidTransactionPlan "Missing local input")
             Just index -> Right (Data.fromData (Data.Integer (toInteger index)))
-      plan = Plan.spendWithDeferredRedeemer scriptInput callback Nothing <> Plan.spend keyInput <> Plan.payTo output <> Plan.attachScript (Script.Plutus script)
+      plan = Plan.attachDatum datum <> Plan.spendWithDeferredRedeemer scriptInput callback (Just datum) <> Plan.spend keyInput <> Plan.payTo output <> Plan.attachScript (Script.Plutus script) <> Plan.attachDatum datum
   count <- newIORef (0 :: Int)
   let observed operation bytes = modifyIORef' count (+ 1) >> Internal.dispatch plan operation bytes
   bytes <- Internal.runWithDispatch config observed (encoded plan) >>= must
   sub <- must (Sub.decodeCbor bytes)
   map Redeemer.argument (redeemers sub) @?= [Data.fromData (Data.Integer 1)]
   readIORef count >>= (@?= 1)
+  Witnesses.datums (Witnesses.toWitnesses (Sub.witnesses sub)) @?= [datum]
 
 encoded :: Plan.Plan -> B.ByteString
 encoded = Common.encodePlan . InternalPlan.toPlan
@@ -431,3 +433,22 @@ uniqueScripts = do
     duplicate <- Builder.build config (attachment <> attachment <> payment)
     assertBool "unsupported sub-level script accepted" (isLeft single)
     duplicate @?= single
+
+uniqueDatums :: IO ()
+uniqueDatums = do
+  (config, output, first) <- fixture
+  let second = Utxo.utxo (Input.input (Input.transactionId (Utxo.input first)) 1) (Utxo.output first)
+      canonical = Data.fromData (Data.Integer 0)
+  imported <- must (Data.decodeCbor (B.pack [0x18, 0]))
+  Data.toData imported @?= Data.toData canonical
+  let attachments = Plan.attachDatum imported <> Plan.attachDatum canonical <> Plan.attachDatum imported <> Plan.attachDatum canonical
+  explicit <- Builder.build config (attachments <> Plan.payTo output) >>= must
+  Witnesses.datums (Witnesses.toWitnesses (Sub.witnesses explicit)) @?= [imported, canonical]
+  forM_ [False, True] $ \attachFirst -> do
+    let spends = Plan.spendWith first Nothing (Just imported) <> Plan.spendWith second Nothing (Just imported)
+        plan = if attachFirst then attachments <> spends <> Plan.payTo output else spends <> attachments <> Plan.payTo output
+    sub <- Builder.build config plan >>= must
+    Fields.fieldInputs (fieldsOf sub) @?= [Utxo.input first, Utxo.input second]
+    Witnesses.datums (Witnesses.toWitnesses (Sub.witnesses sub)) @?= [imported, canonical]
+  Builder.build config (Plan.spendWith first Nothing (Just imported) <> Plan.spendWith first Nothing (Just canonical) <> Plan.payTo output)
+    >>= (@?= Left (InvalidTransactionPlan "Conflicting requirements for one spending input"))

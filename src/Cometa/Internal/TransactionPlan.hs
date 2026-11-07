@@ -215,7 +215,9 @@ mintWithRedeemer a n = one . Mint a n . Just . Immediate
 metadata :: Word64 -> Metadatum -> Plan
 metadata label = one . Metadata label
 
--- | Attach a datum witness.
+-- | Attach a datum witness. Repeated exact CBOR encodings contribute one
+-- witness, including data supplied to spending inputs. First occurrence order
+-- is retained; different encodings remain distinct because their hashes differ.
 attachDatum :: EncodedPlutusData -> Plan
 attachDatum = one . Datum
 
@@ -307,11 +309,24 @@ normalizedOperations :: Plan -> [Operation]
 normalizedOperations (Plan instructions _) = ops
   where
     original = toList instructions
-    ops =
+    ops = uniqueDatums Set.empty requirements
+    requirements =
       normalizeMints (deduplicate [op | op <- original, case op of From _ -> False; Until _ -> False; Donation _ -> False; _ -> True])
         <> [Donation (fromInteger (sum ns)) | let ns = [toInteger n | Donation n <- original], not (null ns)]
         <> [From (maximum ns) | let ns = [n | From n <- original], not (null ns)]
         <> [Until (minimum ns) | let ns = [n | Until n <- original], not (null ns)]
+
+    -- Both native add_datum and add_input append to the same witness set.
+    -- Keep datum hash preimages exactly; stripping a repeated input argument
+    -- only avoids its second global insertion, not any input or callback.
+    uniqueDatums _ [] = []
+    uniqueDatums seen (Datum datum : rest)
+      | datum `Set.member` seen = uniqueDatums seen rest
+      | otherwise = Datum datum : uniqueDatums (Set.insert datum seen) rest
+    uniqueDatums seen (Spend input argument (Just datum) : rest)
+      | datum `Set.member` seen = Spend input argument Nothing : uniqueDatums seen rest
+      | otherwise = Spend input argument (Just datum) : uniqueDatums (Set.insert datum seen) rest
+    uniqueDatums seen (operation : rest) = operation : uniqueDatums seen rest
 
     deduplicate [] = []
     deduplicate (op : rest) = op : deduplicate (if idempotent op then filter (not . sameAttachment op) rest else rest)
