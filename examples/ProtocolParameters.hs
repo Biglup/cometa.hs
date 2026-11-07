@@ -19,7 +19,9 @@ module Main (main) where
 -- IMPORTS --------------------------------------------------------------------
 
 import Cometa.Error (Error)
+import qualified Cometa.PlutusData as Data
 import qualified Cometa.Protocol.Parameters.Update as Update
+import Control.Monad.Trans.Except (ExceptT (..), except, runExceptT)
 import qualified Data.ByteString as ByteString
 import System.Exit (die)
 
@@ -27,14 +29,19 @@ import System.Exit (die)
 
 -- | Print the encoded size of a validated fee change, or fail with its error.
 main :: IO ()
-main = case workflow of
-  Left failure -> die (show failure)
-  Right bytes -> putStrLn ("Validated protocol update: " <> show (ByteString.length bytes) <> " CBOR bytes")
+main = do
+  result <- workflow
+  case result of
+    Left failure -> die (show failure)
+    Right (bytes, scriptData) -> do
+      putStrLn ("Validated protocol update: " <> show (ByteString.length bytes) <> " CBOR bytes")
+      print scriptData
 
-workflow :: Either Error ByteString.ByteString
-workflow = do
+workflow :: IO (Either Error (ByteString.ByteString, Data.PlutusData))
+workflow = runExceptT $ do
   let change = Update.empty {Update.updateMinFeeA = Just 44, Update.updateMinFeeB = Just 155381}
       bytes = Update.encodeCbor change
-  imported <- Update.decodeCbor bytes
+  imported <- except (Update.decodeCbor bytes)
+  scriptData <- ExceptT (Update.toPlutusData change)
   -- Preserve the exact validated bytes when attaching an imported proposal.
-  pure (Update.toCbor imported)
+  pure (Update.toCbor imported, scriptData)

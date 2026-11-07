@@ -33,6 +33,7 @@ import Test.Tasty.Runners (NumThreads (..))
 import qualified TransactionBuilder
 import qualified TransactionBuilding
 import qualified TransactionIndices
+import qualified TransactionInspection
 
 -- DEFINITIONS ----------------------------------------------------------------
 
@@ -42,7 +43,8 @@ main =
     localOption (NumThreads 1) $
       testGroup
         "Runtime extension points"
-        [ Runtime.tests,
+        [ TransactionInspection.tests,
+          Runtime.tests,
           Provider.tests,
           ParameterSnapshot.tests,
           CoinSelection.tests,

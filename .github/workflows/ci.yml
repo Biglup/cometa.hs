@@ -69,6 +69,8 @@ jobs:
           cabal run cometa-hash
           cabal run cometa-cbor
           cabal run cometa-signing
+          cabal run cometa-message-signing
+          cabal run cometa-transaction-inspection
           cabal run cometa-bip32
           cabal run cometa-bip39
           cabal run cometa-password-crypto

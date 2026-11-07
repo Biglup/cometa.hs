@@ -54,3 +54,23 @@ Run the complete example with `cabal run cometa-protocol-parameters`:
 :language: haskell
 :start-at: module Main
 ```
+
+## Inspect the data seen by governance scripts
+
+`Update.toPlutusData change` returns the changed-parameter map used by Plutus
+governance scripts. Its integer keys identify parameters; rational values become
+reduced numerator/denominator lists. This differs from `Update.encodeCbor`, which
+encodes the ledger update itself.
+
+```haskell
+inspectChange :: IO ()
+inspectChange = do
+  result <- Update.toPlutusData change
+  case result of
+    Left failure -> print failure
+    Right value -> print value
+```
+
+Absent parameters are omitted. Historical decentralization, entropy and protocol
+version changes are excluded from this script-data map. The conversion does not
+check whether a proposed change is allowed in the target era.

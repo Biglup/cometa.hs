@@ -73,6 +73,9 @@ library core
     Cometa.Internal.FFI.Evaluation
     Cometa.Internal.FFI.NativeEvaluation
     Cometa.Internal.FFI.Building
+    Cometa.Internal.FFI.ParameterUpdate
+    Cometa.Internal.FFI.Inspection
+    Cometa.Internal.FFI.Cip8
     Cometa.Internal.FFI.SubTransactionBuilder
     Cometa.Internal.FFI.ContextualTransaction
     Cometa.Internal.FFI.TransactionBuilder
@@ -99,6 +102,8 @@ library core
     cbits/cometa_runtime.c
     cbits/cometa_provider_runtime.c
     cbits/cometa_parameters.c
+    cbits/cometa_inspection.c
+    cbits/cometa_cip8.c
     cbits/cometa_coin_selection.c
     cbits/cometa_evaluation.c
     cbits/cometa_native_evaluation.c
@@ -122,6 +127,8 @@ library
     Cometa.Transaction
     Cometa.SubTransaction
     Cometa.Transaction.Signing
+    Cometa.Transaction.Inspection
+    Cometa.Message.Cip8
     Cometa.Transaction.Input
     Cometa.Transaction.Indices
     Cometa.Transaction.Authority
@@ -208,6 +215,9 @@ library
     Cometa.Internal.Evaluation
     Cometa.Internal.Evaluation.Native
     Cometa.Internal.Building
+    Cometa.Internal.ParameterUpdate
+    Cometa.Internal.Inspection
+    Cometa.Internal.Message.Cip8
     Cometa.Internal.Balance
     Cometa.Internal.BatchValidation
     Cometa.Internal.SubTransactionPlan
@@ -346,6 +356,7 @@ test-suite cometa-test
     test/cbits/address_oracle.c
     test/cbits/complete_address_oracle.c
     test/cbits/value_oracle.c
+    test/cbits/asset_id_oracle.c
     test/cbits/plutus_data_oracle.c
     test/cbits/metadata_oracle.c
     test/cbits/script_oracle.c
@@ -380,6 +391,8 @@ test-suite cometa-test
     Fixtures.PlutusData
     Address
     CompleteAddress
+    AssetId
+    Cip8
     Fixtures.Address
     ErrorCode
     Ownership
@@ -425,6 +438,7 @@ executable cometa-assets-values
     base >=4.18 && <4.22,
     bytestring >=0.11 && <0.13,
     text >=2.0 && <2.2,
+    transformers >=0.6 && <0.7,
     cometa
 
 executable cometa-plutus-data
@@ -471,6 +485,7 @@ executable cometa-protocol-parameters
   build-depends:
     base >=4.18 && <4.22,
     bytestring >=0.11 && <0.13,
+    transformers >=0.6 && <0.7,
     cometa
 
 executable cometa-governance
@@ -560,6 +575,9 @@ test-suite cometa-runtime-test
   cc-options: -std=c11 -Wall -Wextra
   ghc-options: -threaded -rtsopts
   other-modules:
+    TransactionInspection
+    Fixtures.Inspection
+    Cometa.Transaction.Inspection
     Provider
     Runtime
     Evaluation
@@ -621,6 +639,9 @@ test-suite cometa-runtime-test
     Cometa.Internal.Evaluation
     Cometa.Internal.Evaluation.Native
     Cometa.Internal.Building
+    Cometa.Internal.ParameterUpdate
+    Cometa.Internal.Inspection
+    Cometa.Internal.Message.Cip8
     Cometa.Internal.Balance
     Cometa.Internal.BatchValidation
     Cometa.Internal.SubTransactionPlan
@@ -925,3 +946,24 @@ executable cometa-wallet-recovery
     bytestring >=0.11 && <0.13,
     text >=2.0 && <2.2,
     transformers >=0.6 && <0.7
+
+executable cometa-message-signing
+  import: language
+  hs-source-dirs: examples
+  main-is: MessageSigning.hs
+  build-depends:
+    base >=4.18 && <4.22,
+    bytestring >=0.11 && <0.13,
+    transformers >=0.6 && <0.7,
+    cometa
+
+executable cometa-transaction-inspection
+  import: language
+  hs-source-dirs: examples
+  main-is: TransactionInspection.hs
+  build-depends:
+    base >=4.18 && <4.22,
+    aeson >=2.2 && <2.3,
+    bytestring >=0.11 && <0.13,
+    transformers >=0.6 && <0.7,
+    cometa

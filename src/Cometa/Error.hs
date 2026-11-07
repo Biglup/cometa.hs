@@ -150,6 +150,8 @@ data Error
     InvalidCborUtf8
   | -- | A native-asset name exceeds 32 bytes.
     InvalidAssetNameLength !Int
+  | -- | A native-asset identity encoding does not contain 28 through 60 bytes.
+    InvalidAssetIdLength !Int
   | -- | A native-asset policy identifier does not contain exactly 28 bytes.
     InvalidPolicyIdLength !Int
   | -- | A credential hash does not contain exactly 28 bytes.
