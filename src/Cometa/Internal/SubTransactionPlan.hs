@@ -125,6 +125,8 @@ referenceInput :: Utxo -> Plan
 referenceInput a = Plan (Top.referenceInput a)
 
 -- | Attach a native or compiled Plutus script. Executed sub-level scripts require V4.
+-- Repeated attachments with the same language and script bytes contribute one
+-- witness, ordered by the first attachment.
 attachScript :: Script -> Plan
 attachScript a = Plan (Top.attachScript a)
 

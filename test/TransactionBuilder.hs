@@ -89,6 +89,7 @@ tests =
       testCase "many mandatory inputs sharing one key keep one witness reserve" sharedKey,
       testCase "injected selection crosses actual balancing callbacks repeatedly" callbacks,
       testCase "native script minting, metadata, certificates and withdrawal" fields,
+      testCase "composed script attachments are unique by language and exact program" uniqueScripts,
       testCase "injected evaluator installs budgets in a complete script spend" scripts,
       testCase "preflight conflicts and native insufficient funds" invalid,
       testCase "surplus withdrawals and minted change cross injected selection" surplus,
@@ -243,7 +244,8 @@ scripts = do
               ]
           )
       injected = config {Builder.availableUtxos = [], Builder.collateralUtxos = [Utxo.utxo (Input.input collateralId 0) collateralOutput], Builder.evaluator = Just evaluate, Builder.parameters = (Builder.parameters config) {P.parameterCostModels = Just (Models.fromList [model])}}
-  tx <- Builder.build injected (Plan.spendWith scriptInput (Just datum) Nothing <> Plan.attachScript script <> Plan.payTo output) >>= must
+  tx <- Builder.build injected (Plan.spendWith scriptInput (Just datum) Nothing <> Plan.attachScript script <> Plan.attachScript script <> Plan.payTo output) >>= must
+  Witnesses.scripts (Witnesses.toWitnesses (Tx.witnesses tx)) @?= [script]
   assertBool "evaluator not called" . (> 0) =<< readIORef calls
   map Redeemer.executionUnits (Witnesses.redeemers (Witnesses.toWitnesses (Tx.witnesses tx))) @?= [ExUnits 100 200]
   let tooSmall = injected {Builder.parameters = (Builder.parameters injected) {P.parameterMaxTxExUnits = Just (ExUnits 99 199)}}
@@ -355,3 +357,28 @@ laws = property $ do
   InternalPlan.encodePlan ((x <> y) <> z) === InternalPlan.encodePlan (x <> (y <> z))
   InternalPlan.encodePlan (mempty <> x) === InternalPlan.encodePlan x
   InternalPlan.encodePlan (x <> mempty) === InternalPlan.encodePlan x
+
+uniqueScripts :: IO ()
+uniqueScripts = do
+  (base, output, _) <- fixture
+  let config = base {Builder.parameters = (Builder.parameters base) {P.parameterProtocolVersion = Version.ProtocolVersion 12 0}}
+      nativeA = Script.Native (Native.allOf [])
+      nativeB = Script.Native (Native.anyOf [])
+      nativePlan = Plan.attachScript nativeB <> Plan.attachScript nativeA
+  nativeTx <- Builder.build config (nativePlan <> nativePlan <> Plan.payTo output) >>= must
+  Witnesses.scripts (Witnesses.toWitnesses (Tx.witnesses nativeTx)) @?= [nativeB, nativeA]
+  versions <- mapM (\version -> Script.Plutus <$> must (Plutus.fromBytes version (B.pack [1, 2, 3]))) [Plutus.V1 .. Plutus.V4]
+  allVersions <- Builder.build config (foldMap Plan.attachScript (versions <> versions) <> Plan.payTo output) >>= must
+  Witnesses.scripts (Witnesses.toWitnesses (Tx.witnesses allVersions)) @?= versions
+  forM_ [Plutus.V1 .. Plutus.V4] $ \version -> do
+    canonical <- Script.Plutus <$> must (Plutus.fromBytes version (B.pack [1, 2, 3]))
+    first <- Script.Plutus <$> must (Plutus.decodeCbor version (B.pack [0x58, 3, 1, 2, 3]))
+    distinct <- Script.Plutus <$> must (Plutus.fromBytes version (B.pack [4, 5, 6]))
+    let once = Plan.attachScript first <> Plan.attachScript distinct <> Plan.payTo output
+        repeated = Plan.attachScript first <> Plan.attachScript distinct <> Plan.attachScript canonical <> Plan.attachScript first <> Plan.payTo output
+    -- Keep the first exact imported framing in the native instruction stream.
+    InternalPlan.encodePlan repeated @?= InternalPlan.encodePlan once
+    expected <- Builder.build config once >>= must
+    actual <- Builder.build config repeated >>= must
+    Tx.encodeCbor actual @?= Tx.encodeCbor expected
+    length (Witnesses.scripts (Witnesses.toWitnesses (Tx.witnesses actual))) @?= 2

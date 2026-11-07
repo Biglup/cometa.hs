@@ -102,6 +102,8 @@ import qualified Cometa.PolicyId as Policy
 import qualified Cometa.Protocol.Parameters as Parameters
 import Cometa.Script (Script)
 import qualified Cometa.Script as Script
+import qualified Cometa.Script.Native as NativeScript
+import qualified Cometa.Script.Plutus as Plutus
 import Cometa.SubTransaction (SubTransaction)
 import qualified Cometa.SubTransaction as Sub
 import qualified Cometa.SubTransaction.Body as SubBody
@@ -194,7 +196,9 @@ spendWith u r = one . Spend u (Immediate <$> r)
 referenceInput :: Utxo -> Plan
 referenceInput = one . Reference
 
--- | Attach a native or Plutus script witness.
+-- | Attach a native or Plutus script witness. Repeated attachments of the same
+-- language and script bytes contribute one witness, ordered by the first
+-- attachment. Different Plutus versions remain distinct.
 attachScript :: Script -> Plan
 attachScript = one . Script
 
@@ -310,8 +314,16 @@ normalizedOperations (Plan instructions _) = ops
         <> [Until (minimum ns) | let ns = [n | Until n <- original], not (null ns)]
 
     deduplicate [] = []
-    deduplicate (op : rest) = op : deduplicate (if idempotent op then filter (/= op) rest else rest)
+    deduplicate (op : rest) = op : deduplicate (if idempotent op then filter (not . sameAttachment op) rest else rest)
+    -- Native builder_witnesses.c (eadb95cd3ca7f711c203d7f2f4ee21c150d4d7f1)
+    -- appends scripts without enforcing witness-set uniqueness. Match the exact
+    -- hash preimage here; Plutus outer bytestring framing is not script identity.
+    sameAttachment (Script left) (Script right) = scriptIdentity left == scriptIdentity right
+    sameAttachment left right = left == right
+    scriptIdentity (Script.Native script) = (0, NativeScript.encodeCbor script)
+    scriptIdentity (Script.Plutus script) = (fromEnum (Plutus.version script) + 1, Plutus.toBytes script)
     idempotent op = case op of
+      Script {} -> True
       Spend {} -> True
       Reference {} -> True
       Metadata {} -> True

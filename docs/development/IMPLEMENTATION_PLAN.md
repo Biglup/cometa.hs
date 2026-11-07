@@ -3610,7 +3610,7 @@ Follow-up work should proceed in these reviewable slices:
    aggregate conservation and parallel independent builds are not substitutes.
 3. Add provider query capabilities for datum lookup, current registration/deposit,
    DRep/pool/action/constitution state, epoch history and mempool needs. Keep custom
-   endpoints and optional authentication. Test deterministic HTTP fixtures and
+   endpoints and optional authentication. Add structured submission diagnostics without exposing arbitrary response bodies or credentials. Test deterministic HTTP fixtures and
    authorized live responses separately.
 4. Design optional typed-data, blueprint and ledger/cardano-api interoperability.
    Keep dependency-heavy integrations separable. General UPLC constant application
@@ -3639,3 +3639,18 @@ recovery/swap/evaluation/deferred/Dijkstra offline programs run successfully.
 Ormolu, HLint, package checks, source manifest, native inventory, strict Sphinx
 HTML/link checks and both public Haddock references pass. Live execution results
 are maintained separately in the example parity record.
+
+Live V2 staking exposed duplicate script witnesses when independently composed
+certificate plans each attached the same script. Native evaluation succeeded,
+but the ledger rejected the duplicate CBOR set elements before execution. Shared
+plan normalization now coalesces attachments by language and script-hash preimage,
+retaining the first encoding and order. Both top-level and subtransaction builders
+use that normalization. Regressions cover native and V1–V4 scripts, distinct
+versions/programs, nonminimal outer Plutus framing, a used V2 witness and an
+actually evaluated V4 subtransaction. No cardano-c change is required by this fix.
+
+After the script-attachment fix, all components rebuild and all 533 tests pass
+(352 public, 133 runtime, 48 Blockfrost). The full runtime suite and all 11
+connected governance recipe tests pass Valgrind with zero errors and zero lost
+allocations. The public full-suite result above remains the broader lifecycle
+baseline; these targeted reruns exercise the changed normalization and live recipe.

@@ -48,6 +48,7 @@ import qualified Cometa.Protocol.Parameters as P
 import qualified Cometa.Protocol.Parameters.Update as Update
 import qualified Cometa.Protocol.Version as Version
 import qualified Cometa.Script as Script
+import qualified Cometa.Script.Native as NativeScript
 import qualified Cometa.Script.Plutus as Plutus
 import qualified Cometa.SlotConfig as Slots
 import qualified Cometa.SubTransaction as Sub
@@ -92,6 +93,7 @@ tests =
     "Sub-transaction builder"
     [ testCase "intent preserves exact inputs/outputs without balancing" intent,
       testCase "actual V4 execution commits immediate and deferred arguments" scripts,
+      testCase "composed script attachments preserve first identity and language failures" uniqueScripts,
       testCase "outer evaluation rejects underbudget signed intents and retains adequate bytes" attachedBudgets,
       testCase "reference scripts resolve from explicit reference inputs" references,
       testCase "guards, account operations and treasury donation survive building" dijkstraFields,
@@ -153,7 +155,7 @@ scripts = do
   (script, policy) <- scriptFixture
   let argument = Data.fromData (Data.Integer 42)
       attached = Plan.attachScript (Script.Plutus script)
-      immediate = attached <> Plan.mintWithRedeemer (asset policy) 1 argument
+      immediate = attached <> attached <> Plan.mintWithRedeemer (asset policy) 1 argument
       deferred = attached <> Plan.mintWithDeferredRedeemer policy [(AssetName.empty, 1)] (\_ _ -> Right argument)
   first <- Builder.build config immediate >>= must
   second <- Builder.build config deferred >>= must
@@ -401,3 +403,31 @@ replaceBudget models units transaction = do
   let fields = (fieldsOf transaction) {Fields.fieldScriptDataHash = commitment}
   body <- must (SubBody.fromBody (SubBody.fromFields fields))
   pure (Sub.assemble body encodedWitnesses (Sub.auxiliaryData transaction))
+
+uniqueScripts :: IO ()
+uniqueScripts = do
+  (config, output, input) <- fixture
+  let nativeA = Script.Native (NativeScript.allOf [])
+      nativeB = Script.Native (NativeScript.anyOf [])
+      nativePlan = Plan.attachScript nativeB <> Plan.attachScript nativeA
+      payment = Plan.spend input <> Plan.payTo output
+  nativeSub <- Builder.build config (nativePlan <> nativePlan <> payment) >>= must
+  Witnesses.scripts (Witnesses.toWitnesses (Sub.witnesses nativeSub)) @?= [nativeB, nativeA]
+  first <- Script.Plutus <$> must (Plutus.decodeCbor Plutus.V4 (B.pack [0x58, 3, 1, 2, 3]))
+  canonical <- Script.Plutus <$> must (Plutus.fromBytes Plutus.V4 (B.pack [1, 2, 3]))
+  distinct <- Script.Plutus <$> must (Plutus.fromBytes Plutus.V4 (B.pack [4, 5, 6]))
+  let once = Plan.attachScript first <> Plan.attachScript distinct <> payment
+      repeated = Plan.attachScript first <> Plan.attachScript distinct <> Plan.attachScript canonical <> Plan.attachScript first <> payment
+  encoded repeated @?= encoded once
+  expected <- Builder.build config once >>= must
+  actual <- Builder.build config repeated >>= must
+  Sub.encodeCbor actual @?= Sub.encodeCbor expected
+  length (Witnesses.scripts (Witnesses.toWitnesses (Sub.witnesses actual))) @?= 2
+  -- Deduplication never turns an unsupported language into an accepted plan.
+  forM_ [Plutus.V1 .. Plutus.V3] $ \version -> do
+    old <- Script.Plutus <$> must (Plutus.fromBytes version (B.pack [1, 2, 3]))
+    let attachment = Plan.attachScript old
+    single <- Builder.build config (attachment <> payment)
+    duplicate <- Builder.build config (attachment <> attachment <> payment)
+    assertBool "unsupported sub-level script accepted" (isLeft single)
+    duplicate @?= single
