@@ -3609,18 +3609,17 @@ implemented, partial and missing application workflows from excluded
 infrastructure. These are review groups, not a percentage denominator. Current cardano-api already includes experimental
 Dijkstra support; the comparison does not claim otherwise.
 
-The [minimum feature set and nice-to-have backlog](HASKELL_API_PARITY.md#minimum-feature-set-and-nice-to-have-backlog)
-now determines delivery priority. The minimum covers remaining construction
-capabilities, essential identifiers/Value CBOR, workflow-critical provider state,
-and actionable failures. Seed generation is intentionally excluded; CIP-8
-verification is nice to have. Broader
-interchange, blueprint/typed-data ergonomics, planning conveniences, VM tooling
-and advanced wallet/crypto variants are nice to have. Infrastructure remains
-excluded. This prioritization does not remove applicable native domain coverage.
+The [delivery scope](HASKELL_API_PARITY.md#delivery-scope-native-coverage-and-idiomatic-transaction-construction)
+now determines completion: existing cardano-c domain coverage, all native-supported
+transaction constructions and small idiomatic Haskell conveniences. Complete the
+shared current-treasury-value and explicit/deferred proposal redeemer builders;
+reconcile the remaining symbol ledger using tested public equivalents rather than
+C-shaped wrappers. Expand the README with compiled examples across supported eras.
 
-Do not equate completion of the minimum with full upstream parity. Track named
-acceptance tests and provenance for every required workflow, and retain optional
-gaps visibly without treating them as minimum-release blockers.
+Broader provider queries, standards absent from C, blueprints, upstream interop,
+CIP-8 verification and advanced VM tooling are future work. Seed generation and
+larger infrastructure remain excluded. Do not describe this narrower scope as
+full upstream-library parity. Record named acceptance tests and specific omissions.
 
 For each slice, review upstream source before API design, use idiomatic public
 values, preserve cancellation/resource safety, and add cross-library or independent
@@ -3661,3 +3660,91 @@ and all 535 tests pass (352 public, 135 runtime, 48 Blockfrost). The 135-test
 runtime suite passes Valgrind with zero errors and zero lost allocations. The
 [PR validation record](https://github.com/Biglup/cometa.hs/pull/22) holds per-run
 preprod transaction and cleanup evidence separately from these deterministic checks.
+
+### Native construction completion and Haskell conveniences
+
+The [construction coverage record](TRANSACTION_CONSTRUCTION.md) maps the narrowed
+scope to public APIs and named test modules. Proposal and treasury API design
+reviewed cardano-api's ordered proposal witnesses and current-treasury setter
+before choosing matching operations in the existing plan monoid. Top/sub proposal
+callbacks retain local insertion indices and protocol deposits; policy-less actions
+require no evaluator. Shared functionality belongs in cardano-c, with a pinned
+native revision for reproducible builds.
+
+Standalone credential and digest CBOR uses pure checked semantic values. Invalid
+kind, shape, length and trailing input remain explicit failures. Existing encoding
+identity contracts for imported transactions are unchanged. New API-specific
+upstream reviews and final validation evidence are recorded below as integration
+completes; this section does not claim unrun checks.
+
+#### Existing-domain API review
+
+Value/codecs reviewed cardano-api `c2212851b06b9c2acc5bb0bfe1b8a8e8cf2be03a`
+(`Value/Internal.hs`) and Atlas `c3adfb416242ea25a244bfaa1614213eecdc55d9`
+(`Types/Value.hs`, `Types/Governance.hs`, `Types/DRep.hs`) before API design.
+Their callers assemble normalized signed maps and convert at checked ledger
+boundaries. Cometa similarly keeps arbitrary-precision algebra pure, while
+standalone native Value/mint CBOR checks signed native storage bounds. DRep text
+imports CIP-105 and CIP-129 with explicit prefix/header validation; action text
+rejects the native display format's index narrowing. `intersection` is an ordinary
+left-biased signed-map operation, not a disguised minimum or coin clamp.
+
+Native-script JSON follows the actual cardano-c construction schema, including
+its guard keyHash/scriptHash forms. Metadata plain JSON is a separate checked
+conversion from detailed metadata JSON and CIP-116 inspection: bytes, nontext keys
+and duplicate object keys fail rather than lose information. These helpers add
+no production native resources; test oracles rebuild typed public values.
+
+Building utilities reviewed cardano-api's `Tx/Internal/Fee.hs` and
+`Tx/Internal/Body.hs` at the same revision: actual witness sizes, reference script
+bytes and execution-unit prices are separate inputs. Pure size queries and exact
+`executionFee` retain that distinction; existing `minimumFee` remains the combined
+checked protocol-aware operation. Language-view encoding follows the historical
+V1 encoding and known V1–V4 ordering, with caller-selected cost models. Tests
+compare every language subset and integer boundary against native oracles.
+
+
+#### Windows HTTP fixture shutdown
+
+The previous PR22 Windows job timed out in the local HTTP fixture after the public
+suite had passed. Reviewed haskell/network
+[`v3.2.12.0`, Socket/Syscall.hs](https://github.com/haskell/network/blob/v3.2.12.0/Network/Socket/Syscall.hs):
+threaded Windows performs `accept` through a safe blocking FFI call. Cancelling
+that worker before closing its listener can wait indefinitely. The test fixture
+now closes sockets before cancellation and joins all workers with bounded waits.
+Accepted sockets are acquired while masked and registered before handlers are
+unmasked. No production provider transport behavior changes.
+
+All 49 Blockfrost tests pass locally. The final masked-acquisition form passes 20
+concurrent stress runs, including 400 idle-listener cleanup cycles. Windows CI
+must confirm the platform-specific result; Linux execution alone is not evidence
+that Windows has passed.
+
+
+#### Integrated validation of construction/domain completion
+
+All components build on GHC 9.6.7; all 554 tests pass (362 public, 143 runtime,
+49 Blockfrost). Each complete suite passes Valgrind with zero errors and zero
+bytes definitely, indirectly or possibly lost. All 54 credential-free example
+entrypoints run successfully, including offline scripts, governance and batches;
+connected runners print usage and do not submit. README Haskell blocks compile
+with `-Wall -Werror`. Ormolu, HLint, ClangFormat 18, package checks, native inventory,
+source manifest, strict Sphinx HTML/link checks and both portable Haddock references
+pass. Native prerequisite PR222 has 1,044 relevant local tests and seven focused
+allocation/ownership tests clean under Valgrind. Hosted matrix status remains a
+separate gate; Windows must confirm the fixture shutdown correction.
+
+Cometa.Inspection adds named domain operations instead of global JSON instances.
+Its 24 new operations cover values, scripts, credentials, certificates, governance,
+pool/protocol values, data, witnesses and metadata. Typed corpus projections check
+exact schema correspondence; malformed, truncated and trailing input, cleanup,
+GC survival and concurrency cover every dispatch operation. Inspection is not
+an inverse serialization or a ledger validity check.
+
+The ledger reconciles source-confirmed existing equivalents rather than reporting
+raw pending row count as missing user features. Lifecycle delegations were checked
+against native function bodies; no clone, cache or tag operation was blanket
+classified as plumbing. Remaining collection encodings and representation choices
+are recorded in TRANSACTION_CONSTRUCTION.md for the next completeness slice.
+The existing preprod record predates the new native pin; no additional on-chain
+execution is claimed by this validation.

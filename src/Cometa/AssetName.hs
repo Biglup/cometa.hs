@@ -31,13 +31,18 @@ module Cometa.AssetName
     toHex,
     fromText,
     toText,
+    encodeCbor,
+    decodeCbor,
   )
 where
 
 -- IMPORTS --------------------------------------------------------------------
 
+import qualified Codec.CBOR.Decoding as D
+import qualified Codec.CBOR.Encoding as E
 import Cometa.Error (Error (..))
 import qualified Cometa.Internal.Hex as Hex
+import qualified Cometa.Internal.TransactionCbor as Cbor
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as ByteString
 import Data.Text (Text)
@@ -85,3 +90,14 @@ fromText = fromBytes . Text.encodeUtf8
 -- are replaced or discarded. An empty name returns @Just ""@.
 toText :: AssetName -> Maybe Text
 toText name = either (const Nothing) Just (Text.decodeUtf8' (toBytes name))
+
+-- | Encode the exact name bytes as a shortest-length definite CBOR byte string.
+encodeCbor :: AssetName -> ByteString
+encodeCbor = Cbor.encode . E.encodeBytes . toBytes
+
+-- | Decode exactly one CBOR byte string containing 0 through 32 bytes.
+-- Nonminimal length encodings are accepted; invalid schemas, lengths or
+-- trailing bytes return 'InvalidAssetNameCbor'. Fresh encoding is semantic
+-- and does not retain the original CBOR representation.
+decodeCbor :: ByteString -> Either Error AssetName
+decodeCbor = Cbor.decodeAs InvalidAssetNameCbor (D.decodeBytes >>= either (fail . show) pure . fromBytes)

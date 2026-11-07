@@ -356,9 +356,9 @@ laws = property $ do
   b <- forAll (Gen.word64 (Range.linear 0 100000))
   c <- forAll (Gen.word64 (Range.linear 0 100000))
   let x = Plan.validFrom a; y = Plan.validUntil b; z = Plan.validFrom c
-  InternalPlan.encodePlan ((x <> y) <> z) === InternalPlan.encodePlan (x <> (y <> z))
-  InternalPlan.encodePlan (mempty <> x) === InternalPlan.encodePlan x
-  InternalPlan.encodePlan (x <> mempty) === InternalPlan.encodePlan x
+  InternalPlan.encodePlan 0 ((x <> y) <> z) === InternalPlan.encodePlan 0 (x <> (y <> z))
+  InternalPlan.encodePlan 0 (mempty <> x) === InternalPlan.encodePlan 0 x
+  InternalPlan.encodePlan 0 (x <> mempty) === InternalPlan.encodePlan 0 x
 
 uniqueScripts :: IO ()
 uniqueScripts = do
@@ -379,7 +379,7 @@ uniqueScripts = do
     let once = Plan.attachScript first <> Plan.attachScript distinct <> Plan.payTo output
         repeated = Plan.attachScript first <> Plan.attachScript distinct <> Plan.attachScript canonical <> Plan.attachScript first <> Plan.payTo output
     -- Keep the first exact imported framing in the native instruction stream.
-    InternalPlan.encodePlan repeated @?= InternalPlan.encodePlan once
+    InternalPlan.encodePlan 0 repeated @?= InternalPlan.encodePlan 0 once
     expected <- Builder.build config once >>= must
     actual <- Builder.build config repeated >>= must
     Tx.encodeCbor actual @?= Tx.encodeCbor expected

@@ -128,6 +128,7 @@ library
     Cometa.SubTransaction
     Cometa.Transaction.Signing
     Cometa.Transaction.Inspection
+    Cometa.Inspection
     Cometa.Message.Cip8
     Cometa.Transaction.Input
     Cometa.Transaction.Indices
@@ -580,6 +581,7 @@ test-suite cometa-runtime-test
     TransactionInspection
     Fixtures.Inspection
     Cometa.Transaction.Inspection
+    Cometa.Inspection
     Provider
     Runtime
     Evaluation

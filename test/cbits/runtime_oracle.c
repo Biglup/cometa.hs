@@ -19,6 +19,7 @@
 
 /* INCLUDES ******************************************************************/
 #include "cometa_runtime.h"
+#include <cardano/cardano.h>
 #include <cardano/providers/provider.h>
 #ifdef _WIN32
 #include <windows.h>
@@ -142,4 +143,74 @@ cometa_test_provider_metadata(cardano_provider_t* provider, unsigned char* name,
   memcpy(name, source, size + 1U);
   *magic = (uint32_t)cardano_provider_get_network_magic(provider);
   return (unsigned int)CARDANO_SUCCESS;
+}
+
+/** Measure public encodings through independent native parsers and calculators.
+ * Kind 3 prices only execution, using memory=7/3 and steps=11/7 lovelace.
+ * Every parsed owner and construction reference is released before returning. */
+int
+cometa_test_building_sizes_oracle(uint8_t kind, const unsigned char* bytes, size_t size, uint64_t* output)
+{
+  cardano_error_t               result     = CARDANO_SUCCESS;
+  cardano_cbor_reader_t*        reader     = cardano_cbor_reader_new(bytes, size);
+  cardano_transaction_t*        tx         = NULL;
+  cardano_transaction_output_t* tx_output  = NULL;
+  cardano_script_t*             script     = NULL;
+  cardano_unit_interval_t*      memory     = NULL;
+  cardano_unit_interval_t*      steps      = NULL;
+  cardano_unit_interval_t*      ref_price  = NULL;
+  cardano_ex_unit_prices_t*     prices     = NULL;
+  cardano_utxo_list_t*          references = NULL;
+  size_t                        measured   = 0;
+  if (reader == NULL)
+  {
+    return CARDANO_ERROR_MEMORY_ALLOCATION_FAILED;
+  }
+  switch (kind)
+  {
+    case 0:
+      result = cardano_transaction_from_cbor(reader, &tx);
+      if (result == CARDANO_SUCCESS)
+        result = cardano_get_serialized_transaction_size(tx, &measured);
+      break;
+    case 1:
+      result = cardano_transaction_output_from_cbor(reader, &tx_output);
+      if (result == CARDANO_SUCCESS)
+        result = cardano_get_serialized_output_size(tx_output, &measured);
+      break;
+    case 2:
+      result = cardano_script_from_cbor(reader, &script);
+      if (result == CARDANO_SUCCESS)
+        result = cardano_get_serialized_script_size(script, &measured);
+      break;
+    case 3:
+      result = cardano_transaction_from_cbor(reader, &tx);
+      if (result == CARDANO_SUCCESS)
+        result = cardano_unit_interval_new(7, 3, &memory);
+      if (result == CARDANO_SUCCESS)
+        result = cardano_unit_interval_new(11, 7, &steps);
+      if (result == CARDANO_SUCCESS)
+        result = cardano_unit_interval_new(0, 1, &ref_price);
+      if (result == CARDANO_SUCCESS)
+        result = cardano_ex_unit_prices_new(memory, steps, &prices);
+      if (result == CARDANO_SUCCESS)
+        result = cardano_utxo_list_new(&references);
+      if (result == CARDANO_SUCCESS)
+        result = cardano_compute_min_script_fee(tx, prices, references, ref_price, output);
+      break;
+    default:
+      result = CARDANO_ERROR_INVALID_ARGUMENT;
+  }
+  if ((result == CARDANO_SUCCESS) && (kind != 3))
+    *output = measured;
+  cardano_utxo_list_unref(&references);
+  cardano_ex_unit_prices_unref(&prices);
+  cardano_unit_interval_unref(&memory);
+  cardano_unit_interval_unref(&steps);
+  cardano_unit_interval_unref(&ref_price);
+  cardano_script_unref(&script);
+  cardano_transaction_output_unref(&tx_output);
+  cardano_transaction_unref(&tx);
+  cardano_cbor_reader_unref(&reader);
+  return result;
 }

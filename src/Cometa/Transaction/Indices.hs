@@ -30,6 +30,7 @@ module Cometa.Transaction.Indices
     findWithdrawal,
     findCertificate,
     findVote,
+    findProposal,
     findRedeemer,
   )
 where
@@ -41,6 +42,7 @@ import Cometa.Address.Reward (RewardAddress)
 import Cometa.Certificate (EncodedCertificate)
 import Cometa.Error (Error)
 import Cometa.Evaluation (RedeemerId)
+import Cometa.Governance.Proposal (Proposal)
 import Cometa.Governance.Voting (Voter)
 import qualified Cometa.Internal.ContextualTransaction as Native
 import qualified Cometa.Internal.TransactionIndices as Indices
@@ -91,6 +93,12 @@ findCertificate certificate = Native.findCertificate certificate . Indices.certi
 -- each kind. Multiple action votes by one voter occupy a single position.
 findVote :: Voter -> Tx.Transaction -> Maybe Word64
 findVote voter = Indices.findVote voter . fields
+
+-- | First proposal with the same canonical encoding, including its deposit,
+-- return account and anchor. Positions follow proposal insertion order, counting
+-- actions without scripts. A proposing redeemer uses this same position.
+findProposal :: Proposal -> Tx.Transaction -> Maybe Word64
+findProposal proposal = Indices.findProposal proposal . fields
 
 -- | Redeemer rank ordered by purpose then purpose index, independently of its
 -- imported witness collection order. This is its position among all redeemers,

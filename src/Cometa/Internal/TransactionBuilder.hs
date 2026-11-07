@@ -149,7 +149,7 @@ buildNative config plan =
         result <- Runtime.withOperations [selection, evaluation, deferred] $ \case
           [selectContext, evaluateContext, deferredContext] ->
             Runtime.withBytes (encodeConfig plan config) $ \configBytes configSize ->
-              Runtime.withBytes (Plan.encodePlan plan) $ \planBytes planSize ->
+              Runtime.withBytes (Plan.encodePlan (fromMaybe 0 (P.parameterGovernanceActionDeposit (parameters config))) plan) $ \planBytes planSize ->
                 withResult
                   ( FFI.cBuild
                       (if isJust (selector config) then selectContext else nullPtr)
@@ -268,7 +268,7 @@ validateFees config plan = do
         -- (hints+1)*(snapshotBytes+1), and each resulting output by the full
         -- asset snapshot plus address and map/coin/script framing allowance.
         snapshotBytes =
-          toInteger (B.length (Plan.encodePlan plan))
+          toInteger (B.length (Plan.encodePlan (fromMaybe 0 (P.parameterGovernanceActionDeposit (parameters config))) plan))
             + sum [toInteger (B.length (Utxo.encodeCbor u)) | u <- possible <> collateralUtxos config]
         changeCount = (toInteger (length (Plan.planOutputs plan)) + 1) * (snapshotBytes + 1)
         changeBytes = changeCount * (snapshotBytes + toInteger (B.length (Address.toBytes (changeAddress config))) + 256)

@@ -95,3 +95,33 @@ cometa_test_script_agreement(
 
   return agrees;
 }
+
+/**
+ * \brief Checks native JSON construction against typed Haskell script CBOR.
+ * Input spans stay borrowed through return and all operation-scoped owners
+ * are released on success and failure. JSON parsing cannot forward CBOR bytes.
+ */
+int
+cometa_test_native_script_json(const char* json, size_t json_size, const unsigned char* expected, size_t expected_size)
+{
+  cardano_native_script_t* script  = NULL;
+  cardano_cbor_writer_t*   writer  = cardano_cbor_writer_new();
+  cardano_buffer_t*        encoded = NULL;
+  cardano_error_t          result  = cardano_native_script_from_json(json, json_size, &script);
+  if (writer == NULL)
+    result = CARDANO_ERROR_MEMORY_ALLOCATION_FAILED;
+  if (result == CARDANO_SUCCESS)
+    result = cardano_native_script_to_cbor(script, writer);
+  if (result == CARDANO_SUCCESS)
+    result = cardano_cbor_writer_encode_in_buffer(writer, &encoded);
+  int agrees = 0;
+  if (result == CARDANO_SUCCESS)
+  {
+    agrees = (cardano_buffer_get_size(encoded) == expected_size) &&
+      (memcmp(cardano_buffer_get_data(encoded), expected, expected_size) == 0);
+  }
+  cardano_buffer_unref(&encoded);
+  cardano_cbor_writer_unref(&writer);
+  cardano_native_script_unref(&script);
+  return agrees;
+}

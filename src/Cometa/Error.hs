@@ -150,12 +150,18 @@ data Error
     InvalidCborUtf8
   | -- | A native-asset name exceeds 32 bytes.
     InvalidAssetNameLength !Int
+  | -- | Asset-name CBOR is malformed or does not contain a name of 0 through 32 bytes.
+    InvalidAssetNameCbor !Text
   | -- | A native-asset identity encoding does not contain 28 through 60 bytes.
     InvalidAssetIdLength !Int
   | -- | A native-asset policy identifier does not contain exactly 28 bytes.
     InvalidPolicyIdLength !Int
   | -- | A credential hash does not contain exactly 28 bytes.
     InvalidCredentialHashLength !Int
+  | -- | A credential CBOR item has invalid syntax, shape or kind.
+    InvalidCredentialCbor !Text
+  | -- | A digest CBOR item has invalid syntax or is not one byte string.
+    InvalidHashCbor !Text
   | -- | A Shelley network tag is outside 0 through 15 inclusive.
     InvalidNetworkId !Integer
   | -- | The four-bit header selects an address form unsupported by the chosen
@@ -182,6 +188,8 @@ data Error
     InvalidMetadataJson !Text
   | -- | Script CBOR is malformed or has an unsupported script form.
     InvalidScriptCbor !Text
+  | -- | Native script construction JSON is malformed or violates script bounds.
+    InvalidScriptJson !Text
   | -- | Compiled Plutus script bytes are empty.
     EmptyPlutusScript
   | -- | A protocol fraction has a negative or oversized component, or a zero denominator.
@@ -198,6 +206,16 @@ data Error
     InvalidTransactionCbor !Text
   | -- | A transaction output contains an unsupported quantity.
     InvalidTransactionOutputValue !Integer
+  | -- | A standalone value has Ada outside 0..2^63-1 or a native quantity outside int64.
+    InvalidValueQuantity !Integer
+  | -- | Standalone value CBOR is malformed or violates its quantity constraints.
+    InvalidValueCbor !Text
+  | -- | Governance action identifier text is malformed or has an invalid prefix or payload.
+    InvalidGovernanceActionText !Text
+  | -- | An action index exceeds the one-byte CIP-129 text representation.
+    InvalidGovernanceActionTextIndex !Word64
+  | -- | A DRep identifier has an invalid checksum, prefix, header or payload.
+    InvalidDRepText !Text
   | -- | A transaction digest does not contain exactly 32 bytes.
     InvalidTransactionHashLength !Int
   | -- | A transaction field violates its domain constraints.

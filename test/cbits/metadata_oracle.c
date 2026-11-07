@@ -289,3 +289,45 @@ cleanup:
   cardano_cbor_writer_unref(&writer);
   return agrees;
 }
+
+/**
+ * \brief Checks plain JSON input/output against typed metadatum CBOR.
+ * Input spans are borrowed. JSON allocation and every acquired native owner
+ * are scoped and released on all exits. JSON parsing reads semantic fields.
+ */
+int
+cometa_test_metadata_plain_json(const char* json, size_t json_size, const unsigned char* expected, size_t size)
+{
+  cardano_metadatum_t*   datum     = NULL;
+  cardano_metadatum_t*   roundtrip = NULL;
+  cardano_cbor_writer_t* writer    = cardano_cbor_writer_new();
+  cardano_buffer_t*      encoded   = NULL;
+  char*                  output    = NULL;
+  cardano_error_t        result    = cardano_metadatum_from_json(json, json_size, &datum);
+  if (writer == NULL)
+    result = CARDANO_ERROR_MEMORY_ALLOCATION_FAILED;
+  if (result == CARDANO_SUCCESS)
+  {
+    size_t output_size = cardano_metadatum_get_json_size(datum);
+    output             = malloc(output_size);
+    if (output == NULL)
+      result = CARDANO_ERROR_MEMORY_ALLOCATION_FAILED;
+    if (result == CARDANO_SUCCESS)
+      result = cardano_metadatum_to_json(datum, output, output_size);
+    if (result == CARDANO_SUCCESS)
+      result = cardano_metadatum_from_json(output, strlen(output), &roundtrip);
+  }
+  if (result == CARDANO_SUCCESS)
+    result = cardano_metadatum_to_cbor(roundtrip, writer);
+  if (result == CARDANO_SUCCESS)
+    result = cardano_cbor_writer_encode_in_buffer(writer, &encoded);
+  int agrees = 0;
+  if (result == CARDANO_SUCCESS)
+    agrees = (cardano_buffer_get_size(encoded) == size) && (memcmp(cardano_buffer_get_data(encoded), expected, size) == 0);
+  free(output);
+  cardano_buffer_unref(&encoded);
+  cardano_cbor_writer_unref(&writer);
+  cardano_metadatum_unref(&roundtrip);
+  cardano_metadatum_unref(&datum);
+  return agrees;
+}

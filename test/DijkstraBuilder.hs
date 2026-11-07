@@ -51,6 +51,7 @@ import qualified Cometa.Transaction.Body as Body
 import qualified Cometa.Transaction.Builder as Builder
 import qualified Cometa.Transaction.Datum as Datum
 import qualified Cometa.Transaction.Fields as Fields
+import qualified Cometa.Transaction.Indices as Indices
 import qualified Cometa.Transaction.Input as Input
 import qualified Cometa.Transaction.Output as Output
 import qualified Cometa.Transaction.Plan as Plan
@@ -60,6 +61,7 @@ import qualified Cometa.Transaction.Witnesses as Witnesses
 import qualified Cometa.TransactionId as Id
 import qualified Cometa.UnitInterval as Interval
 import qualified Cometa.Value as Value
+import Control.Monad (forM_)
 import qualified Data.ByteString as B
 import Data.Either (isLeft)
 import qualified Fixtures.ProtocolParameters as Fixture
@@ -74,6 +76,9 @@ tests =
     "Dijkstra transaction building"
     [ testCase "guards, accumulated account deposits, intervals and donation balance" accounts,
       testCase "all seven proposal actions use the protocol deposit and preserve order" proposals,
+      testCase "treasury assertions preserve explicit zero and full-width values" treasury,
+      testCase "policy-less proposals need no evaluator or collateral" policylessProposals,
+      testCase "proposal redeemers use insertion indices and preserve callback errors" proposalArguments,
       testCase "key votes retain multiple action choices" keyVotes,
       testCase "native V4 guards and deferred grouped votes have distinct purposes" scripts,
       testCase "batch deficits and surpluses preserve subtransaction bytes" batches,
@@ -319,3 +324,66 @@ signedBudgets = do
   sufficient <- intent (ExUnits 1000000 1000000)
   transaction <- Builder.build configured (Plan.payTo output <> Plan.attachSubTransaction sufficient [input]) >>= must
   fmap (map Sub.encodeCbor) (Body.bodySubTransactions (Body.toBody (Tx.body transaction))) @?= Just [Sub.encodeCbor sufficient]
+
+treasury :: IO ()
+treasury = do
+  (config, output, _) <- dijkstra
+  forM_ [0, 12345, maxBound] $ \amount -> do
+    transaction <- Builder.build config (Plan.payTo output <> Plan.currentTreasuryValue amount <> Plan.currentTreasuryValue amount) >>= must
+    Fields.fieldTreasuryValue (fields transaction) @?= Just amount
+    Value.quantity Asset.Ada (foldMap Output.value (Fields.fieldOutputs (fields transaction))) @?= 9800000
+  Builder.build config (Plan.payTo output <> Plan.currentTreasuryValue 1 <> Plan.currentTreasuryValue 2)
+    >>= (@?= Left (InvalidTransactionPlan "Conflicting current treasury values"))
+
+policylessProposals :: IO ()
+policylessProposals = do
+  (config, output, _) <- dijkstra
+  account <- reward
+  metadata <- anchor
+  withdrawals <- must (Action.withdrawalsFromList [(account, 1)])
+  let actions = [Action.ParameterChange Nothing Update.empty Nothing, Action.TreasuryWithdrawals withdrawals Nothing]
+      plan = Plan.payTo output <> foldMap (\action -> Plan.propose account action metadata) actions
+  transaction <- Builder.build config plan >>= must
+  fmap Proposal.toList (Fields.fieldProposalProcedures (fields transaction)) @?= Just [Proposal.Proposal 100000 account action metadata | action <- actions]
+  Witnesses.redeemers (Witnesses.toWitnesses (Tx.witnesses transaction)) @?= []
+  Builder.build config (plan <> Plan.propose account (Action.ParameterChange Nothing Update.empty Nothing) metadata)
+    >>= (@?= Left (InvalidTransactionPlan "Duplicate governance proposal"))
+  Builder.build config (Plan.payTo output <> Plan.proposeWithRedeemer account Action.InfoAction metadata (Data.fromData (Data.Integer 1)))
+    >>= (@?= Left (InvalidTransactionPlan "A proposing redeemer requires a guardrails policy"))
+  halves <- must (mapM (uncurry Interval.mkUnitInterval) [(1, 2), (2, 4)])
+  let committees = [Action.UpdateCommittee Nothing (Action.removalsFromList []) Committee.emptyMembers threshold | threshold <- halves]
+  distinct <- Builder.build config (Plan.payTo output <> foldMap (\action -> Plan.propose account action metadata) committees) >>= must
+  fmap (map Proposal.encodeCbor . Proposal.toList) (Fields.fieldProposalProcedures (fields distinct))
+    @?= Just [Proposal.encodeCbor (Proposal.Proposal 100000 account action metadata) | action <- committees]
+
+proposalArguments :: IO ()
+proposalArguments = do
+  baseline <- Runtime.liveContexts
+  (config, output, _) <- dijkstra
+  account <- reward
+  metadata <- anchor
+  script <- must (Plutus.fromBytes Plutus.V4 (B.pack [0x45, 1, 1, 0, 0x24, 0x99]))
+  policy <- Plutus.hash script >>= must
+  model <- must (Models.mkCostModel 3 (replicate 369 100))
+  collateralId <- must (Id.fromBytes (B.replicate 32 10))
+  collateral <- must (Output.mkOutput (Builder.changeAddress config) (Value.lovelace 5000000) Datum.NoDatum Nothing)
+  withdrawals <- must (Action.withdrawalsFromList [(account, 1)])
+  let action = Action.TreasuryWithdrawals withdrawals (Just policy)
+      expected = Proposal.Proposal 100000 account action metadata
+      immediate = Data.fromData (Data.Integer 42)
+      callback transaction _ = case Indices.findProposal expected transaction of
+        Nothing -> Left (InvalidTransactionPlan "Proposal absent from callback draft")
+        Just index -> Right (Data.fromData (Data.Integer (toInteger index)))
+      configured = config {Builder.parameters = (Builder.parameters config) {P.parameterCostModels = Just (Models.fromList [model])}, Builder.collateralUtxos = [Utxo.utxo (Input.input collateralId 0) collateral]}
+      prefix = Plan.payTo output <> Plan.attachScript (Script.Plutus script) <> Plan.propose account Action.InfoAction metadata
+      plan = prefix <> Plan.proposeWithRedeemer account (Action.ParameterChange Nothing Update.empty (Just policy)) metadata immediate <> Plan.proposeWithDeferredRedeemer account action metadata callback
+  transaction <- Builder.build configured plan >>= must
+  let redeemers = Witnesses.redeemers (Witnesses.toWitnesses (Tx.witnesses transaction))
+  map Redeemer.purpose redeemers @?= [Redeemer.Proposing, Redeemer.Proposing]
+  map Redeemer.index redeemers @?= [1, 2]
+  map Redeemer.argument redeemers @?= [immediate, Data.fromData (Data.Integer 2)]
+  Indices.findProposal expected transaction @?= Just 2
+  Indices.findProposal (expected {Proposal.proposalDeposit = 1}) transaction @?= Nothing
+  let failure = InvalidTransactionPlan "Proposal callback refused draft"
+  Builder.build configured (prefix <> Plan.proposeWithDeferredRedeemer account action metadata (\_ _ -> Left failure)) >>= (@?= Left failure)
+  Runtime.liveContexts >>= (@?= baseline)

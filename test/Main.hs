@@ -132,6 +132,12 @@ foundationTests =
       checkNativeFailure "blake2b.compute" Code.OutOfBoundsMemoryRead computed,
     testCase "copied bytes survive native cleanup and GC" checkCopiedBytes,
     testCase "asynchronous cancellation completes and later calls remain usable" checkCancellation,
+    testCase "digest CBOR checks shape and complete input" $ do
+      digest <- either (fail . show) pure (Blake2b.fromBytes "ab")
+      Blake2b.encodeCbor digest @?= ByteString.pack [0x42, 97, 98]
+      Blake2b.decodeCbor (ByteString.pack [0x5f, 0x41, 97, 0x41, 98, 0xff]) @?= Right digest
+      Blake2b.decodeCbor (ByteString.singleton 0x40) @?= Left EmptyHash
+      mapM_ (\bytes -> case Blake2b.decodeCbor bytes of Left _ -> pure (); Right _ -> assertFailure "Invalid digest CBOR accepted") [ByteString.empty, ByteString.singleton 0, ByteString.pack [0x41, 0, 0]],
     testProperty "bytes and hexadecimal round trips" propRoundTrip,
     testProperty "computed digest has requested length" propDigestLength
   ]
@@ -177,6 +183,7 @@ propRoundTrip = property $ do
   bytes <- forAll (Gen.bytes (Range.linear 1 512))
   digest <- evalEither (Blake2b.fromBytes bytes)
   Blake2b.toBytes digest === bytes
+  Blake2b.decodeCbor (Blake2b.encodeCbor digest) === Right digest
   Blake2b.fromHex (Blake2b.toHex digest) === Right digest
   Blake2b.fromHex (Text.toUpper (Blake2b.toHex digest)) === Right digest
 

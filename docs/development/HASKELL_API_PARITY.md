@@ -1,15 +1,16 @@
 # Haskell API capability parity audit
 
 This is a source-based gap analysis, reviewed 2026-11-07. The target is complete
-coverage of the agreed binding and application APIs, not every subsystem shipped
-by the compared repositories. Cometa has remaining in-scope gaps below.
+coverage of existing cardano-c domain capabilities and supported transaction
+construction, with small Haskell conveniences. The comparison below also records
+optional upstream capabilities; its gaps are not all delivery requirements.
 
 The maintainer explicitly excluded larger infrastructure on 2026-11-07:
 local-node/Ouroboros connectivity, chain synchronization and rollback services,
 full ledger validation/emulation, devnet orchestration, additional built-in
 provider backends, and associated CLI/RPC/WASM applications. These are comparison
-context, not implementation backlog or release gates. Existing provider injection,
-Blockfrost/custom URLs, and application-level query improvements remain in scope.
+context, not implementation backlog or release gates. Existing provider injection
+and Blockfrost/custom URLs remain supported; additional queries are future work.
 
 Seed/entropy generation is intentionally outside the base library. Applications
 supply securely sourced entropy or existing key material; the library provides
@@ -38,8 +39,8 @@ capability present in the latter is not automatically present in those snapshots
 not equality of every upstream function or representation. **Partial** means a
 caller can perform some of the workflow but a material operation or contract is
 missing. **Missing** means there is no corresponding public Cometa workflow.
-**Deferred** identifies an existing explicit API decision; it remains a gap
-within the agreed scope. **Out of scope** identifies infrastructure explicitly
+**Deferred** identifies a consciously postponed convenience; it does not block
+the current delivery scope. **Out of scope** identifies infrastructure explicitly
 excluded by the maintainer; it does not count as missing binding functionality.
 
 This document groups meaningful operations, rather than counting aliases,
@@ -63,7 +64,7 @@ validity or parity with all upstream ledger versions.
 | T03 Coin selection, collateral, change, fee and minimum UTxO iteration | S2 balanceForWallet; A3 buildTxLoop; C2/C15 | CoinSelection and native strategy adapters, Transaction.Building/Builder; test/NativeCoinSelection.hs, test/TransactionBuilding.hs, test/TransactionBuilder.hs | **Implemented** native balancing workflow; algorithm choices and failure results need not match upstream. Atlas' additional configurable strategy space is not automatically covered. |
 | T04 Local script evaluation and remote evaluation | S2; C2/C15 | Evaluation records, Evaluation.Native, optional Blockfrost provider; test/Evaluation.hs, test/NativeEvaluation.hs, blockfrost-test/BlockfrostJson.hs | **Partial.** Native V1–V4 evaluation and target budgets exist. Configurable VM ceilings, detailed successful traces/profiling and upstream error payloads do not. Blockfrost adapter uses Ogmios v5 additional-UTxO grammar and explicitly rejects unsupported newer purposes/scripts; it is not general remote V3/V4/Dijkstra evaluation. |
 | T05 Deferred redeemers and canonical contextual indices | S1 WithRedeemerFn and lookupIndex helpers; C1 witness indexing | Top/sub Plan deferred operations, Transaction.Indices/SubTransaction.Indices; test/DeferredRedeemer.hs, test/TransactionIndices.hs, test/ContextualTransaction.hs | **Implemented** explicit snapshots and total lookups. Index conventions are native ledger ordering, not Haskell Ord of unrelated public types. More concise automatic data conversion remains explicitly **deferred**, not a native API omission. |
-| T06 Staking, pools, DRep/committee, votes, proposals and donation | A1; C1 and governance modules; S1 staking helpers | Certificate, Pool, Governance, Plan certificate/withdraw/vote/propose/donate; test/Certificates.hs, test/Pool.hs, test/Governance.hs, test/Proposals.hs, test/DijkstraBuilder.hs | **Implemented** native typed construction/building. Querying current governance state is P03/P04 below. Plan lacks current-treasury-value setter despite Body.fieldTreasuryValue/manual assembly; native builder setter is absent. Guardrail proposals also use the native builder's generated unit redeemer; caller-supplied or deferred proposing redeemers have no Plan operation. |
+| T06 Staking, pools, DRep/committee, votes, proposals and donation | A1; C1 and governance modules; S1 staking helpers | Certificate, Pool, Governance, Plan certificate/withdraw/vote/propose/donate; test/Certificates.hs, test/Pool.hs, test/Governance.hs, test/Proposals.hs, test/DijkstraBuilder.hs | **Implemented** native typed construction/building. Querying current governance state is P03/P04 below. The construction completion slice adds currentTreasuryValue and explicit/deferred proposing redeemers through shared native builder extensions; see TRANSACTION_CONSTRUCTION.md for tests. |
 | T07 Compiled-code/ledger-type interoperability | S10; A6/A7; cardano-api Plutus/Ledger exports | PlutusData explicit ADT and Script.Plutus serialized bytes/applyParams; test/PlutusData.hs, test/Scripts.hs | **Partial.** Opaque serialized-script import works. No optional conversions for PlutusTx.CompiledCode, ledger Value/Address/Tx types or cardano-api types. S10 also applies arbitrary supported UPLC builtin constants; Cometa applyParams takes PlutusData values, so direct non-Data builtin parameter application is not equivalent. This is a Haskell interoperability layer, not exposure of private C UPLC structs. |
 | T08 Typed datum/redeemer codecs and blueprints | S7/S8/S10; A8 | Explicit PlutusData assembly and script parameter application | **Missing / deferred ergonomics.** No ToData/FromData deriving, CIP-57/Aiken blueprint reader, schema validation, generated Haskell types or validator-role lookup (including S8 CIP-143 helpers). Raw script bytes do not implement blueprint parsing. |
 | T09 Script compiler/UPLC tooling | S7 program conversion; A7 applyParam uses UPLC; compiler dependencies in upstream manifests | Compiled script byte import, hash, native applyParams | **Partial.** No public program-level UPLC AST/parser conversion or general builtin-constant application comparable to S7/S10. Existing cardano-c installed UPLC surface exposes Data parameter application, not private VM internals. These upstream modules consume compiled code; they do not themselves provide an Aiken compiler service. A standalone compiler/optimizer service would be additional scope, not an inferred missing export. |
@@ -128,46 +129,40 @@ They are excluded from the remaining-work and completeness assessment.
 | K05 Native script AST, hashes, cosigner templates, validation and text language | D6/D7; S1 native script helpers; Atlas SimpleScript | Script.Native AST, serialization/hash and builders; test/Scripts.hs | **Partial.** General native scripts work. Cosigner templates, textual parser/pretty-printer and recommended structural validation are missing. A native script's ability to serialize does not prove satisfiability or establish a signing policy. |
 | K06 Address bytes/text, key/script payment/stake, pointers and historical forms | D2/D3/D4; C Address; Atlas Address | General Address sum, Shelley/Reward/Byron codecs/inspection; test/Address.hs, test/CompleteAddress.hs | **Implemented** native-supported address representation. CLI structured diagnostic reports and legacy wallet recovery K04 are not covered. Pointer components follow pinned native Word32 bounds; do not advertise every upstream ChainPointer range without an explicit boundary comparison. |
 | K07 Consensus/operator keys and certificates | C9 KesKey/VrfKey/BlsKey; C13 | Pool.Parameters and Pool.BlsKey accept bounded public values; certificates | **Partial.** Public BLS key/proof bytes are representable; no BLS key generation/proof creation, KES/VRF secret operations, operational certificate issuance or genesis key administration. These algorithms are not exposed by existing Ed25519 wrappers. |
-| K08 Assets/value algebra and fingerprints | A6; cardano-api Value; S1 | AssetId codecs/fingerprint, PolicyId/AssetName, arbitrary signed Integer Value; test/AssetId.hs, test/Value.hs | **Partial.** Core construction/sum/difference/scale/inspection works. Atlas' valueMonus, splitSign, map/alter/restrict/intersection helpers and typed upstream conversions are not all named public operations. Several are implementable purely from toList/fromList/quantity; composability is not identical convenience API coverage. Standalone checked Value CBOR and general JSON remain missing. |
-| K09 Governance identifier text and serialization envelopes | C10/C11; A9; cardano-addresses text prefixes | Raw hash/CBOR values and address text; CIP-116 transaction inspection | **Partial.** CIP-105/129 DRep/committee/action text and typed cardano-cli key/script/transaction envelopes/file helpers are missing. Native governance action text narrows an index; audit standard bounds before adapting that operation. Existing hex output does not replace Bech32 headers/envelope type validation. |
+| K08 Assets/value algebra and fingerprints | A6; cardano-api Value; S1 | AssetId codecs/fingerprint, PolicyId/AssetName, arbitrary signed Integer Value; test/AssetId.hs, test/Value.hs | **Partial.** Core construction/sum/difference/scale/inspection works. Atlas' valueMonus, splitSign, map/alter/restrict/intersection helpers and typed upstream conversions are not all named public operations. Several are implementable purely from toList/fromList/quantity; composability is not identical convenience API coverage. Standalone checked Value/mint CBOR and signed value helpers are now provided; broader general JSON interchange is optional. |
+| K09 Governance identifier text and serialization envelopes | C10/C11; A9; cardano-addresses text prefixes | Raw hash/CBOR values and address text; CIP-116 transaction inspection | **Partial comparison coverage.** DRep CIP-105 import/CIP-129 import/export and checked governance-action text are provided. Committee text and cardano-cli envelopes/file helpers are optional additions absent from this native coverage slice. Action text rejects indices above 255 instead of silently narrowing. |
 | K10 Metadata/data JSON and broader CBOR primitives | cardano-api serialization/Plutus APIs; S11; A6 | Exact CBOR metadata/PlutusData, selected primitive Cbor functions | **Partial.** No public equivalent of every metadata/script-data JSON schema or general CBOR null/tag/simple/double/tagged-bignum primitive. Arbitrary Plutus integers work through PlutusData, not the bounded primitive Cbor integer helper. |
 | K11 Full era-specific/genesis/leadership/poll domains | C12/C13/C14 and cardano-api LedgerState/Genesis | Current native transaction/governance types, legacy certificates and update fields | **Partial application coverage; infrastructure excluded.** Governance poll metadata/answer helpers remain an application-level gap. Genesis generation, leadership scheduling and historical ledger-transition services are excluded infrastructure; their absence is not a binding release blocker. |
 | K12 Raw and COSE message signing | D1 sign/verify; upstream key/signature operations | Crypto.Ed25519 and Message.Cip8; test/Ed25519.hs, test/Cip8.hs | **Implemented** raw signatures and address/key-hash-bound COSE outputs, beyond the raw format in D1. CIP8 accepts nonempty direct payloads with empty AAD and hashed=false; it does not establish that the signing key controls the supplied address. Detached/prehashed/custom-AAD signing and a complete COSE verifier are not supplied or implied. |
 | K13 Optics, standard instances and effect/error integration | S14 Convex.CardanoApi.Lenses; A1/A2/A6 class and instance surfaces | Explicit immutable ADTs, qualified functions, Plan composition and ordinary Either/IO records | **Partial / ergonomic difference.** No optional lens/Plutus/cardano-api instance packages or drop-in MonadBlockchain/GYTxMonad interpreters. Existing record injection is a deliberate interface choice, not source compatibility. Add only invariant-preserving adapters; unsafe constructors, partial lookup functions and printable secret instances are not required to imitate upstream. |
 
-## Minimum feature set and nice-to-have backlog
+## Delivery scope: native coverage and idiomatic transaction construction
 
-Prioritize completion of ordinary wallet, transaction and governance workflows.
-The broader comparison is a reference inventory, not a requirement to reproduce
-every upstream convenience API. The following minimum is the proposed delivery
-baseline; nice-to-have items do not block that baseline. Excluded infrastructure
-remains excluded. Existing applicable cardano-c domain coverage remains required.
+The maintainer narrowed the delivery scope on 2026-11-07 to all application-facing
+capabilities already offered by cardano-c, complete transaction construction for
+its supported eras, and small conveniences that make the Haskell workflows
+succinct. The upstream comparison remains useful design evidence, not a mandate
+to reproduce other libraries' features.
 
-| Minimum remaining capability | Concrete scope | Implementation home |
-| --- | --- | --- |
-| Complete transaction construction | Current-treasury-value setter and custom/deferred proposing redeemers at supported transaction levels. Existing signing, balancing, script and governance workflows remain supported. | Shared builder additions in cardano-c; idiomatic binding entrypoints. |
-| Essential standards codecs | Checked CIP-105/129 governance identifiers and standalone checked Value CBOR. Audit/reuse existing C operations before adding new ones. | Native standards implementation and binding adapters; pure language-level value helpers where appropriate. |
-| State queries needed by those workflows | Current tip/slot, stake and DRep registration/deposits, active pool checks, voting-target status/expiry and constitution policy. Applications should not need ad hoc HTTP outside the provider for the shipped governance examples. | Binding transport and public query contracts; shared native domain types where useful. New C provider capabilities only when native consumers need them. |
-| Actionable failures | Structured submission rejection and useful evaluation failure details, with operation context and no credential leakage. Full successful-execution tracing/profiling is not required. | Native evaluator diagnostics; provider-specific response decoding in the binding. |
+| Required work | Acceptance |
+| --- | --- |
+| Complete transaction construction | Cover every supported body/witness field and script purpose at valid transaction levels. Add current-treasury-value and explicit/deferred proposing redeemers to the shared native builders, then expose them in Haskell. Preserve low-level assembly for constructions outside balancing conveniences. |
+| Existing native domain coverage | Reconcile every remaining native ledger entry against a public operation, a tested Haskell equivalent, or a specific justified omission. Finish standalone Value CBOR, governance identifier text and other existing domain operations. Do not expose native lifetime or mutable-container plumbing as public API. |
+| Small Haskell conveniences | Use composable plans, ordinary values/collections, total assembly after checked input, and one natural error boundary. Add helpers only when complete caller examples demonstrate less ceremony. The separately deferred typed/deferred-redeemer redesign remains deferred. |
+| Construction and lifecycle evidence | Test supported field combinations, top/sub restrictions, reference scripts, immediate/deferred redeemers, signing, witness merging and cancellation/cleanup. Compare native CBOR/hash/results and independent vectors where available. |
+| Usable examples and documentation | The README demonstrates payments, assets, scripts, staking, Conway governance and Dijkstra features with actual APIs, links to full programs, and accurately states validation boundaries. |
 
-Nice to have, without blocking the minimum:
+Additional provider queries, new standards codecs absent from C, blueprints,
+upstream interoperability packages, CIP-8 verification, advanced VM tooling,
+transaction-chain orchestration and alternative wallet algorithms are optional
+future work, not completion requirements. Seed generation and larger infrastructure
+remain explicitly excluded. Existing provider injection, local evaluation, signing
+and Blockfrost functionality remain supported.
 
-- cardano-cli text envelopes, broader JSON interchange and general CBOR convenience APIs.
-- Extra Value algebra, per-address balance summaries, transaction chaining and automatic signer-choice analysis.
-- Bulk/historical queries, mempool and pending-spend helpers, richer era-history utilities and governance poll helpers.
-- Typed datum/redeemer deriving, blueprint import/schema validation/code generation, and cardano-api/Plutus interoperability packages. Previously deferred ergonomic improvements remain deferred.
-- Non-Data UPLC parameter application and public program-level tooling.
-- Configurable VM ceilings, successful trace collection and profiling; broader remote evaluation compatibility.
-- CIP-8 verification is a proposed new capability, not existing native coverage or a minimum requirement. Signing already exists. Any future verification contract must define address/key-binding checks.
-- Multilingual mnemonic dictionaries, legacy/hardware derivation variants from supplied key material, shared-wallet templates and identifiers, KES/VRF/BLS secret-key operations, and advanced COSE modes. Seed generation remains excluded.
-- Optional optics, framework instances and drop-in upstream effect adapters.
-
-Verification is required across the minimum: independent standard vectors,
-invalid-input/boundary tests, ownership and cancellation checks, and complete
-caller workflows. Dijkstra live validation remains a prerequisite for claiming
-network readiness once an appropriate network is available; it is not replaced
-by offline tests. Exact cross-library Dijkstra compatibility requires its own
-pinned comparisons before making that claim.
+“All constructions” means those supported by cardano-c's targeted eras, not every
+historical or prospective ledger rule. Binding correspondence does not establish
+ledger acceptance. Dijkstra network readiness requires live validation on an
+appropriate network; offline fixtures do not replace it.
 
 ## Reviewed primary source catalog
 

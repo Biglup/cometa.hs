@@ -43,6 +43,8 @@ module Cometa.Script.Native
     view,
     encodeCbor,
     decodeCbor,
+    toJson,
+    fromJson,
 
     -- * Script hash
     hash,
@@ -59,7 +61,12 @@ import Cometa.Credential (Credential, Guard, KeyHash, Payment, ScriptHash)
 import qualified Cometa.Credential as Credential
 import qualified Cometa.Crypto.Blake2b as Blake2b
 import Cometa.Error (Error (..))
+import qualified Cometa.Internal.Hex as Hex
 import Control.Monad (replicateM, unless)
+import Data.Aeson ((.:), (.=))
+import qualified Data.Aeson as Aeson
+import qualified Data.Aeson.KeyMap as KeyMap
+import qualified Data.Aeson.Types as Aeson
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as ByteString
 import qualified Data.ByteString.Lazy as Lazy
@@ -261,3 +268,55 @@ decodeBytes = do
         else do
           chunk <- Decode.decodeBytes
           loop (chunk : accumulated)
+
+-- | Export the native script JSON construction schema, shared with cardano-api
+-- for signatures, all/any/atLeast and before/after. Dijkstra guards use
+-- @{"type":"guard","keyHash":"..."}@ or @"scriptHash"@ as accepted by
+-- cardano-c. Numbers are unsigned JSON integers and hashes are lowercase hex.
+-- This describes semantic conditions, so importing it creates fresh CBOR and
+-- does not retain an imported script's original encoding or hash identity.
+-- This construction schema is distinct from CIP-116 inspection JSON.
+toJson :: NativeScript -> Aeson.Value
+toJson script = case view script of
+  RequireSignature key -> Aeson.object ["type" .= ("sig" :: Text.Text), "keyHash" .= Hex.encodeHex (Credential.keyHashBytes key)]
+  RequireAll children -> childrenObject "all" children []
+  RequireAny children -> childrenObject "any" children []
+  RequireAtLeast required children -> childrenObject "atLeast" children ["required" .= required]
+  InvalidBefore slot -> Aeson.object ["type" .= ("after" :: Text.Text), "slot" .= slot]
+  InvalidAfter slot -> Aeson.object ["type" .= ("before" :: Text.Text), "slot" .= slot]
+  RequireGuard credential ->
+    Aeson.object
+      ( ["type" .= ("guard" :: Text.Text)] <> case credential of
+          Credential.KeyCredential credentialHash -> ["keyHash" .= Hex.encodeHex (Credential.keyHashBytes credentialHash)]
+          Credential.ScriptCredential credentialHash -> ["scriptHash" .= Hex.encodeHex (Credential.scriptHashBytes credentialHash)]
+      )
+  where
+    childrenObject kind children fields = Aeson.object (["type" .= (kind :: Text.Text), "scripts" .= map toJson children] <> fields)
+
+-- | Import native script construction JSON. Required fields and hash lengths
+-- are validated, thresholds and slots must be unsigned 64-bit integers, and
+-- children preserve order and duplicates. A guard requires exactly one of
+-- @keyHash@ or @scriptHash@. Other object fields are ignored. Invalid input
+-- returns 'InvalidScriptJson'. Valid but unsatisfiable thresholds are retained.
+-- Fresh definite CBOR is assembled; original JSON/CBOR encoding is not retained.
+fromJson :: Aeson.Value -> Either Error NativeScript
+fromJson = either (Left . InvalidScriptJson . Text.pack) Right . Aeson.parseEither parseScript
+  where
+    parseScript = Aeson.withObject "native script" $ \fields -> do
+      kind <- fields .: "type"
+      case (kind :: Text.Text) of
+        "sig" -> signature <$> (fields .: "keyHash" >>= parseKey)
+        "all" -> allOf <$> parseChildren fields
+        "any" -> anyOf <$> parseChildren fields
+        "atLeast" -> atLeast <$> fields .: "required" <*> parseChildren fields
+        "after" -> invalidBefore <$> fields .: "slot"
+        "before" -> invalidAfter <$> fields .: "slot"
+        "guard" ->
+          requireGuard <$> case (KeyMap.lookup "keyHash" fields, KeyMap.lookup "scriptHash" fields) of
+            (Just key, Nothing) -> Credential.KeyCredential <$> (Aeson.parseJSON key >>= parseKey)
+            (Nothing, Just hashValue) -> Credential.ScriptCredential <$> (Aeson.parseJSON hashValue >>= parseHash >>= either (fail . show) pure . Credential.scriptHashFromBytes)
+            _ -> fail "guard requires exactly one keyHash or scriptHash"
+        _ -> fail "unknown native script type"
+    parseChildren fields = fields .: "scripts" >>= traverse parseScript
+    parseKey text = parseHash text >>= either (fail . show) pure . Credential.keyHashFromBytes
+    parseHash text = maybe (fail "invalid hash hexadecimal") pure (Hex.decodeHex text)

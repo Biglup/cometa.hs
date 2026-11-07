@@ -7,8 +7,10 @@ reviewed. The local read-only snapshot recorded the same revision in
 `SOURCE_REVISION`. No encrypted funded-wallet fixture or private seed from that
 snapshot was copied into the Haskell runners.
 
-The underlying cardano-c dependency remains pinned to
-`eadb95cd3ca7f711c203d7f2f4ee21c150d4d7f1`. Existing Haskell
+The live evidence below used cardano-c
+`eadb95cd3ca7f711c203d7f2f4ee21c150d4d7f1`. The current dependency is recorded in
+`native/cardano-c.ref`; the construction completion revision has separate offline
+validation and does not inherit a claim of new on-chain execution. Existing Haskell
 `Workflows.Native` and `Workflows.NativeScripts` were inspected against the C++
 caller workflows before reuse. Exact comparisons confirm that the 1,941-byte V2
 reward program and 432-byte V3 withdrawal program match the corresponding C++

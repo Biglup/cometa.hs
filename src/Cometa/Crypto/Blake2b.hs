@@ -39,17 +39,26 @@ module Cometa.Crypto.Blake2b
     -- * Inspection
     toBytes,
     toHex,
+
+    -- * CBOR
+    encodeCbor,
+    decodeCbor,
   )
 where
 
 -- IMPORTS --------------------------------------------------------------------
 
+import qualified Codec.CBOR.Encoding as E
+import qualified Codec.CBOR.Read as R
+import qualified Codec.CBOR.Term as T
+import qualified Codec.CBOR.Write as W
 import Cometa.Error (Error (..))
 import Cometa.Internal.Error (fromNativeFailure)
 import qualified Cometa.Internal.FFI.Native as Native
 import Cometa.Internal.Ownership (copyHashResult)
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as ByteString
+import qualified Data.ByteString.Lazy as Lazy
 import Data.Char (isDigit)
 import Data.Text (Text)
 import qualified Data.Text as Text
@@ -132,3 +141,20 @@ hexDigit character
   | otherwise = Nothing
   where
     offset start = fromIntegral (fromEnum character - fromEnum start)
+
+-- | Encode the digest as one definite-length CBOR byte string.
+encodeCbor :: Blake2bHash -> ByteString
+encodeCbor = W.toStrictByteString . E.encodeBytes . toBytes
+
+-- | Import exactly one nonempty CBOR byte string without hashing it. Definite
+-- and indefinite byte strings are accepted; invalid CBOR, other types and
+-- trailing data return 'InvalidHashCbor'. Empty bytes return 'EmptyHash'.
+decodeCbor :: ByteString -> Either Error Blake2bHash
+decodeCbor bytes = case R.deserialiseFromBytes T.decodeTerm (Lazy.fromStrict bytes) of
+  Left failure -> Left (InvalidHashCbor (Text.pack (show failure)))
+  Right (rest, term)
+    | not (Lazy.null rest) -> Left (InvalidHashCbor "Trailing digest CBOR")
+    | otherwise -> case term of
+        T.TBytes value -> fromBytes value
+        T.TBytesI value -> fromBytes (Lazy.toStrict value)
+        _ -> Left (InvalidHashCbor "Expected digest byte string")

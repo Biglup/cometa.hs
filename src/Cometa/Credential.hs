@@ -1,3 +1,4 @@
+{-# LANGUAGE OverloadedStrings #-}
 -- Copyright 2026 Biglup Labs
 -- SPDX-License-Identifier: Apache-2.0
 --
@@ -44,16 +45,24 @@ module Cometa.Credential
     scriptHashBytes,
     Credential (..),
     fromPublicKey,
+    encodeCbor,
+    decodeCbor,
   )
 where
 
 -- IMPORTS --------------------------------------------------------------------
 
+import qualified Codec.CBOR.Encoding as E
+import qualified Codec.CBOR.Read as R
+import qualified Codec.CBOR.Term as T
+import qualified Codec.CBOR.Write as W
 import qualified Cometa.Crypto.Blake2b as Blake2b
 import qualified Cometa.Crypto.Ed25519.PublicKey as PublicKey
-import Cometa.Error (Error (InvalidCredentialHashLength))
+import Cometa.Error (Error (InvalidCredentialCbor, InvalidCredentialHashLength))
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as ByteString
+import qualified Data.ByteString.Lazy as Lazy
+import qualified Data.Text as Text
 
 -- TYPES ----------------------------------------------------------------------
 
@@ -135,3 +144,35 @@ validateHash bytes
 -- 'Cometa.Error.NativeContractViolation'.
 fromPublicKey :: PublicKey.PublicKey -> IO (Either Error (Credential purpose))
 fromPublicKey publicKey = fmap (fmap (KeyCredential . KeyHash . Blake2b.toBytes)) (PublicKey.hash publicKey)
+
+-- | Encode the credential kind and 28-byte hash as a two-element CBOR array.
+-- This produces a fresh definite-length encoding; it does not hash the value.
+encodeCbor :: Credential purpose -> ByteString
+encodeCbor credential =
+  W.toStrictByteString $
+    E.encodeListLen 2 <> case credential of
+      KeyCredential hash -> E.encodeWord 0 <> E.encodeBytes (keyHashBytes hash)
+      ScriptCredential hash -> E.encodeWord 1 <> E.encodeBytes (scriptHashBytes hash)
+
+-- | Decode exactly one credential array, checking its kind and hash length.
+-- Definite and indefinite arrays and byte strings are accepted. Trailing data
+-- and other shapes return 'InvalidCredentialCbor'; invalid hash lengths return
+-- 'InvalidCredentialHashLength'. The result type selects the credential role.
+decodeCbor :: ByteString -> Either Error (Credential purpose)
+decodeCbor bytes = case R.deserialiseFromBytes T.decodeTerm (Lazy.fromStrict bytes) of
+  Left failure -> Left (InvalidCredentialCbor (Text.pack (show failure)))
+  Right (rest, term)
+    | not (Lazy.null rest) -> Left (InvalidCredentialCbor "Trailing credential CBOR")
+    | otherwise -> case term of
+        T.TList values -> decodeFields values
+        T.TListI values -> decodeFields values
+        _ -> Left (InvalidCredentialCbor "Expected credential array")
+  where
+    decodeFields [T.TInt kind, hash] = case hash of
+      T.TBytes value -> construct kind value
+      T.TBytesI value -> construct kind (Lazy.toStrict value)
+      _ -> Left (InvalidCredentialCbor "Expected credential hash bytes")
+    decodeFields _ = Left (InvalidCredentialCbor "Expected credential kind and hash")
+    construct 0 value = KeyCredential <$> keyHashFromBytes value
+    construct 1 value = ScriptCredential <$> scriptHashFromBytes value
+    construct _ _ = Left (InvalidCredentialCbor "Unknown credential kind")

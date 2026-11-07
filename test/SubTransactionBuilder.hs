@@ -54,6 +54,7 @@ import qualified Cometa.SlotConfig as Slots
 import qualified Cometa.SubTransaction as Sub
 import qualified Cometa.SubTransaction.Body as SubBody
 import qualified Cometa.SubTransaction.Builder as Builder
+import qualified Cometa.SubTransaction.Indices as Indices
 import qualified Cometa.SubTransaction.Plan as Plan
 import qualified Cometa.Transaction as Tx
 import qualified Cometa.Transaction.Body as Body
@@ -61,6 +62,7 @@ import qualified Cometa.Transaction.Builder as TopBuilder
 import qualified Cometa.Transaction.Building as Building
 import qualified Cometa.Transaction.Datum as Datum
 import qualified Cometa.Transaction.Fields as Fields
+import qualified Cometa.Transaction.Indices as TopIndices
 import qualified Cometa.Transaction.Input as Input
 import qualified Cometa.Transaction.Output as Output
 import qualified Cometa.Transaction.Plan as TopPlan
@@ -99,6 +101,7 @@ tests =
       testCase "reference scripts resolve from explicit reference inputs" references,
       testCase "guards, account operations and treasury donation survive building" dijkstraFields,
       testCase "all seven proposal constructors use protocol deposits" proposals,
+      testCase "proposals support explicit and deferred local arguments" proposalArguments,
       testCase "grouped voting redeemers run once per local voter" voting,
       testCase "deferred snapshots and indices are local and invoked once" localDraft,
       testCase "conflicts, invalid language and schedule errors are total" invalid,
@@ -194,7 +197,7 @@ localDraft = do
   Witnesses.datums (Witnesses.toWitnesses (Sub.witnesses sub)) @?= [datum]
 
 encoded :: Plan.Plan -> B.ByteString
-encoded = Common.encodePlan . InternalPlan.toPlan
+encoded = Common.encodePlan 0 . InternalPlan.toPlan
 
 invalid :: IO ()
 invalid = do
@@ -452,3 +455,32 @@ uniqueDatums = do
     Witnesses.datums (Witnesses.toWitnesses (Sub.witnesses sub)) @?= [imported, canonical]
   Builder.build config (Plan.spendWith first Nothing (Just imported) <> Plan.spendWith first Nothing (Just canonical) <> Plan.payTo output)
     >>= (@?= Left (InvalidTransactionPlan "Conflicting requirements for one spending input"))
+
+proposalArguments :: IO ()
+proposalArguments = do
+  baseline <- Runtime.liveContexts
+  (config, _, _) <- fixture
+  (account, anchor) <- accountFixture
+  (script, _) <- scriptFixture
+  policy <- Plutus.hash script >>= must
+  let deposit = 100000
+      configured = config {Builder.parameters = (Builder.parameters config) {P.parameterGovernanceActionDeposit = Just deposit}}
+      action = Action.ParameterChange Nothing Update.empty (Just policy)
+      proposal = Proposal.Proposal deposit account action anchor
+      immediate = Data.fromData (Data.Integer 17)
+      callback draft _ = case TopIndices.findProposal proposal draft of
+        Nothing -> Left (InvalidTransactionPlan "Local proposal absent from draft")
+        Just index -> Right (Data.fromData (Data.Integer (toInteger index)))
+      prefix = Plan.attachScript (Script.Plutus script) <> Plan.propose account Action.InfoAction anchor
+  sub <- Builder.build configured (prefix <> Plan.proposeWithDeferredRedeemer account action anchor callback) >>= must
+  map Redeemer.purpose (redeemers sub) @?= [Redeemer.Proposing]
+  map Redeemer.index (redeemers sub) @?= [1]
+  map Redeemer.argument (redeemers sub) @?= [Data.fromData (Data.Integer 1)]
+  Indices.findProposal proposal sub @?= Just 1
+  explicit <- Builder.build configured (prefix <> Plan.proposeWithRedeemer account action anchor immediate) >>= must
+  map Redeemer.argument (redeemers explicit) @?= [immediate]
+  policyless <- Builder.build configured (Plan.propose account (Action.ParameterChange Nothing Update.empty Nothing) anchor) >>= must
+  redeemers policyless @?= []
+  let failure = InvalidTransactionPlan "Local proposal callback refused draft"
+  Builder.build configured (prefix <> Plan.proposeWithDeferredRedeemer account action anchor (\_ _ -> Left failure)) >>= (@?= Left failure)
+  Runtime.liveContexts >>= (@?= baseline)

@@ -20,6 +20,7 @@ module Governance (tests) where
 
 -- IMPORTS --------------------------------------------------------------------
 
+import qualified Codec.Binary.Bech32 as Bech32
 import qualified Cometa.Credential as Credential
 import Cometa.Error (Error (..))
 import qualified Cometa.Governance.ActionId as ActionId
@@ -36,7 +37,7 @@ import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
 import Data.Word (Word64, Word8)
 import qualified Fixtures.Governance as Fixtures
-import Foreign.C.Types (CInt (..), CSize (..), CUInt (..))
+import Foreign.C.Types (CChar, CInt (..), CSize (..), CUInt (..))
 import Foreign.Ptr (Ptr, castPtr)
 import Hedgehog (Property, evalEither, evalIO, forAll, property, (===))
 import qualified Hedgehog.Gen as Gen
@@ -51,7 +52,9 @@ tests :: TestTree
 tests =
   testGroup
     "Governance"
-    [ testCase "public values reconstruct pinned anchors, actions, DReps and choices" checkPinnedScalars,
+    [ testCase "DRep text imports CIP-105 and exports checked CIP-129 credentials" checkDRepText,
+      testCase "CIP-129 action text checks one-byte indices and native correspondence" checkActionText,
+      testCase "public values reconstruct pinned anchors, actions, DReps and choices" checkPinnedScalars,
       testCase "all voter authorities and native ordering agree" checkVoters,
       testCase "public nested collection reconstructs pinned native voting corpus" checkPinnedVoting,
       testCase "URL and identity validation enforce byte bounds" checkValidation,
@@ -315,3 +318,59 @@ expectRight result = case result of
 
 foreign import ccall safe "cometa_test_governance_agreement"
   cAgreement :: CUInt -> Ptr Word8 -> CSize -> IO CInt
+
+checkActionText :: IO ()
+checkActionText = do
+  forM_ [0, 1, 255] $ \actionIndex -> do
+    action <- actionWith 7 actionIndex
+    encoded <- expectRight (ActionId.toText action)
+    ActionId.fromText encoded @?= Right action
+    ActionId.fromText (Text.toUpper encoded) @?= Right action
+    ByteString.useAsCString (TransactionId.toBytes (ActionId.transactionId action)) $ \hash ->
+      ByteString.useAsCStringLen (Text.encodeUtf8 encoded) $ \(textPtr, size) -> do
+        agrees <- cActionText (castPtr hash) (fromIntegral actionIndex) textPtr (fromIntegral size)
+        agrees @?= 1
+  forM_ [256, 65535, maxBound] $ \actionIndex -> do
+    action <- actionWith 0 actionIndex
+    ActionId.toText action @?= Left (InvalidGovernanceActionTextIndex actionIndex)
+    ActionId.decodeCbor (ActionId.encodeCbor action) @?= Right action
+  prefix <- expectRight (Bech32.humanReadablePartFromText "gov_action")
+  wrongPrefix <- expectRight (Bech32.humanReadablePartFromText "stake")
+  let invalidPayload size = Bech32.encodeLenient prefix (Bech32.dataPartFromBytes (ByteString.replicate size 0))
+  forM_ ["", "gov_action1invalid", invalidPayload 32, invalidPayload 34, Bech32.encodeLenient wrongPrefix (Bech32.dataPartFromBytes (ByteString.replicate 33 0))] $ \encoded ->
+    assertBool "reject malformed action identity" (isLeft (ActionId.fromText encoded))
+  action <- actionWith 0 0
+  encoded <- expectRight (ActionId.toText action)
+  assertBool "checksum alteration" (isLeft (ActionId.fromText (Text.init encoded <> if Text.last encoded == 'q' then "p" else "q")))
+  assertBool "mixed case" (isLeft (ActionId.fromText ("G" <> Text.drop 1 encoded)))
+
+foreign import ccall safe "cometa_test_action_text"
+  cActionText :: Ptr Word8 -> Word8 -> Ptr CChar -> CSize -> IO CInt
+
+checkDRepText :: IO ()
+checkDRepText = do
+  let hash = ByteString.replicate 28 0xab
+  key <- Credential.KeyCredential <$> expectRight (Credential.keyHashFromBytes hash)
+  script <- Credential.ScriptCredential <$> expectRight (Credential.scriptHashFromBytes hash)
+  forM_ [(False, key, "drep"), (True, script, "drep_script")] $ \(isScript, credential, legacyPrefix) -> do
+    let drep = DRep.DRepCredential credential
+    canonical <- expectRight (DRep.toText drep)
+    DRep.fromText canonical @?= Right drep
+    DRep.fromText (Text.toUpper canonical) @?= Right drep
+    prefix <- expectRight (Bech32.humanReadablePartFromText legacyPrefix)
+    let legacy = Bech32.encodeLenient prefix (Bech32.dataPartFromBytes hash)
+    DRep.fromText legacy @?= Right drep
+    forM_ [(True, canonical), (False, legacy)] $ \(isCanonical, encoded) ->
+      ByteString.useAsCString hash $ \hashPtr ->
+        ByteString.useAsCStringLen (Text.encodeUtf8 encoded) $ \(textPtr, size) -> do
+          agrees <- cDRepText (castPtr hashPtr) (if isScript then 1 else 0) textPtr (fromIntegral size) (if isCanonical then 1 else 0)
+          agrees @?= 1
+  forM_ [DRep.AlwaysAbstain, DRep.AlwaysNoConfidence] $ \drep -> assertBool "special targets have no credential identifier" (isLeft (DRep.toText drep))
+  prefix <- expectRight (Bech32.humanReadablePartFromText "drep")
+  lookalike <- expectRight (Bech32.humanReadablePartFromText "drep_extra")
+  let encoded payload = Bech32.encodeLenient prefix (Bech32.dataPartFromBytes payload)
+  forM_ ["", "drep1bad", encoded (ByteString.replicate 27 0), encoded (ByteString.replicate 30 0), encoded (ByteString.cons 0x12 hash), encoded (ByteString.cons 0x24 hash), Bech32.encodeLenient lookalike (Bech32.dataPartFromBytes hash)] $ \text ->
+    assertBool "invalid DRep prefix/header/checksum/length" (isLeft (DRep.fromText text))
+
+foreign import ccall safe "cometa_test_drep_text"
+  cDRepText :: Ptr Word8 -> CInt -> Ptr CChar -> CSize -> CInt -> IO CInt

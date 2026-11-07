@@ -212,133 +212,12 @@ cleanup:
   return result;
 }
 
-/* Proposal conversion/getters return retained references; each helper releases
- * them after the native builder has retained its independently built proposal.
- * The placeholder serialized deposit is intentionally replaced by protocol state. */
-static cardano_error_t
-apply_proposal(cardano_tx_builder_t* builder, cardano_proposal_procedure_t* proposal)
-{
-  cardano_reward_address_t*        account = cardano_proposal_procedure_get_reward_address(proposal);
-  cardano_anchor_t*                anchor  = cardano_proposal_procedure_get_anchor(proposal);
-  cardano_governance_action_type_t kind;
-  cardano_error_t                  result = cardano_proposal_procedure_get_action_type(proposal, &kind);
-  if (result == CARDANO_SUCCESS)
-  {
-    switch (kind)
-    {
-      case 0:
-      {
-        cardano_parameter_change_action_t* action = NULL;
-        result                                    = cardano_proposal_procedure_to_parameter_change_action(proposal, &action);
-        if (result == CARDANO_SUCCESS)
-        {
-          cardano_protocol_param_update_t* protocol_param_update = cardano_parameter_change_action_get_protocol_param_update(action);
-          cardano_governance_action_id_t*  governance_action_id  = cardano_parameter_change_action_get_governance_action_id(action);
-          cardano_blake2b_hash_t*          policy_hash           = cardano_parameter_change_action_get_policy_hash(action);
-          cardano_tx_builder_propose_parameter_change(builder, account, anchor, protocol_param_update, governance_action_id, policy_hash);
-          cardano_protocol_param_update_unref(&protocol_param_update);
-          cardano_governance_action_id_unref(&governance_action_id);
-          cardano_blake2b_hash_unref(&policy_hash);
-        }
-        cardano_parameter_change_action_unref(&action);
-        break;
-      }
-      case 1:
-      {
-        cardano_hard_fork_initiation_action_t* action = NULL;
-        result                                        = cardano_proposal_procedure_to_hard_fork_initiation_action(proposal, &action);
-        if (result == CARDANO_SUCCESS)
-        {
-          cardano_protocol_version_t*     protocol_version     = cardano_hard_fork_initiation_action_get_protocol_version(action);
-          cardano_governance_action_id_t* governance_action_id = cardano_hard_fork_initiation_action_get_governance_action_id(action);
-          cardano_tx_builder_propose_hardfork(builder, account, anchor, protocol_version, governance_action_id);
-          cardano_protocol_version_unref(&protocol_version);
-          cardano_governance_action_id_unref(&governance_action_id);
-        }
-        cardano_hard_fork_initiation_action_unref(&action);
-        break;
-      }
-      case 2:
-      {
-        cardano_treasury_withdrawals_action_t* action = NULL;
-        result                                        = cardano_proposal_procedure_to_treasury_withdrawals_action(proposal, &action);
-        if (result == CARDANO_SUCCESS)
-        {
-          cardano_withdrawal_map_t* withdrawals = cardano_treasury_withdrawals_action_get_withdrawals(action);
-          cardano_blake2b_hash_t*   policy_hash = cardano_treasury_withdrawals_action_get_policy_hash(action);
-          cardano_tx_builder_propose_treasury_withdrawals(builder, account, anchor, withdrawals, policy_hash);
-          cardano_withdrawal_map_unref(&withdrawals);
-          cardano_blake2b_hash_unref(&policy_hash);
-        }
-        cardano_treasury_withdrawals_action_unref(&action);
-        break;
-      }
-      case 3:
-      {
-        cardano_no_confidence_action_t* action = NULL;
-        result                                 = cardano_proposal_procedure_to_no_confidence_action(proposal, &action);
-        if (result == CARDANO_SUCCESS)
-        {
-          cardano_governance_action_id_t* governance_action_id = cardano_no_confidence_action_get_governance_action_id(action);
-          cardano_tx_builder_propose_no_confidence(builder, account, anchor, governance_action_id);
-          cardano_governance_action_id_unref(&governance_action_id);
-        }
-        cardano_no_confidence_action_unref(&action);
-        break;
-      }
-      case 4:
-      {
-        cardano_update_committee_action_t* action = NULL;
-        result                                    = cardano_proposal_procedure_to_update_committee_action(proposal, &action);
-        if (result == CARDANO_SUCCESS)
-        {
-          cardano_governance_action_id_t*  governance_action_id  = cardano_update_committee_action_get_governance_action_id(action);
-          cardano_credential_set_t*        members_to_be_removed = cardano_update_committee_action_get_members_to_be_removed(action);
-          cardano_committee_members_map_t* members_to_be_added   = cardano_update_committee_action_get_members_to_be_added(action);
-          cardano_unit_interval_t*         quorum                = cardano_update_committee_action_get_quorum(action);
-          cardano_tx_builder_propose_update_committee(builder, account, anchor, governance_action_id, members_to_be_removed, members_to_be_added, quorum);
-          cardano_governance_action_id_unref(&governance_action_id);
-          cardano_credential_set_unref(&members_to_be_removed);
-          cardano_committee_members_map_unref(&members_to_be_added);
-          cardano_unit_interval_unref(&quorum);
-        }
-        cardano_update_committee_action_unref(&action);
-        break;
-      }
-      case 5:
-      {
-        cardano_new_constitution_action_t* action = NULL;
-        result                                    = cardano_proposal_procedure_to_constitution_action(proposal, &action);
-        if (result == CARDANO_SUCCESS)
-        {
-          cardano_governance_action_id_t* governance_action_id = cardano_new_constitution_action_get_governance_action_id(action);
-          cardano_constitution_t*         constitution         = cardano_new_constitution_action_get_constitution(action);
-          cardano_tx_builder_propose_new_constitution(builder, account, anchor, governance_action_id, constitution);
-          cardano_governance_action_id_unref(&governance_action_id);
-          cardano_constitution_unref(&constitution);
-        }
-        cardano_new_constitution_action_unref(&action);
-        break;
-      }
-      case 6:
-        cardano_tx_builder_propose_info(builder, account, anchor);
-        break;
-      default:
-        result = CARDANO_ERROR_DECODING;
-        break;
-    }
-  }
-  cardano_reward_address_unref(&account);
-  cardano_anchor_unref(&anchor);
-  return result;
-}
-
 /** \brief Apply one instruction, releasing local references after builder retention. */
 static cardano_error_t
 instruction(cardano_tx_builder_t* builder, cardano_cbor_reader_t* reader, cardano_utxo_list_t* resolved, deferred_context_t* contexts, size_t position)
 {
   deferred_context_t*                 context   = &contexts[position];
-  static const int64_t                arities[] = { 2, 4, 2, 2, 5, 3, 2, 3, 4, 2, 2, 2, 4, 5, 3, 4, 3, 0, 3, 3, 3, 2, 2, 5, 5, 3 };
+  static const int64_t                arities[] = { 2, 4, 2, 2, 5, 3, 2, 3, 4, 2, 2, 2, 4, 5, 3, 4, 3, 0, 3, 3, 3, 2, 3, 5, 5, 3, 0, 2, 3 };
   int64_t                             count     = 0;
   uint64_t                            tag = 0U, number = 0U;
   int64_t                             signed_number = 0;
@@ -553,8 +432,18 @@ instruction(cardano_tx_builder_t* builder, cardano_cbor_reader_t* reader, cardan
       cardano_tx_builder_set_donation(builder, number);
       break;
     case 22:
+    case 28:
       TRY(read_proposal(reader, &proposal));
-      TRY(apply_proposal(builder, proposal));
+      if (tag == 28U)
+      {
+        TRY(cardano_cbor_reader_read_uint(reader, &context->index));
+        cardano_tx_builder_add_proposal_with_deferred_redeemer(builder, proposal, deferred_callback, context);
+      }
+      else
+      {
+        TRY(read_data(reader, &redeemer));
+        cardano_tx_builder_add_proposal(builder, proposal, redeemer);
+      }
       break;
     case 23:
     case 24:
@@ -587,6 +476,10 @@ instruction(cardano_tx_builder_t* builder, cardano_cbor_reader_t* reader, cardan
         TRY(read_data(reader, &redeemer));
         cardano_tx_builder_vote(builder, voter, action_id, procedure, redeemer);
       }
+      break;
+    case 27:
+      TRY(cardano_cbor_reader_read_uint(reader, &number));
+      cardano_tx_builder_set_current_treasury_value(builder, number);
       break;
     case 25:
       TRY(read_sub(reader, &sub));

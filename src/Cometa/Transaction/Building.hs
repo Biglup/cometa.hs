@@ -12,6 +12,7 @@
 -- WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
+{-# LANGUAGE OverloadedStrings #-}
 
 -- | Standalone transaction building calculations. Obtain a protocol snapshot,
 -- assemble outputs and witnesses, evaluate scripts, then calculate commitments
@@ -23,9 +24,15 @@
 -- priceOutput output = Building.minimumAda 4310 output
 -- @
 module Cometa.Transaction.Building
-  ( minimumAda,
+  ( coinSize,
+    outputSize,
+    scriptSize,
+    transactionSize,
+    totalExecutionUnits,
+    minimumAda,
     baseFee,
     minimumFee,
+    executionFee,
     referenceScriptFee,
     scriptDataHash,
     ImplicitCoin (..),
@@ -40,22 +47,68 @@ where
 
 -- IMPORTS --------------------------------------------------------------------
 
-import Cometa.Error (Error)
+import qualified Codec.CBOR.Encoding as Encode
+import qualified Codec.CBOR.Write as Write
+import Cometa.Error (Error (InvalidBuildingRequest))
 import qualified Cometa.Internal.Balance as Balance
 import Cometa.Internal.Building (ImplicitCoin (..))
 import qualified Cometa.Internal.Building as Internal
 import Cometa.Protocol.CostModels (CostModels)
+import qualified Cometa.Protocol.ExUnitPrices as Prices
+import qualified Cometa.Protocol.ExUnits as ExUnits
 import Cometa.Protocol.Parameters (Parameters)
+import qualified Cometa.Protocol.Rational as Rational
+import qualified Cometa.Script as Script
+import qualified Cometa.Script.Native as NativeScript
+import qualified Cometa.Script.Plutus as PlutusScript
 import Cometa.SubTransaction (SubTransaction)
 import Cometa.Transaction (Transaction)
+import qualified Cometa.Transaction as Tx
 import Cometa.Transaction.Datum (Hash32)
 import Cometa.Transaction.Output (Output)
+import qualified Cometa.Transaction.Output as Output
+import qualified Cometa.Transaction.Redeemer as Redeemer
 import Cometa.Transaction.Utxo (Utxo)
 import Cometa.Transaction.Witnesses (EncodedWitnesses)
 import Cometa.Value (Value)
+import qualified Data.ByteString as ByteString
 import Data.Word (Word64)
 
 -- DEFINITIONS ----------------------------------------------------------------
+
+-- | Size in bytes of the shortest unsigned CBOR encoding of a lovelace amount.
+-- Zero through 23 require one byte; every unsigned 64-bit amount is supported.
+coinSize :: Word64 -> Int
+coinSize = ByteString.length . Write.toStrictByteString . Encode.encodeWord64
+
+-- | Size in bytes of this output's public CBOR encoding, including its value,
+-- datum and reference script. Does not calculate the minimum required Ada.
+outputSize :: Output -> Int
+outputSize = ByteString.length . Output.encodeCbor
+
+-- | Script size in bytes charged by reference-script pricing. Native scripts
+-- use their exact CBOR; Plutus scripts use their compiled bytes without the
+-- outer CBOR bytestring or the language-tag envelope.
+scriptSize :: Script.Script -> Int
+scriptSize script = case script of
+  Script.Native native -> ByteString.length (NativeScript.encodeCbor native)
+  Script.Plutus plutus -> ByteString.length (PlutusScript.toBytes plutus)
+
+-- | Complete encoded transaction size in bytes, including the validity flag
+-- when present, actual witnesses and auxiliary data. This is not the ledger
+-- size used by 'baseFee', which excludes the validity flag.
+transactionSize :: Transaction -> Int
+transactionSize = ByteString.length . Tx.encodeCbor
+
+-- | Sum declared memory units and CPU steps without executing scripts. Counts
+-- every supplied redeemer, including repeated purpose/index pairs. Empty input
+-- returns zero. Either total exceeding 2^64-1 returns 'Cometa.Error.InvalidExUnits'
+-- rather than wrapping. Nested transaction redeemers must be supplied explicitly.
+totalExecutionUnits :: [Redeemer.Redeemer] -> Either Error ExUnits.ExUnits
+totalExecutionUnits redeemers =
+  ExUnits.mkExUnits
+    (sum (map (toInteger . ExUnits.memory . Redeemer.executionUnits) redeemers))
+    (sum (map (toInteger . ExUnits.steps . Redeemer.executionUnits) redeemers))
 
 -- | Minimum output coin in lovelace, accounting for the size of the resulting
 -- coin encoding. The first argument is lovelace per UTxO byte. Zero is allowed;
@@ -82,6 +135,21 @@ baseFee = Internal.baseFee
 -- witness estimation, input resolution or fee installation is performed.
 minimumFee :: Parameters -> [Utxo] -> Transaction -> IO (Either Error Word64)
 minimumFee = Internal.minimumFee
+
+-- | Exact execution charge in lovelace for supplied prices and aggregate
+-- budgets: round the sum of memory and CPU charges upward once. Does not price
+-- reference scripts or execute scripts. Zero budgets cost zero. A result above
+-- 2^64-1 returns 'Cometa.Error.InvalidBuildingRequest'. Aggregate transaction and
+-- subtransaction redeemers with 'totalExecutionUnits' before pricing a batch.
+executionFee :: Prices.ExUnitPrices -> ExUnits.ExUnits -> Either Error Word64
+executionFee prices units =
+  let charge =
+        fromIntegral (ExUnits.memory units) * Rational.toRational (Prices.memoryPrice prices)
+          + fromIntegral (ExUnits.steps units) * Rational.toRational (Prices.stepPrice prices)
+      rounded = ceiling charge :: Integer
+   in if rounded <= toInteger (maxBound :: Word64)
+        then Right (fromInteger rounded)
+        else Left (InvalidBuildingRequest "Execution fee exceeds the unsigned 64-bit range")
 
 -- | Price reference scripts in exactly these unique resolved UTxOs, in lovelace.
 -- Uses exact rational tier prices and floors the total once. Missing stride or

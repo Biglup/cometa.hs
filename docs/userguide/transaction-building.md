@@ -74,3 +74,23 @@ error. Evaluation budgets must fit the supplied protocol limit. The builder also
 checks the resulting transaction size with its required witness reserve. Set
 `Builder.extraSigners` for additional signatures needed by native scripts so
 that fee and size estimates include them.
+
+## Governance proposals and treasury assertions
+
+`Plan.propose returnAccount action anchor` takes its deposit from the configured
+protocol parameters. Parameter-change and treasury-withdrawal actions may name a
+guardrails policy. When they do, this operation uses the unit redeemer; attach the
+script or resolve its reference-script UTxO separately. Actions without a policy
+need no proposing witness.
+
+Use `Plan.proposeWithRedeemer returnAccount action anchor argument` for an explicit
+policy argument, or `Plan.proposeWithDeferredRedeemer` to derive it from the
+balanced draft. These operations require an action with a guardrails policy.
+Proposal order determines redeemer indices, including preceding actions without
+scripts. `Transaction.Indices.findProposal` locates a complete proposal, including
+its configured deposit. Duplicate proposals fail at the build boundary.
+
+`Plan.currentTreasuryValue amount` declares the treasury balance in lovelace as a
+ledger-state assertion. It does not fund the transaction or donate that amount.
+Repeated identical assertions combine; conflicting values fail. Zero is preserved
+explicitly. `Plan.donate amount` is the separate operation for contributing funds.

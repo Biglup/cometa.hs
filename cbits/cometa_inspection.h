@@ -21,7 +21,11 @@
 
 /**
  * \brief Inspect one complete CBOR object with fresh operation-scoped owners.
- * \param operation 0 transaction, 1 subtransaction, 2 body, 3 subtransaction body.
+ * \param operation 0 transaction, 1 subtransaction, 2 body, 3 subtransaction body;
+ * 4 value, 5 script, 6 credential, 7 certificate, 8 proposal, 9 pool parameters,
+ * 10 protocol update, 11 Plutus data, 12 output, 13 witnesses, 14 UTxO,
+ * 15 DRep, 16 action id, 17 anchor, 18 voting procedures, 19 governance action,
+ * 20 metadatum, 21 metadata, 22 auxiliary data, 23 input, 24 datum, 25 redeemer.
  * \param input Borrowed complete CBOR bytes, valid through return.
  * \param size Byte count of input.
  * \param output Transferred JSON byte buffer on success, NULL on failure.
