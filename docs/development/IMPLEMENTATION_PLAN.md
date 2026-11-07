@@ -18,6 +18,14 @@ Provide a complete, idiomatic Haskell interface to cardano-c. Applications shoul
 work with Haskell domain values and functions and should never need to allocate,
 retain, release, or dispose of C objects during ordinary use.
 
+Scope decision (2026-11-07): larger infrastructure is excluded. Do not plan
+local-node/Ouroboros clients, chain synchronization/rollback services, full ledger
+validation/emulation, devnet orchestration, additional built-in provider backends,
+or associated CLI/RPC/WASM applications. Existing provider injection, Blockfrost
+with custom endpoints, application-level query improvements and the native
+transaction evaluator remain in scope. Measure completeness against binding and
+application APIs; excluded infrastructure is not a release blocker.
+
 Agreed requirements:
 
 - Cover every applicable public cardano-c domain type, enum, and operation.
@@ -3589,16 +3597,17 @@ on-chain acceptance must be validated independently on the selected network.
 The [Haskell capability audit](HASKELL_API_PARITY.md) compares pinned current
 sc-tools, Atlas, cardano-api and cardano-addresses sources. It extends the native
 symbol ledger: that ledger cannot establish parity with a node client, emulator,
-query service or code generator. Forty-two capability groups identify concrete
-implemented, partial and missing workflows. These are review groups, not a
-percentage denominator. Current cardano-api already includes experimental
+query service or code generator. Forty-two comparison groups distinguish
+implemented, partial and missing application workflows from excluded
+infrastructure. These are review groups, not a percentage denominator. Current cardano-api already includes experimental
 Dijkstra support; the comparison does not claim otherwise.
 
-Before claiming full upstream parity, expand each group into exported operations
-and supported-version contracts, with a named acceptance test and provenance.
+Before claiming completeness within the agreed scope, expand each in-scope group
+into exported operations and supported-version contracts, with a named acceptance
+test and provenance.
 Matching names or successfully building the C++ examples does not satisfy this
-release gate. Preserve missing functionality until it is implemented or the
-maintainer explicitly changes the target scope.
+release gate. Preserve in-scope gaps until they are implemented; infrastructure
+excluded by the maintainer is comparison context only.
 
 Follow-up work should proceed in these reviewable slices:
 
@@ -3619,10 +3628,6 @@ Follow-up work should proceed in these reviewable slices:
 5. Address native/backend gaps: VM limits and diagnostic traces, signer analysis,
    legacy wallet derivation and consensus-key operations. Add public native APIs
    only where the capability belongs there; do not expose private VM structures.
-6. Specify and implement the larger service capabilities if literal union parity
-   remains the target: local-node transport, chain synchronization/rollback,
-   ledger-backed emulation, development networks and associated tooling. They
-   remain gaps rather than silently being excluded from the requested scope.
 
 For each slice, review upstream source before API design, use idiomatic public
 values, preserve cancellation/resource safety, and add cross-library or independent

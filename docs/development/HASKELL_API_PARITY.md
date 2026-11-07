@@ -1,10 +1,15 @@
 # Haskell API capability parity audit
 
-This is a source-based gap analysis, reviewed 2026-11-07. **Cometa does not yet
-provide 100% of the functionality in the union of these libraries.** Porting and
-running the Cometa.cpp examples establishes those workflows, not the functionality
-of a node client, a ledger emulator, a blueprint generator, or every upstream
-key scheme. Those remain visible requirements below.
+This is a source-based gap analysis, reviewed 2026-11-07. The target is complete
+coverage of the agreed binding and application APIs, not every subsystem shipped
+by the compared repositories. Cometa has remaining in-scope gaps below.
+
+The maintainer explicitly excluded larger infrastructure on 2026-11-07:
+local-node/Ouroboros connectivity, chain synchronization and rollback services,
+full ledger validation/emulation, devnet orchestration, additional built-in
+provider backends, and associated CLI/RPC/WASM applications. These are comparison
+context, not implementation backlog or release gates. Existing provider injection,
+Blockfrost/custom URLs, and application-level query improvements remain in scope.
 
 The comparison baseline is the current default-branch source resolved on the
 review date, not an assumed Hackage release. sc-tools and Atlas pin older
@@ -27,16 +32,15 @@ not equality of every upstream function or representation. **Partial** means a
 caller can perform some of the workflow but a material operation or contract is
 missing. **Missing** means there is no corresponding public Cometa workflow.
 **Deferred** identifies an existing explicit API decision; it remains a gap
-against a literal 100% requirement. **Infrastructure proposal** identifies a
-missing subsystem that needs an explicit scope decision; it is not an exclusion
-accepted on the user's behalf.
+within the agreed scope. **Out of scope** identifies infrastructure explicitly
+excluded by the maintainer; it does not count as missing binding functionality.
 
 This document groups meaningful operations, rather than counting aliases,
 instances, lenses, enum variants or private reference-count functions. The group
 IDs are stable review targets, not a denominator for a percentage. An exhaustive
-export-by-export correspondence, supported versions and acceptance tests would
-still be required before a function-level 100% claim. The native symbol ledger
-is a separate denominator and does not inventory upstream Haskell services.
+export-by-export correspondence within the agreed scope, supported versions and
+acceptance tests would still be required before a function-level 100% claim.
+The native symbol ledger is a separate denominator.
 
 The tables cite the pinned source catalog below. Local test paths are evidence
 that test cases exist; their current passing status belongs to the build/CI
@@ -90,13 +94,21 @@ comparison, not proof that the two ledger versions accept identical encodings.
 | P02 Payment-credential, multi-address, asset-index and historical queries | S3 MonadUtxoQuery; A2/A4 GYQueryUTxO | utxosAt, utxosWithAsset at one address, utxoWithAsset single-result and current unspent resolution | **Partial.** No bulk credential query, complete global asset UTxO listing, historical transaction retrieval or indexed spent-output history. Calling single-result utxoWithAsset is not equivalent to listing all outputs carrying an asset. |
 | P03 Governance state, constitution/proposals, DRep state and delegation queries | A2 govState/drepState/proposals/constitution; S3 queryStakeVoteDelegatees; C6 | Typed governance values and provider reward balance | **Missing.** Construction and reward amount do not answer these state queries. Extend provider contracts/backends and deterministic fixtures; do not invent answers from transaction bodies. |
 | P04 Stake pools, stake delegation/deposits, system start, era history and current slot | S3 queryStakeAddresses/queryStakePools/queryEraHistory/querySlotNo; A2/A4; C6 | Explicit protocol snapshot, NetworkId and fixed SlotConfig | **Partial.** No public live era-history/current-tip/pool/delegation query surface; reward balance alone does not supply registration/delegation/deposit state. Static slot arithmetic is not multi-era history interpretation. |
-| P05 Wait for slot/block, mempool inspection and pending-spend handling | A2 mempoolTxs/waitUntilSlot; A4; sc-tools node client | awaitTransaction ID polling | **Partial.** Await by ID exists; slot/block waits, mempool query/overlay/reservation and rollback-aware state are missing. |
-| P06 Additional provider backends and caching | S12, convex-blockfrost; A5 and Providers.Node/Ogmios/Kupo/Maestro/Hydra/CacheMempool/CacheLocal | Injectable Provider record, one official HTTP adapter | **Missing adapters**, not satisfied by record injectability. Additional backends can be Haskell-only; cache invalidation/rollback/mempool semantics need their own tests. Atlas exposes GCP/Sentry/logging helpers too; Cometa has no corresponding integrations. |
-| P07 Local node connection, local state query/submission and chain sync | C7; S3/S4; Atlas Providers.Node | No native socket/Ouroboros client | **Missing infrastructure proposal.** Blockfrost HTTP is not a node client. An optional Haskell service/backend or new native transport is required; this remains part of literal upstream functionality until scope is agreed. |
-| P08 Full ledger-state transition/validation, blocks/headers, rollback folds and events | C8, Cardano.Api.Block/Consensus/Ledger; S4/S5 | Transaction decoding and phase-two script evaluation | **Missing infrastructure proposal.** A local VM is not full phase-one validation, ledger state, consensus, rewards processing or chain rollback. Needs ledger/consensus backend integration, not a thin wrapper around the installed native evaluator. |
-| P09 Emulator/mockchain and contract-game/user testing | S5 and Convex.Class mock state; A10 and GYTxGameMonad | Deterministic callback/HTTP fixtures and native evaluator tests | **Missing infrastructure proposal.** Existing fakes do not implement a ledger emulator, mutable chain/time/UTxO model, reward transitions or multi-user contract tests. Reusable public generator/test-helper packages such as cardano-api-gen and Convex.MockChain.Gen also have no corresponding Cometa package; internal Hedgehog tests are a different artifact. |
-| P10 Private network/devnet lifecycle | S6; Atlas Test.Privnet modules | No node process/genesis orchestration | **Missing infrastructure proposal.** A testnet submission example does not replace disposable devnet creation, hard-fork setup, process teardown and funded test users. |
-| P11 RPC/WASM/browser service packages and CLI applications | C16/C17 cardano-rpc/cardano-wasm manifests; sc-tools convex-tx-mod; cardano-addresses Command modules | Haskell examples and library API | **Missing separate applications.** No RPC server, WASM/TypeScript bridge, general address/key CLI or transaction download/graph tool. These are visible adjacent repository capabilities, not claimed binding coverage. |
+| P05 Wait for slot/block, mempool inspection and pending-spend handling | A2 mempoolTxs/waitUntilSlot; A4; sc-tools node client | awaitTransaction ID polling | **Partial.** Await by ID exists; slot/block waits and provider-backed mempool/pending-spend queries remain missing. Chain rollback services are excluded under P08. |
+
+## Excluded infrastructure (comparison context only)
+
+These entries retain their original IDs and source references for traceability.
+They are excluded from the remaining-work and completeness assessment.
+
+| ID | Excluded capability | Source evidence |
+| --- | --- | --- |
+| P06 | Additional built-in provider backends and service caching/observability integrations | S12; A5 |
+| P07 | Local-node/Ouroboros transport, local state-query client and chain synchronization | C7; S3/S4 |
+| P08 | Full ledger validation/state transitions, chain indexing and rollback services | C8; S4/S5 |
+| P09 | Ledger emulator/mockchain and contract-game infrastructure | S5; A10 |
+| P10 | Private-network/devnet creation and node-process orchestration | S6; Atlas Test.Privnet |
+| P11 | Standalone CLI, RPC server and WASM/browser applications | C16/C17; S11; cardano-addresses Command |
 
 ## Keys, addresses, values and standards
 
@@ -112,7 +124,7 @@ comparison, not proof that the two ledger versions accept identical encodings.
 | K08 Assets/value algebra and fingerprints | A6; cardano-api Value; S1 | AssetId codecs/fingerprint, PolicyId/AssetName, arbitrary signed Integer Value; test/AssetId.hs, test/Value.hs | **Partial.** Core construction/sum/difference/scale/inspection works. Atlas' valueMonus, splitSign, map/alter/restrict/intersection helpers and typed upstream conversions are not all named public operations. Several are implementable purely from toList/fromList/quantity; composability is not identical convenience API coverage. Standalone checked Value CBOR and general JSON remain missing. |
 | K09 Governance identifier text and serialization envelopes | C10/C11; A9; cardano-addresses text prefixes | Raw hash/CBOR values and address text; CIP-116 transaction inspection | **Partial.** CIP-105/129 DRep/committee/action text and typed cardano-cli key/script/transaction envelopes/file helpers are missing. Native governance action text narrows an index; audit standard bounds before adapting that operation. Existing hex output does not replace Bech32 headers/envelope type validation. |
 | K10 Metadata/data JSON and broader CBOR primitives | cardano-api serialization/Plutus APIs; S11; A6 | Exact CBOR metadata/PlutusData, selected primitive Cbor functions | **Partial.** No public equivalent of every metadata/script-data JSON schema or general CBOR null/tag/simple/double/tagged-bignum primitive. Arbitrary Plutus integers work through PlutusData, not the bounded primitive Cbor integer helper. |
-| K11 Full era-specific/genesis/leadership/poll domains | C12/C13/C14 and cardano-api LedgerState/Genesis | Current native transaction/governance types, legacy certificates and update fields | **Missing/partial infrastructure domains.** No genesis generation, leadership schedule computation, governance poll metadata/answer verification or typed transition API for every historical era. Current transaction field coverage does not substitute. |
+| K11 Full era-specific/genesis/leadership/poll domains | C12/C13/C14 and cardano-api LedgerState/Genesis | Current native transaction/governance types, legacy certificates and update fields | **Partial application coverage; infrastructure excluded.** Governance poll metadata/answer helpers remain an application-level gap. Genesis generation, leadership scheduling and historical ledger-transition services are excluded infrastructure; their absence is not a binding release blocker. |
 | K12 Raw and COSE message signing | D1 sign/verify; upstream key/signature operations | Crypto.Ed25519 and Message.Cip8; test/Ed25519.hs, test/Cip8.hs | **Implemented** raw signatures and address/key-hash-bound COSE outputs, beyond the raw format in D1. CIP8 accepts nonempty direct payloads with empty AAD and hashed=false; it does not establish that the signing key controls the supplied address. Detached/prehashed/custom-AAD signing and a complete COSE verifier are not supplied or implied. |
 | K13 Optics, standard instances and effect/error integration | S14 Convex.CardanoApi.Lenses; A1/A2/A6 class and instance surfaces | Explicit immutable ADTs, qualified functions, Plan composition and ordinary Either/IO records | **Partial / ergonomic difference.** No optional lens/Plutus/cardano-api instance packages or drop-in MonadBlockchain/GYTxMonad interpreters. Existing record injection is a deliberate interface choice, not source compatibility. Add only invariant-preserving adapters; unsafe constructors, partial lookup functions and printable secret instances are not required to imitate upstream. |
 
@@ -128,7 +140,8 @@ PR or silently redefine 100% scope.
    and define the schema per operation. Preserve exact signed transaction bytes.
 2. **Optional Haskell integration:** Aiken/CIP-57 blueprints, typed Plutus data
    codecs and upstream cardano-api/Plutus conversions, broader provider queries
-   and backends, time/era-history interpretation. No private C AST needs exposure.
+   and time/era-history interpretation. Additional built-in provider backends are
+   excluded. No private C AST needs exposure.
    The native current-treasury builder setter is a distinct native API gap;
    manual field construction already exists.
 3. **Requires a new implementation/backend or public native extension:** VM
@@ -136,14 +149,7 @@ PR or silently redefine 100% scope.
    analysis; legacy derivation variants; consensus secret-key algorithms. Merely
    adding FFI declarations cannot create an installed public capability.
    Haskell-only alternative backends remain a possible design choice.
-4. **Separate service/tooling scope requiring an explicit acceptance decision:**
-   local-node/Ouroboros transport, ledger validation/emulator, chain index/folds,
-   devnet orchestration, RPC/WASM and CLIs. Program-level compiler
-   interoperability belongs to T07–T09; a standalone compiler service needs its
-   own additional-scope decision. The listed upstream service/tooling capabilities
-   are currently missing if “all functionality” is read literally; they have not been declared
-   out of scope by this audit.
-5. **Previously deferred ergonomics:** automatic ToPlutusData/FromPlutusData,
+4. **Previously deferred ergonomics:** automatic ToPlutusData/FromPlutusData,
    derived redeemer codecs and a shorter deferred-redeemer/builder interface.
    Existing explicit operations are real capability, but the requested ergonomic
    comparison must continue to show the difference. Do not add partial findIndex
