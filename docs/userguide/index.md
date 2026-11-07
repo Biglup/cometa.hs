@@ -50,6 +50,9 @@ transaction-bodies
 transactions
 transaction-witnesses
 providers
+blockfrost
+blockfrost-examples
+native-workflows
 coin-selection
 building-utilities
 transaction-building

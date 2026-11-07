@@ -3216,3 +3216,251 @@ Next is the Blockfrost provider and applicable native example workflows (P13),
 followed by the remaining symbol/inspection audit and release hardening. This
 batch does not establish live-network Dijkstra acceptance. The ToPlutusData
 ergonomics proposal remains deferred to a separate API review.
+
+
+### P13: Blockfrost provider and connected workflows
+
+The backend lives in the public `cometa:blockfrost` Cabal sublibrary, with HTTP/TLS
+dependencies isolated from the main library. It produces the existing `Provider`
+record; applications keep their builder, selector, evaluator and signer interfaces.
+`withProvider` validates configuration once and scopes requests. Project credentials
+have no printable instance. Errors carry operation names, HTTP status codes or
+sanitized transport categories, never raw requests, credentials or response bodies.
+
+Protocol mapping reviewed against Blockfrost OpenAPI commit
+`1d4d5d8bac8f0c641eea5c6f7b1f3fbbed8d1505`,
+[`src/schemas/epochs/epoch_param_content.yaml`](https://github.com/blockfrost/openapi/blob/1d4d5d8bac8f0c641eea5c6f7b1f3fbbed8d1505/src/schemas/epochs/epoch_param_content.yaml),
+and the pinned native example's `blockfrost_pparam_parser.c`. Execution prices use
+exact `Scientific` fractions, not binary floating point. Pool pledge influence and
+reference-script prices are nonnegative fractions and may exceed one. Related
+fields (prices, execution budgets, voting thresholds) must be complete as a group.
+Unsigned quantities and signed cost-model coefficients are checked before narrowing.
+The UTxO charge is a byte price only from Babbage; Alonzo's word charge is not
+silently relabelled. Absent fields remain unavailable. The published backend schema
+does not define the newer Dijkstra, Leios or Peras parameters, so these are not
+invented or populated with speculative defaults. This backend limitation does not
+remove the binding's separately tested offline transaction capabilities.
+
+Initial HTTP fixture validation covers headers/path encoding, status errors,
+redirect refusal, no implicit submission retry, bounded whole-request duration,
+response size limits, cancellation recovery, escaped handles and scope drainage.
+Local tests require permission to create loopback sockets; ordinary CI uses no
+credentials or public network requests for those fixtures.
+
+#### HTTP workflow and lifetime review
+
+Reviewed the actual `http-client-0.7.19` sources before choosing the transport:
+[public API](https://github.com/snoyberg/http-client/blob/http-client-0.7.19/http-client/Network/HTTP/Client.hs),
+[request/response scope](https://github.com/snoyberg/http-client/blob/http-client-0.7.19/http-client/Network/HTTP/Client/Core.hs),
+and [manager implementation](https://github.com/snoyberg/http-client/blob/http-client-0.7.19/http-client/Network/HTTP/Client/Manager.hs).
+Also reviewed installed `http-client-tls-0.3.6.4`, `http-types-0.12.6` and
+`scientific-0.3.10` source archives. No implementation code was copied.
+
+A normal caller supplies a network and optional validated project ID to `defaultConfig`,
+then uses the existing provider operations within `withProvider`. Configuration
+sets whole-request and confirmation-poll intervals, bounded to 1–60,000 ms.
+The transport uses the library's bracketed `withResponse` workflow with an 8 MiB
+response limit, standard TLS certificate verification, encoded path/query values,
+no redirects, and no automatic retry (including the client's reused-connection
+retry predicate). Only HTTP exceptions are translated; asynchronous cancellation
+propagates after cleanup. The request deadline includes connection acquisition,
+DNS, TLS, headers and body reads.
+
+A guarded active-request count prevents new requests after scope closure and
+joins active requests before scope exit. Pure empty-result operations also check
+scope state. `http-client`'s deprecated `closeManager` is a no-op, so the transport
+sets the idle connection count to zero: response cleanup closes sockets instead
+of retaining idle connections until GC. This intentionally trades connection
+reuse for deterministic connection cleanup. It is a performance review item for
+P14, not a claim that the manager has a deterministic destructor.
+
+Loopback HTTP tests cover exact wire paths, headers and POST bytes, status 429,
+redirect refusal, single-attempt submission, overridden timeouts, response bounds,
+cancellation recovery and closure/drainage. Pure response tests cover exact values
+above 2^53, all native script alternatives, reference-script/inline-datum payloads,
+all documented protocol groups, and precise evaluation budget coverage.
+Scientific exponents are bounded before conversion: even a bounded conversion
+can overflow internal Int exponent arithmetic at extreme input exponents.
+Regression tests exercise both Int bounds. Standard Aeson object-key parsing is
+used; the binding additionally rejects semantic duplicate asset units, UTxO
+identities and redeemer identities. It does not claim lexical duplicate-key
+rejection for JSON objects.
+
+#### Provider API and endpoint review
+
+Reviewed [Atlas's Blockfrost provider](https://github.com/geniusyield/atlas/blob/c3adfb416242ea25a244bfaa1614213eecdc55d9/src/GeniusYield/Providers/Blockfrost.hs)
+at `c3adfb416242ea25a244bfaa1614213eecdc55d9` and the
+[Blockfrost Haskell SDK](https://github.com/blockfrost/blockfrost-haskell/tree/a540dff307503409e8eb764a4dc661f8a927d4aa)
+at `a540dff307503409e8eb764a4dc661f8a927d4aa`, including its Core, Types,
+Cardano/Transactions and README sources. Their complete workflows informed typed
+provider records, pagination, reference-script resolution and endpoint-specific
+absence handling. Cometa keeps the existing `IO (Either Error a)` boundary,
+explicit configuration and scoped capabilities; no mandatory SDK monad is added.
+Unlike the reviewed Atlas conversion, protocol fractions remain exact and required
+fields are checked without partial extraction. Unlike the SDK retry policy,
+submission and rate-limited requests are not retried automatically.
+
+The pinned OpenAPI requires nullable datum/reference-script fields in UTxO rows.
+It defines a global asset UTxO endpoint; NFT lookup therefore need not infer unique
+holdings from a list of asset addresses. Historical transaction outputs alone do
+not prove spendability: resolve each requested output against current address
+UTxOs, also respecting a supplied consumed-by transaction. Separate requests are
+not an atomic snapshot. Datum and reference-script content hashes are checked
+against requested identities. Plutus CBOR endpoint bytes are passed unchanged to
+`Plutus.fromBytes`, matching the native example's `new_bytes_from_hex` behavior;
+no speculative stripping of CBOR layers occurs. Timelock JSON reconstruction must
+produce the requested hash or the query fails.
+
+The [archived Ogmios 5.6 specification](https://ogmios.dev/api/v5.6/ogmios.wsp.json)
+and Blockfrost's pinned evaluation request schema define `additionalUtxoSet` as
+input/output pairs, with exact transaction CBOR, `policy[.name]` asset keys,
+`datumHash`, inline datum CBOR, and native/V1/V2 reference scripts. The backend
+explicitly requests version 5 and verifies exact redeemer budget coverage.
+The native example mixes a newer additional-UTxO payload with the default legacy
+dialect; that mismatch is not copied. Unsupported governance/Dijkstra features,
+newer scripts and sub-transactions fail before remote evaluation. Local native
+VM evaluation remains the normal builder path. A newer remote dialect is a
+follow-up requiring an authoritative complete payload contract and integration
+evidence; it is not advertised as implemented.
+
+All provider fixtures are newly authored synthetic responses and deterministic
+request schedules. No upstream implementation or test fixture was copied. Native
+Blockfrost source is an example backend rather than installed C functionality,
+so this phase adds no new public C symbols to the native coverage ledger.
+
+
+### Native example source-to-Haskell inventory (pinned Apache-2.0 corpus)
+
+Base source: [cardano-c examples/src](https://github.com/Biglup/cardano-c/tree/eadb95cd3ca7f711c203d7f2f4ee21c150d4d7f1/examples/src).
+This maps executable domains/stages, not a claim that their live network scripts
+were run or every literal/console message was copied.
+
+| Native example | Haskell workflow | Evidence / deliberate differences |
+| --- | --- | --- |
+| `bip39_example.c` | WalletRecovery.hs; existing Bip39/SoftwareKeyHandler/Addresses examples | Mnemonic→entropy→encrypted handler→account+base address→signed synthetic payment; public demonstration material only. |
+| `secure_key_handler_example.c` | WalletRecovery.hs + Blockfrost.Common/BlockfrostPayment.hs | Encrypted handler serialize/reload, account/payment derivation and scoped BIP32 signing; live entry accepts existing caller storage. |
+| `provider_example.c` | BlockfrostQueries.hs; Workflows.Native.runStage | Protocol/address queries; reward queries are exercised by runRewardCycle. Dependent workflow stages requery fresh state. |
+| `send_lovelace_example.c` | BlockfrostPayment.hs; Workflows.Native.runPayment | Query→balance→sign→explicit submit→confirm. NativeWorkflows payment fixture. |
+| `mint_burn_native_script_example.c` | Workflows.Native.runMintBurn Native policy | Mint then confirm/requery/burn with real signer-backed native policy. Static CIP25 sample content not copied; typed Metadata domain already covered. |
+| `mint_burn_plutus_script_example.c` | runMintBurn with resolved reference; NativeWorkflows.plutusMint | Fund reference output, resolve by exact ID, actual V3 mint→confirm/requery→burn. |
+| `spend_from_native_script_example.c` | runLockSpend Native policy | Fund exact script output→confirm→spend with its native witness/signature. |
+| `spend_from_validator_example.c` | runLockSpend actual native V3 | Fund inline datum+reference script→confirm→spend exact reference through reference input. |
+| `reward_account_pubkey_example.c` | runRewardCycle key credential | Register/stake+vote delegate→query rewards→withdraw+deregister with explicit historic deposit. |
+| `reward_account_script_example.c` | runRewardCycle actual native V2 | Native source-specific register+stake delegate only, then script withdrawal+deregistration. |
+| `drep_pubkey_example.c` | runDRepCycle key credential | Register DRep, stake register/vote-delegate, stake withdraw/deregister, DRep deregister; explicit prepared registry state/deposits. |
+| `drep_script_example.c` | runDRepCycle actual native V3 | Same complete lifecycle with script authorization and collateral. |
+| `vote_for_proposal_pubkey_example.c` | runVoteCycle key DRep | Register→vote on explicit existing ActionId→deregister. |
+| `vote_for_proposal_script_example.c` | runVoteCycle actual native V3 | Same lifecycle with actual script registration/voting/certificate execution. |
+| `propose_treasury_withdrawal_example.c` | runTreasuryWithdrawal actual native V3 guardrails | Typed withdrawal map/anchor/policy, actual proposing script, sign+submit+confirm. |
+| `donate_to_treasury_example.c` | runDonation | Typed donation included in fully balanced/signed/submitted fixture transaction. |
+| `deferred_redeemer_self_index_example.c` | runDeferredSelf + actual Aiken selfIndex | Fund→confirm→deferred own canonical index→real enforcing script; wrong-index rejection test. |
+| `deferred_redeemer_batch_example.c` | runDeferredBatch + actual Aiken orderPairing | Two confirmed orders, each late own-input/payout index, actual paired settlement; preserve reference output during second funding. |
+| `deferred_redeemer_withdraw_zero_example.c` | runWithdrawZero + actual native V3 | Register/delegate, zero withdrawal forwards canonical input indices, cleanup certificate; actual enforcing script. |
+| `sub_transaction_batch_example.c` | Workflows.Swap.runSwap + NativeSwap.hs | Exact native buyer/seller/batcher amounts and asset; independent signatures+required batcher guard+unchanged sub bytes+global conservation. |
+| `plutus_v4_guarded_sub_transaction_example.c` | runGuardedSub actual native V4 programs | Fund validator, local V4 guarded intent, independent local signing, complete parent with collateral; actual sub budgets checked. |
+
+
+The workflow fixture verifies each outer and nested Ed25519 witness against its own
+body hash before changing UTxO state. A corrupted-signature regression requires
+unchanged state and history. It also checks complete value conservation, but does
+not implement consensus registration, rewards, eligibility or chain finality.
+
+
+#### Integrated validation and remaining work
+
+Local GHC 9.6.7 builds and all 493 tests pass: 325 public tests (including 18
+complete workflow cases), 125 runtime tests and 43 Blockfrost tests. All three
+suites pass Valgrind with zero errors, zero definitely/indirectly/possibly lost
+bytes and zero matched suppressions in this run. The existing GHC scheduler
+suppression remains configured. All 35 executable entry points run successfully:
+33 offline examples and two connected command-line usage checks without action
+arguments. No live network traffic or submissions are implied by those checks.
+
+Both public API references have 100% declaration documentation coverage. The
+portable archive generated by `tools/build-api-docs.py` contains core and
+Blockfrost documentation with relative cross-component links; third-party links
+use Hackage. Private backend modules are excluded from the public reference.
+Formatting, HLint, native inventory, role checks and strict guide/link checks pass.
+The core library's transitive build graph has no HTTP/TLS dependencies; those
+belong solely to the optional component. A fresh source archive builds every
+component with tests enabled and passes the same 493 tests.
+
+Live preprod validation is recorded below. Staking, governance and Dijkstra
+workflow cases above remain offline validation. P14 still covers the remaining native-symbol
+mapping audit, performance review and final cross-platform/release hardening.
+The deferred-redeemer ergonomics pass remains explicitly deferred. Newer remote
+Blockfrost evaluation dialects are also not claimed by this implementation.
+
+
+#### Custom endpoints and optional authentication
+
+`Config.endpoint` accepts an absolute HTTP/HTTPS base URL, independently of the
+selected network magic. `projectId` is `Maybe ProjectId`; `Nothing` omits the
+header entirely. `defaultConfig network credential` still chooses the official
+endpoint, while custom services can provide a different host, port, path and
+query parameters. Operation query parameters override matching base keys. Paths,
+including encoded bytes and repeated separators, retain their supplied meaning.
+
+Reviewed `network-uri-2.6.4.2`'s `Network.URI.parseURI` and `http-client-0.7.19`'s
+public `requestFromURI` and underlying request conversion. Parsing and conversion
+use total `Maybe` results and return a sanitized configuration error before the
+user action. Raw ports are bounded before the HTTP client's Int conversion;
+otherwise a huge decimal could wrap into a valid-looking port. Tests include
+IPv6, leading-zero ports, both port bounds and overflow inputs. Userinfo and URL
+fragments are rejected; query parameters are supported and excluded from errors.
+The reviewed Blockfrost Haskell SDK also supports custom URLs, but its partial
+invalid-URL handling is not copied.
+
+Four added loopback test groups exercise the public provider with custom paths,
+query merging, present/absent authentication, independent network magic, and
+invalid configuration before callback invocation. All 47 backend tests pass.
+The connected examples accept optional `BLOCKFROST_URL` and
+`BLOCKFROST_PROJECT_ID`; a missing project identifier no longer prevents startup.
+
+
+#### Live Blockfrost preprod validation
+
+The public provider was exercised against the official preprod service on
+2026-11-07, using a custom endpoint URL with a trailing slash. The service reported
+protocol version 11. Credentials and the encrypted public demonstration wallet
+were supplied outside the repository.
+
+Successful endpoint checks include protocol parameters, account rewards, address
+UTxOs, asset-filtered address UTxOs, unique-asset UTxOs, transaction-input
+resolution, datum CBOR, script metadata, native script JSON, Plutus script CBOR,
+transaction submission and transaction confirmation. Known absent datums and
+inputs were also checked. A spent output is excluded by input resolution.
+
+Two self-payments were submitted and confirmed:
+
+- `a3453280e6e7ac2c7078b344e91df6baf50ca86200969b65f1a67ec9a6935949`:
+  inline datum, checked against its original value after retrieval.
+- `c357d2dbae00d1226b4813372b87f76e3945a77e49b9f73553314e692a651f5f`:
+  native and Plutus V2 reference scripts, retrieved through both address queries
+  and input resolution with exact script-hash checks.
+
+The first address query after the second confirmation returned an older UTxO
+snapshot. A later read returned both expected outputs; confirmation does not
+imply that every index endpoint has caught up.
+
+A signed Plutus V2 mint was evaluated remotely without submission; the service
+returned 8,400 memory units and 1,328,100 steps for minting redeemer zero.
+
+The additional-UTxO evaluation check found and corrected a live-service encoding
+incompatibility: the hosted evaluator rejects an ADA-only value containing an
+empty `assets` object. Omitting that optional field preserves the same value and
+allows evaluation. A differential request changed only that field, retaining the
+same transaction, query version, datum fields and supplemental input. Nonempty
+asset maps remain unchanged. A deterministic regression covers the ADA-only
+payload alongside the existing multi-asset encoding test.
+
+Follow-up validation passes all 498 tests (325 public, 125 runtime and 48
+Blockfrost). The updated backend suite passes Valgrind with zero errors, zero
+lost bytes and zero matched suppressions. The unchanged public/runtime suites
+retain the earlier clean Valgrind runs. Package, formatting and lint checks pass.
+
+The rebuilt public provider passed the final supplemental-input check: transaction
+`aab7db0ee0a646ab66193cffd1f481b58b2312518b8721fe62bf81a8a453fce1` failed
+evaluation without its synthetic input and returned 8,400 memory units and
+1,328,100 steps when that exact input was supplied. This transaction was evaluated
+only, never submitted.
