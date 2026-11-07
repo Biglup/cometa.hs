@@ -18,6 +18,21 @@ Provide a complete, idiomatic Haskell interface to cardano-c. Applications shoul
 work with Haskell domain values and functions and should never need to allocate,
 retain, release, or dispose of C objects during ordinary use.
 
+Scope decision (2026-11-07): larger infrastructure is excluded. Do not plan
+local-node/Ouroboros clients, chain synchronization/rollback services, full ledger
+validation/emulation, devnet orchestration, additional built-in provider backends,
+or associated CLI/RPC/WASM applications. Existing provider injection, Blockfrost
+with custom endpoints, application-level query improvements and the native
+transaction evaluator remain in scope. Measure completeness against binding and
+application APIs; excluded infrastructure is not a release blocker.
+
+Seed/entropy generation is intentionally application-owned. Preserve this security
+boundary in cardano-c and its bindings: accept supplied entropy/key material for
+validation, conversion and derivation. Automatic seed-generation helpers are not
+a missing feature or a release requirement. Existing operational randomness for
+salts/nonces is unaffected. CIP-8 verification is a separate nice-to-have proposal;
+existing CIP-8 support provides signing.
+
 Agreed requirements:
 
 - Cover every applicable public cardano-c domain type, enum, and operation.
@@ -3575,3 +3590,74 @@ Haddock references pass; public declarations retain 100% documentation coverage.
 The source-package manifest contains the new sources, fixtures, notices, guides
 and examples. Hosted CI results are reviewed on the PR before another slice;
 these local checks do not by themselves establish the platform matrix.
+
+### P14 example parity and upstream capability audit
+
+The next review slice ports all 21 examples from Cometa.cpp revision
+`824ae8e8ac9adf113d957265532ae7ea37a628a3`. The exact source-to-entrypoint mapping,
+intentional configuration differences and execution evidence live in
+[the example parity record](EXAMPLE_PARITY.md). Connected runners require an
+explicit `--submit`; ordinary CI compiles them and exercises their credential-free
+usage paths. Staking/governance recipes have offline tests, but ledger state and
+on-chain acceptance must be validated independently on the selected network.
+
+The [Haskell capability audit](HASKELL_API_PARITY.md) compares pinned current
+sc-tools, Atlas, cardano-api and cardano-addresses sources. It extends the native
+symbol ledger: that ledger cannot establish parity with a node client, emulator,
+query service or code generator. Forty-two comparison groups distinguish
+implemented, partial and missing application workflows from excluded
+infrastructure. These are review groups, not a percentage denominator. Current cardano-api already includes experimental
+Dijkstra support; the comparison does not claim otherwise.
+
+The [minimum feature set and nice-to-have backlog](HASKELL_API_PARITY.md#minimum-feature-set-and-nice-to-have-backlog)
+now determines delivery priority. The minimum covers remaining construction
+capabilities, essential identifiers/Value CBOR, workflow-critical provider state,
+and actionable failures. Seed generation is intentionally excluded; CIP-8
+verification is nice to have. Broader
+interchange, blueprint/typed-data ergonomics, planning conveniences, VM tooling
+and advanced wallet/crypto variants are nice to have. Infrastructure remains
+excluded. This prioritization does not remove applicable native domain coverage.
+
+Do not equate completion of the minimum with full upstream parity. Track named
+acceptance tests and provenance for every required workflow, and retain optional
+gaps visibly without treating them as minimum-release blockers.
+
+For each slice, review upstream source before API design, use idiomatic public
+values, preserve cancellation/resource safety, and add cross-library or independent
+vectors where possible. Native-oracle tests establish binding correspondence;
+independent ledger acceptance and upstream behavior need their own evidence.
+
+Local validation for this slice: GHC 9.6.7 builds every component. The 352 public,
+131 runtime and 48 Blockfrost tests pass; the HTTP tests require loopback sockets.
+The public suite passes Valgrind with zero errors and zero definitely, indirectly
+or possibly lost bytes. After the deferred recipe alignment, all 31 matching
+native tests pass again and the changed end-to-end workflows pass Valgrind again.
+All 17 connected entrypoints print usage without credentials, and the five
+recovery/swap/evaluation/deferred/Dijkstra offline programs run successfully.
+Ormolu, HLint, package checks, source manifest, native inventory, strict Sphinx
+HTML/link checks and both public Haddock references pass. Live execution results
+are maintained separately in the example parity record.
+
+Live V2 staking exposed duplicate script witnesses when independently composed
+certificate plans each attached the same script. Native evaluation succeeded,
+but the ledger rejected the duplicate CBOR set elements before execution. Shared
+plan normalization now coalesces attachments by language and script-hash preimage,
+retaining the first encoding and order. Both top-level and subtransaction builders
+use that normalization. Regressions cover native and V1–V4 scripts, distinct
+versions/programs, nonminimal outer Plutus framing, a used V2 witness and an
+actually evaluated V4 subtransaction. No cardano-c change is required by this fix.
+
+After the script-attachment fix, all components rebuild and all 533 tests pass
+(352 public, 133 runtime, 48 Blockfrost). The full runtime suite and all 11
+connected governance recipe tests pass Valgrind with zero errors and zero lost
+allocations. The public full-suite result above remains the broader lifecycle
+baseline; these targeted reruns exercise the changed normalization and live recipe.
+
+The related datum path also appended repeated witness data. Normalization now
+coalesces exact datum CBOR across explicit attachments and input arguments, after
+checking the original per-input declarations. Distinct hash-bearing encodings,
+input order and deferred callback indices remain unchanged. All components build
+and all 535 tests pass (352 public, 135 runtime, 48 Blockfrost). The 135-test
+runtime suite passes Valgrind with zero errors and zero lost allocations. The
+[PR validation record](https://github.com/Biglup/cometa.hs/pull/22) holds per-run
+preprod transaction and cleanup evidence separately from these deterministic checks.

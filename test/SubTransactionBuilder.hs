@@ -48,6 +48,7 @@ import qualified Cometa.Protocol.Parameters as P
 import qualified Cometa.Protocol.Parameters.Update as Update
 import qualified Cometa.Protocol.Version as Version
 import qualified Cometa.Script as Script
+import qualified Cometa.Script.Native as NativeScript
 import qualified Cometa.Script.Plutus as Plutus
 import qualified Cometa.SlotConfig as Slots
 import qualified Cometa.SubTransaction as Sub
@@ -92,6 +93,8 @@ tests =
     "Sub-transaction builder"
     [ testCase "intent preserves exact inputs/outputs without balancing" intent,
       testCase "actual V4 execution commits immediate and deferred arguments" scripts,
+      testCase "composed script attachments preserve first identity and language failures" uniqueScripts,
+      testCase "datum witnesses are shared across explicit attachments and local inputs" uniqueDatums,
       testCase "outer evaluation rejects underbudget signed intents and retains adequate bytes" attachedBudgets,
       testCase "reference scripts resolve from explicit reference inputs" references,
       testCase "guards, account operations and treasury donation survive building" dijkstraFields,
@@ -153,7 +156,7 @@ scripts = do
   (script, policy) <- scriptFixture
   let argument = Data.fromData (Data.Integer 42)
       attached = Plan.attachScript (Script.Plutus script)
-      immediate = attached <> Plan.mintWithRedeemer (asset policy) 1 argument
+      immediate = attached <> attached <> Plan.mintWithRedeemer (asset policy) 1 argument
       deferred = attached <> Plan.mintWithDeferredRedeemer policy [(AssetName.empty, 1)] (\_ _ -> Right argument)
   first <- Builder.build config immediate >>= must
   second <- Builder.build config deferred >>= must
@@ -181,13 +184,14 @@ localDraft = do
           else case elemIndex (Utxo.input scriptInput) localInputs of
             Nothing -> Left (InvalidTransactionPlan "Missing local input")
             Just index -> Right (Data.fromData (Data.Integer (toInteger index)))
-      plan = Plan.spendWithDeferredRedeemer scriptInput callback Nothing <> Plan.spend keyInput <> Plan.payTo output <> Plan.attachScript (Script.Plutus script)
+      plan = Plan.attachDatum datum <> Plan.spendWithDeferredRedeemer scriptInput callback (Just datum) <> Plan.spend keyInput <> Plan.payTo output <> Plan.attachScript (Script.Plutus script) <> Plan.attachDatum datum
   count <- newIORef (0 :: Int)
   let observed operation bytes = modifyIORef' count (+ 1) >> Internal.dispatch plan operation bytes
   bytes <- Internal.runWithDispatch config observed (encoded plan) >>= must
   sub <- must (Sub.decodeCbor bytes)
   map Redeemer.argument (redeemers sub) @?= [Data.fromData (Data.Integer 1)]
   readIORef count >>= (@?= 1)
+  Witnesses.datums (Witnesses.toWitnesses (Sub.witnesses sub)) @?= [datum]
 
 encoded :: Plan.Plan -> B.ByteString
 encoded = Common.encodePlan . InternalPlan.toPlan
@@ -401,3 +405,50 @@ replaceBudget models units transaction = do
   let fields = (fieldsOf transaction) {Fields.fieldScriptDataHash = commitment}
   body <- must (SubBody.fromBody (SubBody.fromFields fields))
   pure (Sub.assemble body encodedWitnesses (Sub.auxiliaryData transaction))
+
+uniqueScripts :: IO ()
+uniqueScripts = do
+  (config, output, input) <- fixture
+  let nativeA = Script.Native (NativeScript.allOf [])
+      nativeB = Script.Native (NativeScript.anyOf [])
+      nativePlan = Plan.attachScript nativeB <> Plan.attachScript nativeA
+      payment = Plan.spend input <> Plan.payTo output
+  nativeSub <- Builder.build config (nativePlan <> nativePlan <> payment) >>= must
+  Witnesses.scripts (Witnesses.toWitnesses (Sub.witnesses nativeSub)) @?= [nativeB, nativeA]
+  first <- Script.Plutus <$> must (Plutus.decodeCbor Plutus.V4 (B.pack [0x58, 3, 1, 2, 3]))
+  canonical <- Script.Plutus <$> must (Plutus.fromBytes Plutus.V4 (B.pack [1, 2, 3]))
+  distinct <- Script.Plutus <$> must (Plutus.fromBytes Plutus.V4 (B.pack [4, 5, 6]))
+  let once = Plan.attachScript first <> Plan.attachScript distinct <> payment
+      repeated = Plan.attachScript first <> Plan.attachScript distinct <> Plan.attachScript canonical <> Plan.attachScript first <> payment
+  encoded repeated @?= encoded once
+  expected <- Builder.build config once >>= must
+  actual <- Builder.build config repeated >>= must
+  Sub.encodeCbor actual @?= Sub.encodeCbor expected
+  length (Witnesses.scripts (Witnesses.toWitnesses (Sub.witnesses actual))) @?= 2
+  -- Deduplication never turns an unsupported language into an accepted plan.
+  forM_ [Plutus.V1 .. Plutus.V3] $ \version -> do
+    old <- Script.Plutus <$> must (Plutus.fromBytes version (B.pack [1, 2, 3]))
+    let attachment = Plan.attachScript old
+    single <- Builder.build config (attachment <> payment)
+    duplicate <- Builder.build config (attachment <> attachment <> payment)
+    assertBool "unsupported sub-level script accepted" (isLeft single)
+    duplicate @?= single
+
+uniqueDatums :: IO ()
+uniqueDatums = do
+  (config, output, first) <- fixture
+  let second = Utxo.utxo (Input.input (Input.transactionId (Utxo.input first)) 1) (Utxo.output first)
+      canonical = Data.fromData (Data.Integer 0)
+  imported <- must (Data.decodeCbor (B.pack [0x18, 0]))
+  Data.toData imported @?= Data.toData canonical
+  let attachments = Plan.attachDatum imported <> Plan.attachDatum canonical <> Plan.attachDatum imported <> Plan.attachDatum canonical
+  explicit <- Builder.build config (attachments <> Plan.payTo output) >>= must
+  Witnesses.datums (Witnesses.toWitnesses (Sub.witnesses explicit)) @?= [imported, canonical]
+  forM_ [False, True] $ \attachFirst -> do
+    let spends = Plan.spendWith first Nothing (Just imported) <> Plan.spendWith second Nothing (Just imported)
+        plan = if attachFirst then attachments <> spends <> Plan.payTo output else spends <> attachments <> Plan.payTo output
+    sub <- Builder.build config plan >>= must
+    Fields.fieldInputs (fieldsOf sub) @?= [Utxo.input first, Utxo.input second]
+    Witnesses.datums (Witnesses.toWitnesses (Sub.witnesses sub)) @?= [imported, canonical]
+  Builder.build config (Plan.spendWith first Nothing (Just imported) <> Plan.spendWith first Nothing (Just canonical) <> Plan.payTo output)
+    >>= (@?= Left (InvalidTransactionPlan "Conflicting requirements for one spending input"))

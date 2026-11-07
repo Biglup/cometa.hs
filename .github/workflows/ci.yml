@@ -103,6 +103,23 @@ jobs:
           cabal run cometa-building-utilities
           cabal run cometa-coin-selection
           cabal run cometa-transaction-witnesses
+          cabal run cometa-send-lovelace
+          cabal run cometa-mint-burn-native-script
+          cabal run cometa-mint-burn-plutus-script
+          cabal run cometa-spend-from-native-script
+          cabal run cometa-spend-from-validator
+          cabal run cometa-deferred-self-index
+          cabal run cometa-deferred-batch
+          cabal run cometa-reward-account-pubkey
+          cabal run cometa-reward-account-script
+          cabal run cometa-drep-pubkey
+          cabal run cometa-drep-script
+          cabal run cometa-vote-for-proposal-pubkey
+          cabal run cometa-vote-for-proposal-script
+          cabal run cometa-donate-to-treasury
+          cabal run cometa-propose-treasury-withdrawal
+          cabal run cometa-deferred-withdraw-zero
+          cabal run cometa-plutus-v4-guarded-subtransaction
           python tools/check-key-handler-roles.py
           python tools/check-credential-roles.py
       - name: Exercise optimized pure crypto evaluation and concurrency

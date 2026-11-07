@@ -102,6 +102,8 @@ import qualified Cometa.PolicyId as Policy
 import qualified Cometa.Protocol.Parameters as Parameters
 import Cometa.Script (Script)
 import qualified Cometa.Script as Script
+import qualified Cometa.Script.Native as NativeScript
+import qualified Cometa.Script.Plutus as Plutus
 import Cometa.SubTransaction (SubTransaction)
 import qualified Cometa.SubTransaction as Sub
 import qualified Cometa.SubTransaction.Body as SubBody
@@ -194,7 +196,9 @@ spendWith u r = one . Spend u (Immediate <$> r)
 referenceInput :: Utxo -> Plan
 referenceInput = one . Reference
 
--- | Attach a native or Plutus script witness.
+-- | Attach a native or Plutus script witness. Repeated attachments of the same
+-- language and script bytes contribute one witness, ordered by the first
+-- attachment. Different Plutus versions remain distinct.
 attachScript :: Script -> Plan
 attachScript = one . Script
 
@@ -211,7 +215,9 @@ mintWithRedeemer a n = one . Mint a n . Just . Immediate
 metadata :: Word64 -> Metadatum -> Plan
 metadata label = one . Metadata label
 
--- | Attach a datum witness.
+-- | Attach a datum witness. Repeated exact CBOR encodings contribute one
+-- witness, including data supplied to spending inputs. First occurrence order
+-- is retained; different encodings remain distinct because their hashes differ.
 attachDatum :: EncodedPlutusData -> Plan
 attachDatum = one . Datum
 
@@ -303,15 +309,36 @@ normalizedOperations :: Plan -> [Operation]
 normalizedOperations (Plan instructions _) = ops
   where
     original = toList instructions
-    ops =
+    ops = uniqueDatums Set.empty requirements
+    requirements =
       normalizeMints (deduplicate [op | op <- original, case op of From _ -> False; Until _ -> False; Donation _ -> False; _ -> True])
         <> [Donation (fromInteger (sum ns)) | let ns = [toInteger n | Donation n <- original], not (null ns)]
         <> [From (maximum ns) | let ns = [n | From n <- original], not (null ns)]
         <> [Until (minimum ns) | let ns = [n | Until n <- original], not (null ns)]
 
+    -- Both native add_datum and add_input append to the same witness set.
+    -- Keep datum hash preimages exactly; stripping a repeated input argument
+    -- only avoids its second global insertion, not any input or callback.
+    uniqueDatums _ [] = []
+    uniqueDatums seen (Datum datum : rest)
+      | datum `Set.member` seen = uniqueDatums seen rest
+      | otherwise = Datum datum : uniqueDatums (Set.insert datum seen) rest
+    uniqueDatums seen (Spend input argument (Just datum) : rest)
+      | datum `Set.member` seen = Spend input argument Nothing : uniqueDatums seen rest
+      | otherwise = Spend input argument (Just datum) : uniqueDatums (Set.insert datum seen) rest
+    uniqueDatums seen (operation : rest) = operation : uniqueDatums seen rest
+
     deduplicate [] = []
-    deduplicate (op : rest) = op : deduplicate (if idempotent op then filter (/= op) rest else rest)
+    deduplicate (op : rest) = op : deduplicate (if idempotent op then filter (not . sameAttachment op) rest else rest)
+    -- Native builder_witnesses.c (eadb95cd3ca7f711c203d7f2f4ee21c150d4d7f1)
+    -- appends scripts without enforcing witness-set uniqueness. Match the exact
+    -- hash preimage here; Plutus outer bytestring framing is not script identity.
+    sameAttachment (Script left) (Script right) = scriptIdentity left == scriptIdentity right
+    sameAttachment left right = left == right
+    scriptIdentity (Script.Native script) = (0, NativeScript.encodeCbor script)
+    scriptIdentity (Script.Plutus script) = (fromEnum (Plutus.version script) + 1, Plutus.toBytes script)
     idempotent op = case op of
+      Script {} -> True
       Spend {} -> True
       Reference {} -> True
       Metadata {} -> True

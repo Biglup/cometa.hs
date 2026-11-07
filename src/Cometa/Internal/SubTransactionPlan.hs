@@ -125,6 +125,8 @@ referenceInput :: Utxo -> Plan
 referenceInput a = Plan (Top.referenceInput a)
 
 -- | Attach a native or compiled Plutus script. Executed sub-level scripts require V4.
+-- Repeated attachments with the same language and script bytes contribute one
+-- witness, ordered by the first attachment.
 attachScript :: Script -> Plan
 attachScript a = Plan (Top.attachScript a)
 
@@ -144,7 +146,9 @@ mintWithDeferredRedeemer a b c = Plan (Top.mintWithDeferredRedeemer a b c)
 metadata :: Word64 -> Metadatum -> Plan
 metadata a b = Plan (Top.metadata a b)
 
--- | Attach an exact datum witness.
+-- | Attach an exact datum witness. Repeated exact CBOR encodings contribute one
+-- witness, including data supplied to spending inputs, in first occurrence order.
+-- Different encodings remain distinct because their hashes differ.
 attachDatum :: EncodedPlutusData -> Plan
 attachDatum a = Plan (Top.attachDatum a)
 

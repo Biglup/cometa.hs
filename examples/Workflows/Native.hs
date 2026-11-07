@@ -20,6 +20,7 @@
 module Workflows.Native
   ( Context (..),
     runStage,
+    runStageWithIndexPolling,
     runPayment,
     runMintBurn,
     runLockSpend,
@@ -81,11 +82,14 @@ import qualified Cometa.Transaction.Plan as Plan
 import Cometa.Transaction.Utxo (Utxo)
 import qualified Cometa.Transaction.Utxo as Utxo
 import qualified Cometa.Value as Value
+import Control.Concurrent (threadDelay)
 import Control.Monad (unless)
+import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Trans.Except (ExceptT (..), except, runExceptT)
 import Data.Int (Int64)
 import Data.List (sort)
 import Data.Word (Word64)
+import GHC.Clock (getMonotonicTimeNSec)
 
 -- TYPES ----------------------------------------------------------------------
 
@@ -113,7 +117,13 @@ voidArgument = Data.fromData (Data.Constr 0 [])
 -- check the accepted ID and wait for confirmation before returning. A timeout
 -- aborts the flow: dependent stages must not spend an unconfirmed result.
 runStage :: Context -> Plan -> IO (Either Error Tx.Transaction)
-runStage context plan = runExceptT $ do
+runStage = runStageWithIndexPolling getMonotonicTimeNSec (threadDelay 1000000)
+
+-- | Supply a monotonic nanosecond clock and one polling pause. This seam lets
+-- deterministic provider fixtures model index lag without wall-clock sleeps;
+-- ordinary callers use 'runStage'. Submission still happens exactly once.
+runStageWithIndexPolling :: IO Word64 -> IO () -> Context -> Plan -> IO (Either Error Tx.Transaction)
+runStageWithIndexPolling clock pause context plan = runExceptT $ do
   let backend = provider context
   params <- ExceptT (Provider.protocolParameters backend)
   funds <- ExceptT (Provider.utxosAt backend (wallet context))
@@ -133,7 +143,29 @@ runStage context plan = runExceptT $ do
   except (unless (accepted == identifier) (Left (InvalidProviderResponse "Submitted ID differs from signed transaction body")))
   confirmed <- ExceptT (Provider.awaitTransaction backend accepted (confirmationTimeoutMillis context))
   except (unless confirmed (Left (InvalidBuildingRequest "Confirmation timed out; dependent workflow stages were not run")))
+  ExceptT (awaitWalletSnapshot clock pause context signed)
   pure signed
+
+-- Confirmation and address indexing are separate observations. Wait only on
+-- idempotent queries; never repeat submission after an uncertain response.
+awaitWalletSnapshot :: IO Word64 -> IO () -> Context -> Tx.Transaction -> IO (Either Error ())
+awaitWalletSnapshot clock pause context transaction = runExceptT $ do
+  identifier <- ExceptT (Tx.transactionId transaction)
+  let fields = Body.bodyFields (Body.toBody (Tx.body transaction))
+      expected = [Utxo.utxo (Input.input identifier index) output | (index, output) <- zip [0 ..] (Fields.fieldOutputs fields), Output.address output == wallet context]
+      consumed = Fields.fieldInputs fields
+  started <- liftIO clock
+  let deadline = toInteger started + toInteger (confirmationTimeoutMillis context) * 1000000
+      poll = runExceptT $ do
+        current <- ExceptT (Provider.utxosAt (provider context) (wallet context))
+        if all (`elem` current) expected && all ((`notElem` consumed) . Utxo.input) current
+          then pure ()
+          else do
+            now <- liftIO clock
+            if toInteger now >= deadline
+              then except (Left (InvalidBuildingRequest "Confirmed transaction is not yet reflected in the wallet index; dependent stages stopped"))
+              else liftIO pause >> ExceptT poll
+  ExceptT poll
 
 runPayment :: Context -> Address -> Word64 -> IO (Either Error Tx.Transaction)
 runPayment context recipient amount = runExceptT $ do
@@ -162,7 +194,8 @@ runLockSpend context script amount = runExceptT $ do
   (locked, reference, funded) <- ExceptT (fundScript context script amount)
   let argument = case script of Script.Native _ -> Nothing; Script.Plutus _ -> Just voidArgument
       source = maybe (Plan.attachScript script) Plan.referenceInput reference
-  spent <- ExceptT (runStage context (Plan.spendWith locked argument Nothing <> source))
+  payout <- except (Output.mkOutput (wallet context) (Value.lovelace 1000000) Datum.NoDatum Nothing)
+  spent <- ExceptT (runStage context (Plan.payTo payout <> Plan.spendWith locked argument Nothing <> source))
   pure [funded, spent]
 
 fundScript :: Context -> Script -> Word64 -> IO (Either Error (Utxo, Maybe Utxo, Tx.Transaction))
@@ -193,35 +226,45 @@ outputAt transaction index = runExceptT $ do
     at n (_ : rest) = at (n - 1) rest
     at _ [] = Left (InvalidBuildingRequest "Workflow output index is absent")
 
+-- These deferred examples use inline script witnesses, matching the C++
+-- recipes; they do not create an unrelated reference-script deployment.
+fundInlineScript :: Context -> Script -> IO (Either Error (Utxo, Tx.Transaction))
+fundInlineScript context script = runExceptT $ do
+  digest <- ExceptT (Script.hash script)
+  let destination = Address.ShelleyAddress (Shelley.enterprise (network context) (Credential.ScriptCredential digest))
+  output <- except (Output.mkOutput destination (Value.lovelace 2000000) (Datum.InlineDatum voidArgument) Nothing)
+  funded <- ExceptT (runStage context (Plan.payTo output))
+  locked <- ExceptT (outputAt funded 0)
+  pure (locked, funded)
+
 runDeferredSelf :: Context -> Script -> IO (Either Error [Tx.Transaction])
 runDeferredSelf context script = runExceptT $ do
-  (locked, reference, funded) <- ExceptT (fundScript context script 4000000)
+  (locked, funded) <- ExceptT (fundInlineScript context script)
+  payout <- except (Output.mkOutput (wallet context) (Value.lovelace 1000000) Datum.NoDatum Nothing)
   let callback draft _ = do
         position <- maybe (Left (InvalidBuildingRequest "Deferred input disappeared")) Right (Indices.findInput (Utxo.input locked) draft)
         pure (Data.fromData (Data.Constr 0 [Data.Integer (toInteger position)]))
-      source = maybe (Plan.attachScript script) Plan.referenceInput reference
-  spent <- ExceptT (runStage context (Plan.spendWithDeferredRedeemer locked callback Nothing <> source))
+      plan = Plan.payTo payout <> Plan.spendWithDeferredRedeemer locked callback Nothing <> Plan.attachScript script
+  spent <- ExceptT (runStage context plan)
   pure [funded, spent]
 
 runDeferredBatch :: Context -> Script -> IO (Either Error [Tx.Transaction])
 runDeferredBatch context script = runExceptT $ do
-  (first, reference, funded) <- ExceptT (fundScript context script 8000000)
-  -- A second order is funded independently; neither order is spent until both
-  -- confirmations have completed. Each redeemer pairs its own input and payout.
-  (second, _, fundedAgain) <- ExceptT (fundScriptPreserving context (maybe [] pure reference) script 8000000)
+  (first, funded) <- ExceptT (fundInlineScript context script)
+  -- Each order is funded independently; both confirmations precede settlement.
+  (second, fundedAgain) <- ExceptT (fundInlineScript context script)
   firstPayout <- except (Output.mkOutput (wallet context) (Value.lovelace 1200000) Datum.NoDatum Nothing)
   secondPayout <- except (Output.mkOutput (wallet context) (Value.lovelace 1500000) Datum.NoDatum Nothing)
   let callback input minimumAmount draft _ = do
         own <- maybe (Left (InvalidBuildingRequest "Order input disappeared")) Right (Indices.findInput (Utxo.input input) draft)
         payout <- maybe (Left (InvalidBuildingRequest "Order payout disappeared")) Right (Indices.findOutput (wallet context) minimumAmount draft)
         pure (Data.fromData (Data.Constr 0 [Data.Integer (toInteger own), Data.Integer (toInteger payout)]))
-      source = maybe (Plan.attachScript script) Plan.referenceInput reference
       plan =
         Plan.payTo firstPayout
           <> Plan.payTo secondPayout
           <> Plan.spendWithDeferredRedeemer first (callback first 1200000) Nothing
           <> Plan.spendWithDeferredRedeemer second (callback second 1500000) Nothing
-          <> source
+          <> Plan.attachScript script
   settled <- ExceptT (runStage context plan)
   pure [funded, fundedAgain, settled]
 
