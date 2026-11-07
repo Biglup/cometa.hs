@@ -128,38 +128,39 @@ They are excluded from the remaining-work and completeness assessment.
 | K12 Raw and COSE message signing | D1 sign/verify; upstream key/signature operations | Crypto.Ed25519 and Message.Cip8; test/Ed25519.hs, test/Cip8.hs | **Implemented** raw signatures and address/key-hash-bound COSE outputs, beyond the raw format in D1. CIP8 accepts nonempty direct payloads with empty AAD and hashed=false; it does not establish that the signing key controls the supplied address. Detached/prehashed/custom-AAD signing and a complete COSE verifier are not supplied or implied. |
 | K13 Optics, standard instances and effect/error integration | S14 Convex.CardanoApi.Lenses; A1/A2/A6 class and instance surfaces | Explicit immutable ADTs, qualified functions, Plan composition and ordinary Either/IO records | **Partial / ergonomic difference.** No optional lens/Plutus/cardano-api instance packages or drop-in MonadBlockchain/GYTxMonad interpreters. Existing record injection is a deliberate interface choice, not source compatibility. Add only invariant-preserving adapters; unsafe constructors, partial lookup functions and printable secret instances are not required to imitate upstream. |
 
-## Implementation routing and priorities
+## Minimum feature set and nice-to-have backlog
 
-These are actionable follow-ups, not permission to expand the current examples
-PR or silently redefine 100% scope.
+Prioritize completion of ordinary wallet, transaction and governance workflows.
+The broader comparison is a reference inventory, not a requirement to reproduce
+every upstream convenience API. The following minimum is the proposed delivery
+baseline; nice-to-have items do not block that baseline. Excluded infrastructure
+remains excluded. Existing applicable cardano-c domain coverage remains required.
 
-1. **Binding-only / pure Haskell gaps with existing data:** governance identifier
-   text with checked standard bounds; typed text-envelope/file interchange;
-   address-level balance changes; selected Value algebra; metadata/native-script
-   JSON codecs and standalone checked Value serialization. Add independent vectors
-   and define the schema per operation. Preserve exact signed transaction bytes.
-2. **Optional Haskell integration:** Aiken/CIP-57 blueprints, typed Plutus data
-   codecs and upstream cardano-api/Plutus conversions, broader provider queries
-   and time/era-history interpretation. Additional built-in provider backends are
-   excluded. No private C AST needs exposure.
-   The native current-treasury builder setter is a distinct native API gap;
-   manual field construction already exists.
-3. **Requires a new implementation/backend or public native extension:** VM
-   configurable ceilings and traces/profiling; full subtransaction/script signer
-   analysis; legacy derivation variants; consensus secret-key algorithms. Merely
-   adding FFI declarations cannot create an installed public capability.
-   Haskell-only alternative backends remain a possible design choice.
-4. **Previously deferred ergonomics:** automatic ToPlutusData/FromPlutusData,
-   derived redeemer codecs and a shorter deferred-redeemer/builder interface.
-   Existing explicit operations are real capability, but the requested ergonomic
-   comparison must continue to show the difference. Do not add partial findIndex
-   convenience functions simply to imitate upstream.
+| Minimum remaining capability | Concrete scope | Implementation home |
+| --- | --- | --- |
+| Complete transaction construction | Current-treasury-value setter and custom/deferred proposing redeemers at supported transaction levels. Existing signing, balancing, script and governance workflows remain supported. | Shared builder additions in cardano-c; idiomatic binding entrypoints. |
+| Essential standards codecs | Checked CIP-105/129 governance identifiers and standalone checked Value CBOR. Audit/reuse existing C operations before adding new ones. | Native standards implementation and binding adapters; pure language-level value helpers where appropriate. |
+| State queries needed by those workflows | Current tip/slot, stake and DRep registration/deposits, active pool checks, voting-target status/expiry and constitution policy. Applications should not need ad hoc HTTP outside the provider for the shipped governance examples. | Binding transport and public query contracts; shared native domain types where useful. New C provider capabilities only when native consumers need them. |
+| Actionable failures | Structured submission rejection and useful evaluation failure details, with operation context and no credential leakage. Full successful-execution tracing/profiling is not required. | Native evaluator diagnostics; provider-specific response decoding in the binding. |
+| Complete ordinary key/message workflows | Secure key/English mnemonic generation helpers, using audited entropy sources, and CIP-8 verification with explicit address/key-binding checks. | Shared crypto/verification in cardano-c; idiomatic entropy and secret-lifetime boundaries in bindings. |
 
-The existing native ledger has genuine remaining codec/domain entries and many
-private lifetime/container mechanics. Neither its raw symbol count nor successful
-preprod examples is a defensible denominator for this broader comparison.
-Dijkstra offline tests, live supported-era flows, remote evaluator support and
-upstream cross-library interoperability must be reported separately.
+Nice to have, without blocking the minimum:
+
+- cardano-cli text envelopes, broader JSON interchange and general CBOR convenience APIs.
+- Extra Value algebra, per-address balance summaries, transaction chaining and automatic signer-choice analysis.
+- Bulk/historical queries, mempool and pending-spend helpers, richer era-history utilities and governance poll helpers.
+- Typed datum/redeemer deriving, blueprint import/schema validation/code generation, and cardano-api/Plutus interoperability packages. Previously deferred ergonomic improvements remain deferred.
+- Non-Data UPLC parameter application and public program-level tooling.
+- Configurable VM ceilings, successful trace collection and profiling; broader remote evaluation compatibility.
+- Multilingual mnemonic dictionaries, legacy/hardware derivation variants, shared-wallet templates and identifiers, KES/VRF/BLS secret-key operations, and advanced COSE modes.
+- Optional optics, framework instances and drop-in upstream effect adapters.
+
+Verification is required across the minimum: independent standard vectors,
+invalid-input/boundary tests, ownership and cancellation checks, and complete
+caller workflows. Dijkstra live validation remains a prerequisite for claiming
+network readiness once an appropriate network is available; it is not replaced
+by offline tests. Exact cross-library Dijkstra compatibility requires its own
+pinned comparisons before making that claim.
 
 ## Reviewed primary source catalog
 

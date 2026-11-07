@@ -3602,32 +3602,17 @@ implemented, partial and missing application workflows from excluded
 infrastructure. These are review groups, not a percentage denominator. Current cardano-api already includes experimental
 Dijkstra support; the comparison does not claim otherwise.
 
-Before claiming completeness within the agreed scope, expand each in-scope group
-into exported operations and supported-version contracts, with a named acceptance
-test and provenance.
-Matching names or successfully building the C++ examples does not satisfy this
-release gate. Preserve in-scope gaps until they are implemented; infrastructure
-excluded by the maintainer is comparison context only.
+The [minimum feature set and nice-to-have backlog](HASKELL_API_PARITY.md#minimum-feature-set-and-nice-to-have-backlog)
+now determines delivery priority. The minimum covers remaining construction
+capabilities, essential identifiers/Value CBOR, workflow-critical provider state,
+actionable failures, and ordinary key generation/CIP-8 verification. Broader
+interchange, blueprint/typed-data ergonomics, planning conveniences, VM tooling
+and advanced wallet/crypto variants are nice to have. Infrastructure remains
+excluded. This prioritization does not remove applicable native domain coverage.
 
-Follow-up work should proceed in these reviewable slices:
-
-1. Finish domain codecs and interchange: governance identifiers, standalone Value
-   algebra/CBOR, JSON and text envelopes. Include upstream vectors, malformed-input
-   cases, exact encoding and round-trip properties.
-2. Add application helpers: per-address balance changes and tracked chained
-   transaction funding. Validate full caller workflows and failure behavior;
-   aggregate conservation and parallel independent builds are not substitutes.
-3. Add provider query capabilities for datum lookup, current registration/deposit,
-   DRep/pool/action/constitution state, epoch history and mempool needs. Keep custom
-   endpoints and optional authentication. Add structured submission diagnostics without exposing arbitrary response bodies or credentials. Test deterministic HTTP fixtures and
-   authorized live responses separately.
-4. Design optional typed-data, blueprint and ledger/cardano-api interoperability.
-   Keep dependency-heavy integrations separable. General UPLC constant application
-   needs a reviewed backend extension; Data-only parameter application is not full
-   equivalence. The previously deferred redeemer ergonomics remain deferred.
-5. Address native/backend gaps: VM limits and diagnostic traces, signer analysis,
-   legacy wallet derivation and consensus-key operations. Add public native APIs
-   only where the capability belongs there; do not expose private VM structures.
+Do not equate completion of the minimum with full upstream parity. Track named
+acceptance tests and provenance for every required workflow, and retain optional
+gaps visibly without treating them as minimum-release blockers.
 
 For each slice, review upstream source before API design, use idiomatic public
 values, preserve cancellation/resource safety, and add cross-library or independent
