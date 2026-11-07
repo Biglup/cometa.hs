@@ -47,3 +47,17 @@ application's Cabal project and declare `cometa` in the application's
 `build-depends`. Use an explicit source revision for reproducible builds. See
 [hashes](hashes.md) for the current public interface and
 [API reference](api-reference.md) for local Haddock generation.
+
+## Blockfrost
+
+Add the optional Blockfrost component when your application uses that backend:
+
+```text
+build-depends:
+  cometa,
+  cometa:blockfrost
+```
+
+The component supplies `Cometa.Provider.Blockfrost` and its HTTP/TLS dependencies.
+Applications using another provider or working offline only need `cometa`.
+Both components use the same transaction values and `Provider` interface.

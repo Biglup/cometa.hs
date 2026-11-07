@@ -42,6 +42,7 @@ import Hedgehog (Property, evalEither, evalIO, forAll, property, (===))
 import qualified Hedgehog.Gen as Gen
 import qualified Hedgehog.Range as Range
 import qualified Metadata
+import qualified NativeWorkflows
 import qualified Ownership
 import qualified Parameters
 import qualified PasswordCrypto
@@ -82,6 +83,7 @@ main =
         Parameters.tests,
         Scripts.tests,
         Metadata.tests,
+        NativeWorkflows.tests,
         PlutusData.tests,
         Value.tests,
         Address.tests,

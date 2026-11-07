@@ -15,18 +15,16 @@ and open `index.html`. GitHub requires sign-in to download artifacts.
 With the native dependency configured as for a normal build, run:
 
 ```sh
-cabal haddock all
+python3 tools/build-api-docs.py
 ```
 
-Cabal prints the generated HTML location under `dist-newstyle`. Open the package
-index for the main library, then browse `Cometa`, `Cometa.Crypto.Blake2b`,
-`Cometa.Encoding.Cbor`, `Cometa.Crypto.Bip39`, the `Cometa.Crypto.Ed25519` and
-`Cometa.Crypto.Bip32` modules, `Cometa.Crypto.Pbkdf2`, `Cometa.Crypto.Emip3`,
-`Cometa.KeyHandler.Software`, `Cometa.Credential`, `Cometa.Address.Shelley`,
-`Cometa.Address.Reward`, `Cometa.NetworkId`, `Cometa.AssetName`, `Cometa.PolicyId`,
-`Cometa.AssetId`, `Cometa.Value`, `Cometa.Error`, and `Cometa.Error.Code`.
-Use the same `--extra-include-dirs` and `--extra-lib-dirs` options as your build
-when the native library is installed outside the default search paths.
+Open `docs/_build/api/index.html`, then choose the core library or optional
+Blockfrost provider. The archive keeps links between these components relative,
+so it can be moved or shared. Third-party API links point to Hackage.
+
+Keep the native include and library directories in `cabal.project.local` when
+the native library is installed outside the default search paths. For ordinary
+local browsing, `cabal haddock all` is also available.
 
 ## Availability
 

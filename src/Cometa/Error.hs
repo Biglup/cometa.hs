@@ -214,6 +214,16 @@ data Error
     InvalidByronAddress !Text
   | -- | Byron address text is not a valid Base58 address.
     InvalidByronAddressText
+  | -- | A backend rejected an HTTP request. The payload contains the operation
+    -- name and HTTP status, without response bodies or credentials.
+    ProviderHttpError !Text !Int
+  | -- | A backend request could not complete. The payload contains the operation
+    -- name and a credential-free description of the transport failure.
+    ProviderTransportError !Text !Text
+  | -- | A backend response violates the named operation's data contract.
+    InvalidProviderResponse !Text
+  | -- | A backend configuration is invalid. The diagnostic excludes credentials.
+    InvalidProviderConfiguration !Text
   | -- | The requested service capability is not supplied.
     UnsupportedOperation !Text
   | -- | An operation used a resource after its scope ended.

@@ -90,6 +90,10 @@ jobs:
           cabal run cometa-providers
           cabal run cometa-evaluation
           cabal run cometa-native-evaluation
+          cabal run cometa-native-swap
+          cabal run cometa-wallet-recovery
+          cabal run cometa-blockfrost-queries
+          cabal run cometa-blockfrost-payment
           cabal run cometa-deferred-redeemers
           cabal run cometa-dijkstra-building
           cabal run cometa-subtransaction-building
@@ -104,11 +108,11 @@ jobs:
           cabal test cometa-test --enable-optimization=2 --test-show-details=direct --test-options="-p BIP39 +RTS -N2 -RTS"
           cabal test cometa-test --enable-optimization=2 --test-show-details=direct --test-options="-p PBKDF2 +RTS -N2 -RTS"
       - name: Build Haddock
-        run: cabal haddock lib:cometa --haddock-for-hackage --haddock-hyperlink-source
+        run: python tools/build-api-docs.py
       - uses: actions/upload-artifact@v4
         with:
           name: haddock-${{ matrix.os }}-ghc-${{ matrix.ghc }}
-          path: dist-newstyle/build/*/ghc-*/cometa-*/doc/html/cometa-*-docs/
+          path: docs/_build/api/
           if-no-files-found: error
       - name: Check package and build source distribution consumer
         env:
@@ -134,6 +138,7 @@ jobs:
           # Suppress only the documented GHC 9.6.7 scheduler shutdown allocation.
           timeout 600s valgrind --suppressions=test/valgrind/ghc-9.6.7.supp --fair-sched=yes --leak-check=full --show-leak-kinds=definite,indirect --errors-for-leak-kinds=definite,indirect --error-exitcode=1 "$(cabal list-bin cometa-test)" --num-threads=1 +RTS -N2 -RTS
           timeout 600s valgrind --suppressions=test/valgrind/ghc-9.6.7.supp --fair-sched=yes --leak-check=full --show-leak-kinds=definite,indirect --errors-for-leak-kinds=definite,indirect --error-exitcode=1 "$(cabal list-bin cometa-runtime-test)" --num-threads=1 +RTS -N2 -RTS
+          timeout 600s valgrind --suppressions=test/valgrind/ghc-9.6.7.supp --fair-sched=yes --leak-check=full --show-leak-kinds=definite,indirect --errors-for-leak-kinds=definite,indirect --error-exitcode=1 "$(cabal list-bin cometa-blockfrost-test)" --num-threads=1 +RTS -N2 -RTS
 
   quality:
     runs-on: ubuntu-24.04
@@ -157,8 +162,8 @@ jobs:
           clang-format-18 --dry-run --Werror cbits/*.c cbits/*.h test/cbits/*.c
       - name: Check formatting and lint
         run: |
-          find src internal test examples \( -name '*.hs' -o -name '*.hsc' \) -print0 | xargs -0 "$RUNNER_TEMP/style-bin/ormolu" --mode check
-          "$RUNNER_TEMP/style-bin/hlint" src internal test examples
+          find src internal test examples blockfrost-src blockfrost-test \( -name '*.hs' -o -name '*.hsc' \) -print0 | xargs -0 "$RUNNER_TEMP/style-bin/ormolu" --mode check
+          "$RUNNER_TEMP/style-bin/hlint" src internal test examples blockfrost-src blockfrost-test
 
   documentation:
     runs-on: ubuntu-24.04
