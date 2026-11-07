@@ -736,3 +736,52 @@ cometa_parameters_to_snapshot(cardano_protocol_parameters_t* parameters, const u
   cardano_protocol_param_update_unref(&shape);
   return (unsigned int)result;
 }
+
+unsigned int
+cometa_parameters_update_to_plutus_data(const unsigned char* bytes, size_t size, cardano_buffer_t** output)
+{
+  if (output == NULL)
+  {
+    return CARDANO_ERROR_POINTER_IS_NULL;
+  }
+
+  *output = NULL;
+
+  if (bytes == NULL)
+  {
+    return CARDANO_ERROR_POINTER_IS_NULL;
+  }
+
+  cardano_protocol_param_update_t* update = NULL;
+  cardano_plutus_data_t*           data   = NULL;
+  cardano_cbor_writer_t*           writer = NULL;
+  cardano_error_t                  result = read_snapshot(bytes, size, &update);
+
+  if (result == CARDANO_SUCCESS)
+  {
+    result = cardano_protocol_param_update_to_plutus_data(update, &data);
+  }
+
+  if (result == CARDANO_SUCCESS)
+  {
+    writer = cardano_cbor_writer_new();
+    result = writer == NULL ? CARDANO_ERROR_MEMORY_ALLOCATION_FAILED : cardano_plutus_data_to_cbor(data, writer);
+  }
+
+  if (result == CARDANO_SUCCESS)
+  {
+    result = cardano_cbor_writer_encode_in_buffer(writer, output);
+  }
+
+  cardano_cbor_writer_unref(&writer);
+  cardano_plutus_data_unref(&data);
+  cardano_protocol_param_update_unref(&update);
+
+  if (result != CARDANO_SUCCESS)
+  {
+    cardano_buffer_unref(output);
+    *output = NULL;
+  }
+
+  return (unsigned int)result;
+}

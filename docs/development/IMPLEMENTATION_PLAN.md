@@ -3464,3 +3464,114 @@ The rebuilt public provider passed the final supplemental-input check: transacti
 evaluation without its synthetic input and returned 8,400 memory units and
 1,328,100 steps when that exact input was supplied. This transaction was evaluated
 only, never submitted.
+
+### P14, first completeness pass: inspection and message interchange
+
+The post-P13 audit checks the installed public headers at native commit
+`eadb95cd3ca7f711c203d7f2f4ee21c150d4d7f1`. It distinguishes missing domain operations
+from immutable-value adaptations and stale planning records. This slice does not
+complete P14 or declare every pending ledger entry implemented.
+
+#### API review and caller workflows
+
+- Transaction inspection uses explicit `Cometa.Transaction.Inspection` functions
+  returning `IO (Either Error Aeson.Value)`. The caller assembles or decodes a
+  typed value, inspects it, then renders the result with `Aeson.encode`.
+  [cardano-api JSON serialization](https://github.com/IntersectMBO/cardano-api/blob/5e63165a4bb7481a03d2e50464dc9c4f106c9fa5/cardano-api/src/Cardano/Api/Serialise/Json.hs)
+  demonstrates explicit schema serialization with structured decode errors;
+  [Atlas transaction instances](https://github.com/geniusyield/atlas/blob/c3adfb416242ea25a244bfaa1614213eecdc55d9/src/GeniusYield/Types/Tx.hs)
+  instead use CBOR-hex JSON strings. Cometa deliberately does not install global
+  instances that would confuse inspection with transaction interchange.
+- CIP-8 message signing uses the existing scoped `SigningKey`, a validated address
+  or key-hash binding, and binary payload. It returns owned COSE Sign1 and key
+  bytes. The actual [cardano-addresses signing workflow](https://github.com/IntersectMBO/cardano-addresses/blob/5bca1736741413802f5b5aa96d0be9747f89f03c/lib/Cardano/Address/Derivation.hs)
+  informed opaque-key/message composition; it is not a COSE implementation.
+  [CIP-8](https://cips.cardano.org/cip/CIP-0008) defines the message representation.
+  Cometa retains IO and scoped native keys. The pinned native API signs nonempty,
+  unhashed payloads with empty external AAD; `_ex` selects key-hash binding. Neither
+  operation proves that the supplied address/hash belongs to the key. The public
+  contract and independent verification tests state this explicitly. The encrypted
+  software handler is unchanged because its native interface has no message method.
+- Asset identifiers import/export policy bytes followed by exact name bytes.
+  [cardano-api's AssetId model](https://github.com/IntersectMBO/cardano-api/blob/5e63165a4bb7481a03d2e50464dc9c4f106c9fa5/cardano-api/src/Cardano/Api/Value/Internal.hs)
+  separates Ada from native tokens; its dotted text grammar is not silently used
+  for native contiguous hex. Successful native codecs round-trip. Ada is explicitly
+  unsupported in these codecs rather than exported as an empty value that cannot
+  be imported. Fingerprints follow the [CIP-14 Haskell reference and vectors](https://github.com/cardano-foundation/CIPs/blob/86b89208d3b2aabb5dcc5b778dfbe09096b4e114/CIP-0014/README.md):
+  BLAKE2b-160 of policy/name bytes followed by Bech32 with the `asset` prefix.
+  Fingerprints are display identifiers, not reversible or authenticity proofs.
+- `Protocol.Parameters.Update.toPlutusData` converts a typed sparse update into
+  the changed-parameter script-data map. The reviewed [ledger caller](https://github.com/IntersectMBO/cardano-ledger/blob/7827506b7518284d7f9dbbe3502a20431e513fe9/eras/conway/impl/src/Cardano/Ledger/Conway/TxInfo.hs)
+  passes `toPlutusData` into V3 `ChangedParameters` for a parameter-change action.
+  Cometa uses a named operation rather than adding a generic conversion class,
+  and retains IO because the native conversion allocates. It differs from ledger
+  update CBOR: rationals are reduced lists, null alternatives are constructors,
+  and historical keys 12–14 are omitted. It does not validate era activation rules.
+
+#### Ownership and conformance
+
+Inspection parses fresh native objects from borrowed input bytes, requires a
+complete CBOR value, writes JSON, copies the owned result and releases all native
+owners. Returned Aeson values are independent of those owners. Original body bytes,
+transaction IDs and witnesses remain unchanged. The JSON writer buffer contains
+length-delimited bytes without a terminating NUL; no terminator is guessed or removed.
+
+CIP-8 borrows the key under its existing operation lock. Both output slots are
+initialized and bracketed before the safe native call; partial native failures,
+copy exceptions and cancellation release both outputs. Temporary address/hash
+owners are released in C. Tests cover both key formats, exact native vectors,
+independent COSE structure and Ed25519 verification, mismatched bindings, empty
+payloads, closed keys, lazy failures, repeated calls and concurrent independent scopes.
+
+Protocol conversion releases its temporary update, data and writer before returning
+one owned CBOR buffer. The Haskell boundary copies and releases that buffer before
+materializing public Plutus data. Asset codecs acquire no native resource;
+fingerprinting uses the existing scoped hash implementation.
+
+Fixture provenance is recorded in `test/Fixtures/INSPECTION.md`,
+`test/Fixtures/PARAMETER_DATA.md`, and the CIP-8/AssetId test modules. Inspection
+compares whole expected JSON values from all three pinned binding transaction
+fixtures and two rich native transaction fixtures. It also checks each nested
+body/subtransaction, arbitrary large signed integers, binary values, malformed
+input cleanup, retained results across GC and concurrent inspection. Asset tests
+include all eight official CIP-14 vectors and native codec correspondence for all
+33 valid asset-name lengths. Protocol tests check rational reduction, execution-unit
+ordering, null distinctions, unsigned-64-bit values, all supported parameter IDs,
+unchanged source bytes and repeated conversions.
+
+The ledger reconciles 23 explicitly reviewed entries in this slice: six asset-codec
+operations, ten stale address mappings, four inspection operations, two CIP-8
+operations and one protocol conversion. No test-only oracle is counted as production
+coverage, and no native fingerprint symbol is invented.
+
+#### Remaining completeness and release gates
+
+A subsequent pass must address governance identifier text (CIP-105/129 and checked
+index bounds), standalone Value CBOR and remaining algebra, standalone JSON codecs,
+language-view encoding and remaining general CBOR capabilities. The large pending
+count also contains buffers, integers, mutable collection machinery, diagnostics
+and lifetime operations: each needs a justified correspondence or omission, not a
+mechanical public wrapper or a blanket status change.
+
+The lifecycle review found no demonstrated defect in the inspected callback and
+native evaluation paths. Existing tests cover cancellation, reentry, lazy results,
+retained aliases, grouped rollback and V1–V4 evaluation. Performance review still
+needs measured build/sign/inspect, startup and marshaling baselines. The Blockfrost
+manager deliberately disables idle pooling for deterministic connection cleanup;
+no ownership change is justified by unmeasured assumptions. Published-package
+consumer validation and release publication remain P15 work.
+
+
+#### Integrated validation for this slice
+
+GHC 9.6.7 builds all components and passes all 518 tests: 339 public, 131 runtime,
+and 48 Blockfrost. Both changed public/runtime suites pass Valgrind with zero
+errors, zero definitely/indirectly/possibly lost bytes and zero matched
+suppressions. The unchanged Blockfrost suite retains its P13 clean Valgrind run.
+The final CIP-8 test cleanup was recompiled and its six tests pass separately.
+All four new/updated examples run successfully. Ormolu, HLint, ClangFormat,
+`cabal check`, native inventory, strict Sphinx/link checks and both portable public
+Haddock references pass; public declarations retain 100% documentation coverage.
+The source-package manifest contains the new sources, fixtures, notices, guides
+and examples. Hosted CI results are reviewed on the PR before another slice;
+these local checks do not by themselves establish the platform matrix.

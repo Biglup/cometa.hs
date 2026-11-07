@@ -52,4 +52,14 @@ unsigned int cometa_parameters_from_snapshot(const unsigned char* bytes, size_t 
  */
 unsigned int cometa_parameters_to_snapshot(cardano_protocol_parameters_t* parameters, const unsigned char* template_bytes, size_t template_size, cardano_buffer_t** output);
 
+/**
+ * \brief Convert a sparse protocol update to its ChangedParameters Plutus data.
+ * \param[in] bytes Borrowed complete protocol-update CBOR until return.
+ * \param[in] size Number of input bytes.
+ * \param[out] output Owned Plutus-data CBOR buffer on success; NULL on failure.
+ * \return Native status. Temporary update, data and writer owners are released
+ * before return. The caller releases the returned buffer.
+ */
+unsigned int cometa_parameters_update_to_plutus_data(const unsigned char* bytes, size_t size, cardano_buffer_t** output);
+
 #endif /* BIGLUP_LABS_INCLUDE_COMETA_PARAMETERS_H */

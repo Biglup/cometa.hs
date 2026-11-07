@@ -30,6 +30,7 @@ installation
 hashes
 cbor
 signing
+message-signing
 bip32
 bip39
 password-crypto
@@ -48,6 +49,7 @@ certificates
 governance-proposals
 transaction-bodies
 transactions
+transaction-inspection
 transaction-witnesses
 providers
 blockfrost

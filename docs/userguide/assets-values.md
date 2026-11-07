@@ -2,7 +2,8 @@
 
 Use `Cometa.AssetId` to identify Ada or a native token, and `Cometa.Value` to
 assemble and inspect their quantities. Asset identities and values are immutable;
-construction, arithmetic, and inspection are pure.
+construction, arithmetic, and inspection are pure. Computing a fingerprint uses
+`IO` and returns an explicit error result.
 
 ## Assemble a token payment
 
@@ -12,7 +13,8 @@ wherever the asset is needed. `AssetId.Ada` identifies Ada independently of any
 policy or name. An empty name under a policy still identifies a native token.
 
 The following example imports a policy and token name, combines Ada and token
-quantities, and computes the token balance after a payment. It uses demonstration
+quantities, computes the token balance after a payment, and displays the native
+asset ID and fingerprint. It uses demonstration
 values and makes no network requests.
 
 ```{literalinclude} ../../examples/AssetsValues.hs
@@ -26,7 +28,8 @@ Run it with:
 cabal run cometa-assets-values
 ```
 
-Input validation has one `Either Error` boundary. Once the policy and name are
+The example combines input validation and fingerprint hashing through `ExceptT`
+and handles one `Either Error` result. Once the policy and name are
 validated, `Value.singleton`, `Value.fromList`, and arithmetic compose them
 without further validation branches.
 
@@ -48,6 +51,26 @@ hexadecimal representation. Use `PolicyId.toBytes` and `PolicyId.toHex` to expor
 it. A policy ID is a script hash: `PolicyId.fromScriptHash` and
 `PolicyId.toScriptHash` convert validated values directly. Importing a policy ID
 does not compute a script hash or establish the right to mint tokens.
+
+## Exchange full asset IDs and display fingerprints
+
+`AssetId.fromBytes` imports the 28-byte policy ID followed by zero through 32
+exact asset-name bytes. `AssetId.fromHex` imports the same bytes as contiguous
+hexadecimal text, without a separator. Both preserve binary names and accept an
+empty native name. Byte lengths outside 28 through 60 return
+`InvalidAssetIdLength`; malformed hexadecimal returns `InvalidHex`.
+
+`AssetId.toBytes` and `AssetId.toHex` return these native asset encodings; hex
+output is lowercase. Ada has no representation in this format, so both exports
+return `Left (UnsupportedOperation ...)` for `AssetId.Ada`. Empty bytes and empty
+hex are rejected on import. Select `AssetId.Ada` explicitly when handling Ada.
+
+Use `AssetId.fingerprint asset` to compute a CIP-14 display fingerprint. It returns
+`IO (Either Error Text)` containing an `asset1...` Bech32 string for a native
+asset, or `UnsupportedOperation` for Ada. The fingerprint hashes the policy and
+exact name bytes with BLAKE2b-160. It cannot be decoded back to the full asset ID
+and does not prove that a token is authentic. Keep the full policy and name for
+identity interchange and transaction construction.
 
 ## Add quantities and inspect balances
 

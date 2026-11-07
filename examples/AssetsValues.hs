@@ -14,7 +14,7 @@
 -- limitations under the License.
 {-# LANGUAGE OverloadedStrings #-}
 
--- | Validate asset identifiers once, then compose signed balances purely.
+-- | Validate asset identifiers, compose signed balances, and display a CIP-14 fingerprint.
 module Main (main) where
 
 -- IMPORTS --------------------------------------------------------------------
@@ -24,17 +24,27 @@ import qualified Cometa.AssetName as AssetName
 import Cometa.Error (Error)
 import qualified Cometa.PolicyId as PolicyId
 import qualified Cometa.Value as Value
+import Control.Monad.Trans.Except (ExceptT (..), except, runExceptT)
 import qualified Data.Text as Text
 import System.Exit (die)
 
 -- DEFINITIONS ----------------------------------------------------------------
 
 main :: IO ()
-main = case balances of
-  Left err -> die (show err)
-  Right (token, remaining) -> do
-    putStrLn ("Remaining lovelace: " <> show (Value.quantity AssetId.Ada remaining))
-    putStrLn ("Remaining token units: " <> show (Value.quantity token remaining))
+main = do
+  result <- runExceptT $ do
+    (token, remaining) <- except balances
+    assetHex <- except (AssetId.toHex token)
+    displayFingerprint <- ExceptT (AssetId.fingerprint token)
+    pure (token, remaining, assetHex, displayFingerprint)
+
+  case result of
+    Left err -> die (show err)
+    Right (token, remaining, assetHex, displayFingerprint) -> do
+      putStrLn ("Asset ID: " <> Text.unpack assetHex)
+      putStrLn ("Asset fingerprint: " <> Text.unpack displayFingerprint)
+      putStrLn ("Remaining lovelace: " <> show (Value.quantity AssetId.Ada remaining))
+      putStrLn ("Remaining token units: " <> show (Value.quantity token remaining))
 
 balances :: Either Error (AssetId.AssetId, Value.Value)
 balances = do

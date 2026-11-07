@@ -19,11 +19,13 @@ module Main (main) where
 -- IMPORTS --------------------------------------------------------------------
 
 import qualified Address
+import qualified AssetId
 import qualified Bip32
 import qualified Bip39
 import qualified Callback
 import qualified Cbor
 import qualified Certificates
+import qualified Cip8
 import qualified Cometa
 import qualified Cometa.Crypto.Blake2b as Blake2b
 import Cometa.Error (Error (..))
@@ -70,7 +72,9 @@ main :: IO ()
 main =
   defaultMain $
     testGroup "Cometa foundation" $
-      [ CompleteAddress.tests,
+      [ AssetId.tests,
+        Cip8.tests,
+        CompleteAddress.tests,
         TransactionBody.tests,
         PublicTransaction.tests,
         TransactionWitnesses.tests,

@@ -23,8 +23,12 @@ import qualified Codec.CBOR.Encoding as Encode
 import qualified Codec.CBOR.Read as Read
 import qualified Codec.CBOR.Write as Write
 import Cometa.Error (Error (..))
+import qualified Cometa.PlutusData as Data
+import qualified Cometa.Protocol.ExUnits as Units
 import qualified Cometa.Protocol.Parameters as P
 import qualified Cometa.Protocol.Parameters.Update as U
+import qualified Cometa.Protocol.Rational as Rational
+import qualified Cometa.UnitInterval as Unit
 import Control.Monad (forM_)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as Lazy
@@ -51,6 +55,9 @@ tests =
       testCase "exact import bytes remain distinct from normalized serialization" checkIdentity,
       testCase "invalid schema bounds duplicates unknown and trailing bytes fail" checkInvalid,
       testCase "nonce and positive stride validation reject invalid boundaries" checkBounds,
+      testCase "changed parameters reduce rationals and preserve execution-unit order" checkChangedParameters,
+      testCase "changed parameters distinguish absent and nullable values" checkChangedNullable,
+      testCase "changed parameters cover all supported field identifiers" checkChangedFields,
       testProperty "sparse fee edits preserve other full fields and native semantics" propFees
     ]
 
@@ -264,3 +271,54 @@ nativeAgreement input expected = BS.useAsCStringLen input $ \(inputPtr, inputSiz
 -- All storage is borrowed through synchronous return; C scopes all native owners.
 foreign import ccall unsafe "cometa_test_parameters_agreement"
   c_agreement :: Ptr Word8 -> CSize -> Ptr Word8 -> CSize -> IO CInt
+
+-- Adapted from cardano-c's pinned protocol_param_update.cpp
+-- encodesTagsValuesAndReducesRationals; see Fixtures/PARAMETER_DATA.md.
+checkChangedParameters :: IO ()
+checkChangedParameters = do
+  pledge <- expectRight (Rational.mkNonNegativeRational 3 10)
+  treasury <- expectRight (Unit.mkUnitInterval 2 10)
+  let change =
+        U.empty
+          { U.updateMinFeeA = Just 44,
+            U.updatePoolPledgeInfluence = Just pledge,
+            U.updateTreasuryGrowthRate = Just treasury,
+            U.updateMaxTxExUnits = Just (Units.ExUnits 1000 2000)
+          }
+      expected =
+        Data.Map
+          [ (Data.Integer 0, Data.Integer 44),
+            (Data.Integer 9, Data.List [Data.Integer 3, Data.Integer 10]),
+            (Data.Integer 11, Data.List [Data.Integer 1, Data.Integer 5]),
+            (Data.Integer 20, Data.List [Data.Integer 1000, Data.Integer 2000])
+          ]
+  U.toPlutusData change >>= (@?= Right expected)
+  U.toPlutusData U.empty >>= (@?= Right (Data.Map []))
+
+checkChangedNullable :: IO ()
+checkChangedNullable = do
+  let change =
+        U.empty
+          { U.updateMinFeeA = Just maxBound,
+            U.updateMaxPledgeLeverage = Just Nothing,
+            U.updatePerasBootstrapRound = Just Nothing
+          }
+      expected =
+        Data.Map
+          [ (Data.Integer 0, Data.Integer (toInteger (maxBound :: Word64))),
+            (Data.Integer 38, Data.Constr 1 []),
+            (Data.Integer 53, Data.Constr 1 [])
+          ]
+  U.toPlutusData change >>= (@?= Right expected)
+
+checkChangedFields :: IO ()
+checkChangedFields = do
+  full <- fixture
+  let change = U.fromParameters full
+      original = U.encodeCbor change
+  converted <- U.toPlutusData change >>= expectRight
+  case converted of
+    Data.Map entries -> map fst entries @?= map Data.Integer ([0 .. 11] ++ [16 .. 56])
+    _ -> assertFailure "Changed parameters must be a data map"
+  U.encodeCbor change @?= original
+  forM_ [1 .. 25 :: Int] $ \_ -> U.toPlutusData change >>= (@?= Right converted)

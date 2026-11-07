@@ -35,6 +35,7 @@ module Cometa.Protocol.Parameters.Update
     decodeCbor,
     toCbor,
     toUpdate,
+    toPlutusData,
   )
 where
 
@@ -47,8 +48,10 @@ import qualified Codec.CBOR.Write as Write
 import Cometa.Error (Error (..))
 import Cometa.Internal.CostModels (CostModels)
 import qualified Cometa.Internal.CostModels as Models
+import qualified Cometa.Internal.ParameterUpdate as Native
 import Cometa.Internal.ProtocolValues (DRepVotingThresholds, ExUnitPrices, ExUnits, NonNegativeRational, PoolVotingThresholds, ProtocolVersion, UnitInterval)
 import qualified Cometa.Internal.ProtocolValues as Values
+import qualified Cometa.PlutusData as Data
 import Cometa.Protocol.Parameters (Nonce, Parameters (..), ReferenceScriptCostStride)
 import qualified Cometa.Protocol.Parameters as Parameters
 import Control.Applicative ((<|>))
@@ -573,3 +576,13 @@ decodeUpdate = do
             56 -> (\value -> change {updateRefInputsCostPerDatumByte = Just value}) <$> Decode.decodeWord64
             _ -> fail "Unknown protocol parameter key"
           go (subtract 1 <$> count) (Set.insert key seen) next
+
+-- | Encode changed parameters for a Plutus governance script. The result is a
+-- map keyed by parameter identifiers; absent fields are omitted. Rational values
+-- are reduced fractions represented as numerator/denominator lists. Historical
+-- decentralization, entropy and protocol-version changes are excluded. This is
+-- script data, distinct from protocol-update CBOR, and does not validate whether
+-- the changes are permitted in a particular ledger era. Conversion failures
+-- return 'NativeError'.
+toPlutusData :: Update -> IO (Either Error Data.PlutusData)
+toPlutusData = Native.toPlutusData . encodeCbor
