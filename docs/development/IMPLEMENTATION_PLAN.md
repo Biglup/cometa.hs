@@ -26,6 +26,13 @@ with custom endpoints, application-level query improvements and the native
 transaction evaluator remain in scope. Measure completeness against binding and
 application APIs; excluded infrastructure is not a release blocker.
 
+Seed/entropy generation is intentionally application-owned. Preserve this security
+boundary in cardano-c and its bindings: accept supplied entropy/key material for
+validation, conversion and derivation. Automatic seed-generation helpers are not
+a missing feature or a release requirement. Existing operational randomness for
+salts/nonces is unaffected. CIP-8 verification is a separate nice-to-have proposal;
+existing CIP-8 support provides signing.
+
 Agreed requirements:
 
 - Cover every applicable public cardano-c domain type, enum, and operation.
@@ -3605,7 +3612,8 @@ Dijkstra support; the comparison does not claim otherwise.
 The [minimum feature set and nice-to-have backlog](HASKELL_API_PARITY.md#minimum-feature-set-and-nice-to-have-backlog)
 now determines delivery priority. The minimum covers remaining construction
 capabilities, essential identifiers/Value CBOR, workflow-critical provider state,
-actionable failures, and ordinary key generation/CIP-8 verification. Broader
+and actionable failures. Seed generation is intentionally excluded; CIP-8
+verification is nice to have. Broader
 interchange, blueprint/typed-data ergonomics, planning conveniences, VM tooling
 and advanced wallet/crypto variants are nice to have. Infrastructure remains
 excluded. This prioritization does not remove applicable native domain coverage.

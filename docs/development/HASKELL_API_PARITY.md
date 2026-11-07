@@ -11,6 +11,13 @@ provider backends, and associated CLI/RPC/WASM applications. These are compariso
 context, not implementation backlog or release gates. Existing provider injection,
 Blockfrost/custom URLs, and application-level query improvements remain in scope.
 
+Seed/entropy generation is intentionally outside the base library. Applications
+supply securely sourced entropy or existing key material; the library provides
+validation, mnemonic conversion and derivation. Bindings must preserve this
+boundary rather than introduce automatic seed-generation helpers as a coverage
+requirement. This does not prohibit randomness needed by existing cryptographic
+operations, such as encryption salts and nonces.
+
 The comparison baseline is the current default-branch source resolved on the
 review date, not an assumed Hackage release. sc-tools and Atlas pin older
 cardano-api dependencies than the separately reviewed current cardano-api. A
@@ -115,7 +122,7 @@ They are excluded from the remaining-work and completeness assessment.
 | ID / capability | Primary source evidence | Cometa evidence | Status and concrete limitation |
 | --- | --- | --- | --- |
 | K01 Scoped Ed25519/BIP32, hashes, signature verification and password storage | D1/D9; A9; C9 | Crypto.Ed25519/Bip32/Blake2b, Software handlers, Emip3/Pbkdf2; test/Ed25519.hs, test/Bip32.hs, test/PasswordCrypto.hs, test/SoftwareKeyHandler.hs | **Implemented** native crypto workflows with explicit scoped secrets. EMIP-3 software storage is not byte-compatible with cardano-addresses EncryptedKey or its passphrase rotation API. |
-| K02 Recovery phrases, randomness and dictionary support | D8 and Cardano.Dictionary language modules; C9 generateMnemonic/autocomplete helpers | English Crypto.Bip39 import/export from caller-supplied entropy; test/Bip39.hs | **Partial.** No random mnemonic/key generation helper, multilingual dictionaries or prefix autocomplete. Native English validation cannot establish multilingual parity. Randomness and normalization policy require an explicit workflow design. |
+| K02 Recovery phrases, randomness and dictionary support | D8 and Cardano.Dictionary language modules; C9 generateMnemonic/autocomplete helpers | English Crypto.Bip39 import/export from caller-supplied entropy; test/Bip39.hs | **Intentional boundary; optional dictionary gaps.** Seed/entropy generation is application-owned and is not missing binding functionality. English mnemonic conversion from supplied entropy exists. Multilingual dictionaries and prefix autocomplete are nice to have. |
 | K03 Shelley/governance/shared path derivation and discovery | D1/D2/D5; C9 mnemonic-to-role-key | DerivationPath supports custom purpose/coin/roles, 1852/1854 and DRep/committee roles; Bip32 public/private operations; test/DerivationPath.hs | **Partial.** Generic path derivation covers many mechanics, but does not supply sharedWalletId, cosigner-template identity, every style-specific generation contract. A general wallet discovery/synchronization engine is not asserted as an export of these reviewed modules. |
 | K04 Legacy Byron, Icarus/hardware and shared wallet schemes | D3/D4/D5 | Complete Byron address values/codecs and generic native BIP32 | **Partial.** Byron address parsing is implemented; legacy random-wallet master generation, encrypted derivation-path recovery, hardware Ledger root-generation variant and scheme-specific wallet operations are not established. They need audited additional algorithms/backend support, not renamed existing functions. |
 | K05 Native script AST, hashes, cosigner templates, validation and text language | D6/D7; S1 native script helpers; Atlas SimpleScript | Script.Native AST, serialization/hash and builders; test/Scripts.hs | **Partial.** General native scripts work. Cosigner templates, textual parser/pretty-printer and recommended structural validation are missing. A native script's ability to serialize does not prove satisfiability or establish a signing policy. |
@@ -142,7 +149,6 @@ remains excluded. Existing applicable cardano-c domain coverage remains required
 | Essential standards codecs | Checked CIP-105/129 governance identifiers and standalone checked Value CBOR. Audit/reuse existing C operations before adding new ones. | Native standards implementation and binding adapters; pure language-level value helpers where appropriate. |
 | State queries needed by those workflows | Current tip/slot, stake and DRep registration/deposits, active pool checks, voting-target status/expiry and constitution policy. Applications should not need ad hoc HTTP outside the provider for the shipped governance examples. | Binding transport and public query contracts; shared native domain types where useful. New C provider capabilities only when native consumers need them. |
 | Actionable failures | Structured submission rejection and useful evaluation failure details, with operation context and no credential leakage. Full successful-execution tracing/profiling is not required. | Native evaluator diagnostics; provider-specific response decoding in the binding. |
-| Complete ordinary key/message workflows | Secure key/English mnemonic generation helpers, using audited entropy sources, and CIP-8 verification with explicit address/key-binding checks. | Shared crypto/verification in cardano-c; idiomatic entropy and secret-lifetime boundaries in bindings. |
 
 Nice to have, without blocking the minimum:
 
@@ -152,7 +158,8 @@ Nice to have, without blocking the minimum:
 - Typed datum/redeemer deriving, blueprint import/schema validation/code generation, and cardano-api/Plutus interoperability packages. Previously deferred ergonomic improvements remain deferred.
 - Non-Data UPLC parameter application and public program-level tooling.
 - Configurable VM ceilings, successful trace collection and profiling; broader remote evaluation compatibility.
-- Multilingual mnemonic dictionaries, legacy/hardware derivation variants, shared-wallet templates and identifiers, KES/VRF/BLS secret-key operations, and advanced COSE modes.
+- CIP-8 verification is a proposed new capability, not existing native coverage or a minimum requirement. Signing already exists. Any future verification contract must define address/key-binding checks.
+- Multilingual mnemonic dictionaries, legacy/hardware derivation variants from supplied key material, shared-wallet templates and identifiers, KES/VRF/BLS secret-key operations, and advanced COSE modes. Seed generation remains excluded.
 - Optional optics, framework instances and drop-in upstream effect adapters.
 
 Verification is required across the minimum: independent standard vectors,
