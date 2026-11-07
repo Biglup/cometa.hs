@@ -69,7 +69,8 @@ tests =
       testCase "native JSON timelocks and threshold children map precisely" nativeScripts,
       testCase "historical output addresses require identity and unique indices" historical,
       testCase "evaluation budgets cover exactly four supported purposes" budgets,
-      testCase "Ogmios v5 payload retains CBOR, datum choice and reference script" payload
+      testCase "Ogmios v5 payload retains CBOR, datum choice and reference script" payload,
+      testCase "Ada-only supplemental evaluation values omit the empty assets field" adaOnlyPayload
     ]
 
 parse :: (Value -> Data.Aeson.Types.Parser a) -> Value -> Either Error a
@@ -206,7 +207,7 @@ payload = do
         ]
       hashReference =
         [ object ["txId" .= TxId.toHex txId, "index" .= (2 :: Int)],
-          object ["address" .= Address.toText address, "value" .= object ["coins" .= (9 :: Int), "assets" .= object []], "datumHash" .= Hex.encodeHex (B.replicate 32 2), "datum" .= Null, "script" .= Null]
+          object ["address" .= Address.toText address, "value" .= object ["coins" .= (9 :: Int)], "datumHash" .= Hex.encodeHex (B.replicate 32 2), "datum" .= Null, "script" .= Null]
         ]
   Json.evaluationPayload tx resolved @?= Right (object ["cbor" .= Hex.encodeHex (Tx.encodeCbor tx), "additionalUtxoSet" .= [reference, hashReference]])
   assertBool "duplicate resolution" (isLeft (Json.evaluationPayload tx (resolved ++ resolved)))
@@ -219,3 +220,20 @@ payload = do
 
 require :: (Show failure) => Either failure value -> IO value
 require = either (\failure -> assertFailure (show failure) >> fail "invalid JSON fixture") pure
+
+-- Regression from a hosted preprod evaluation: the identical signed V2 mint
+-- failed with value={coins:10000000,assets:{}} and succeeded after omitting only
+-- assets. Absence retains the exact Ada-only value; payload above separately
+-- checks that a nonempty policy/name map remains unchanged.
+adaOnlyPayload :: IO ()
+adaOnlyPayload = do
+  tx <- transaction []
+  identifier <- require (TxId.fromBytes (B.replicate 32 0xab))
+  address <- fixtureAddress
+  output <- require (Output.mkOutput address (Amount.lovelace 10000000) Datum.NoDatum Nothing)
+  let supplemental = Utxo.utxo (Input.input identifier 0) output
+      expected =
+        [ object ["txId" .= TxId.toHex identifier, "index" .= (0 :: Int)],
+          object ["address" .= Address.toText address, "value" .= object ["coins" .= (10000000 :: Int)], "datumHash" .= Null, "datum" .= Null, "script" .= Null]
+        ]
+  Json.evaluationPayload tx [supplemental] @?= Right (object ["cbor" .= Hex.encodeHex (Tx.encodeCbor tx), "additionalUtxoSet" .= [expected]])

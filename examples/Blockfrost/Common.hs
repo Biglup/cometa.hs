@@ -33,6 +33,7 @@ import qualified Cometa.Provider.Blockfrost as Blockfrost
 import qualified Cometa.Signer as Signer
 import Cometa.SlotConfig (SlotConfig)
 import qualified Cometa.SlotConfig as Slots
+import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Trans.Except (ExceptT (..), except, runExceptT)
 import qualified Data.ByteString as ByteString
 import Data.List.NonEmpty (NonEmpty (..))
@@ -59,8 +60,11 @@ configuration = runExceptT $ do
     "preprod" -> Right Blockfrost.Preprod
     "preview" -> Right Blockfrost.Preview
     _ -> Left (InvalidProviderConfiguration "COMETA_NETWORK must be mainnet, preprod or preview")
-  project <- ExceptT (required "BLOCKFROST_PROJECT_ID") >>= except . Blockfrost.mkProjectId
-  pure (Blockfrost.defaultConfig network project)
+  projectText <- liftIO (lookupEnv "BLOCKFROST_PROJECT_ID")
+  project <- except (traverse (Blockfrost.mkProjectId . Text.pack) projectText)
+  endpoint <- liftIO (lookupEnv "BLOCKFROST_URL")
+  let defaults = Blockfrost.defaultConfig network project
+  pure (maybe defaults (\url -> defaults {Blockfrost.endpoint = Text.pack url}) endpoint)
 
 networkSlots :: Blockfrost.Network -> SlotConfig
 networkSlots network = case network of

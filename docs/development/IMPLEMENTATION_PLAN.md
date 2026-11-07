@@ -3256,7 +3256,7 @@ and [manager implementation](https://github.com/snoyberg/http-client/blob/http-c
 Also reviewed installed `http-client-tls-0.3.6.4`, `http-types-0.12.6` and
 `scientific-0.3.10` source archives. No implementation code was copied.
 
-A normal caller supplies a validated project ID and network to `defaultConfig`,
+A normal caller supplies a network and optional validated project ID to `defaultConfig`,
 then uses the existing provider operations within `withProvider`. Configuration
 sets whole-request and confirmation-poll intervals, bounded to 1–60,000 ms.
 The transport uses the library's bracketed `withResponse` workflow with an 8 MiB
@@ -3385,9 +3385,82 @@ The core library's transitive build graph has no HTTP/TLS dependencies; those
 belong solely to the optional component. A fresh source archive builds every
 component with tests enabled and passes the same 493 tests.
 
-Live preprod validation, including the selected funded wallet, network state and
-confirmed transaction identifiers, remains separate work. No Haskell live
-transactions have been submitted. P14 still covers the remaining native-symbol
+Live preprod validation is recorded below. Staking, governance and Dijkstra
+workflow cases above remain offline validation. P14 still covers the remaining native-symbol
 mapping audit, performance review and final cross-platform/release hardening.
 The deferred-redeemer ergonomics pass remains explicitly deferred. Newer remote
 Blockfrost evaluation dialects are also not claimed by this implementation.
+
+
+#### Custom endpoints and optional authentication
+
+`Config.endpoint` accepts an absolute HTTP/HTTPS base URL, independently of the
+selected network magic. `projectId` is `Maybe ProjectId`; `Nothing` omits the
+header entirely. `defaultConfig network credential` still chooses the official
+endpoint, while custom services can provide a different host, port, path and
+query parameters. Operation query parameters override matching base keys. Paths,
+including encoded bytes and repeated separators, retain their supplied meaning.
+
+Reviewed `network-uri-2.6.4.2`'s `Network.URI.parseURI` and `http-client-0.7.19`'s
+public `requestFromURI` and underlying request conversion. Parsing and conversion
+use total `Maybe` results and return a sanitized configuration error before the
+user action. Raw ports are bounded before the HTTP client's Int conversion;
+otherwise a huge decimal could wrap into a valid-looking port. Tests include
+IPv6, leading-zero ports, both port bounds and overflow inputs. Userinfo and URL
+fragments are rejected; query parameters are supported and excluded from errors.
+The reviewed Blockfrost Haskell SDK also supports custom URLs, but its partial
+invalid-URL handling is not copied.
+
+Four added loopback test groups exercise the public provider with custom paths,
+query merging, present/absent authentication, independent network magic, and
+invalid configuration before callback invocation. All 47 backend tests pass.
+The connected examples accept optional `BLOCKFROST_URL` and
+`BLOCKFROST_PROJECT_ID`; a missing project identifier no longer prevents startup.
+
+
+#### Live Blockfrost preprod validation
+
+The public provider was exercised against the official preprod service on
+2026-11-07, using a custom endpoint URL with a trailing slash. The service reported
+protocol version 11. Credentials and the encrypted public demonstration wallet
+were supplied outside the repository.
+
+Successful endpoint checks include protocol parameters, account rewards, address
+UTxOs, asset-filtered address UTxOs, unique-asset UTxOs, transaction-input
+resolution, datum CBOR, script metadata, native script JSON, Plutus script CBOR,
+transaction submission and transaction confirmation. Known absent datums and
+inputs were also checked. A spent output is excluded by input resolution.
+
+Two self-payments were submitted and confirmed:
+
+- `a3453280e6e7ac2c7078b344e91df6baf50ca86200969b65f1a67ec9a6935949`:
+  inline datum, checked against its original value after retrieval.
+- `c357d2dbae00d1226b4813372b87f76e3945a77e49b9f73553314e692a651f5f`:
+  native and Plutus V2 reference scripts, retrieved through both address queries
+  and input resolution with exact script-hash checks.
+
+The first address query after the second confirmation returned an older UTxO
+snapshot. A later read returned both expected outputs; confirmation does not
+imply that every index endpoint has caught up.
+
+A signed Plutus V2 mint was evaluated remotely without submission; the service
+returned 8,400 memory units and 1,328,100 steps for minting redeemer zero.
+
+The additional-UTxO evaluation check found and corrected a live-service encoding
+incompatibility: the hosted evaluator rejects an ADA-only value containing an
+empty `assets` object. Omitting that optional field preserves the same value and
+allows evaluation. A differential request changed only that field, retaining the
+same transaction, query version, datum fields and supplemental input. Nonempty
+asset maps remain unchanged. A deterministic regression covers the ADA-only
+payload alongside the existing multi-asset encoding test.
+
+Follow-up validation passes all 498 tests (325 public, 125 runtime and 48
+Blockfrost). The updated backend suite passes Valgrind with zero errors, zero
+lost bytes and zero matched suppressions. The unchanged public/runtime suites
+retain the earlier clean Valgrind runs. Package, formatting and lint checks pass.
+
+The rebuilt public provider passed the final supplemental-input check: transaction
+`aab7db0ee0a646ab66193cffd1f481b58b2312518b8721fe62bf81a8a453fce1` failed
+evaluation without its synthetic input and returned 8,400 memory units and
+1,328,100 steps when that exact input was supplied. This transaction was evaluated
+only, never submitted.

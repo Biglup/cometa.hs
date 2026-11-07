@@ -41,7 +41,7 @@ main = do
   arguments <- getArgs
   case arguments of
     ["--query"] -> query
-    _ -> putStrLn "Set COMETA_NETWORK, BLOCKFROST_PROJECT_ID and COMETA_ADDRESS; run with --query."
+    _ -> putStrLn "Set COMETA_NETWORK and COMETA_ADDRESS; optionally set BLOCKFROST_URL and BLOCKFROST_PROJECT_ID, then run with --query."
 
 query :: IO ()
 query = do

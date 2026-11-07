@@ -5,7 +5,7 @@ configuration from the environment and do no network work when invoked without
 an action argument. The following commands are intended for your own configured
 wallet; ordinary tests use fixtures instead of credentials or funded inputs.
 
-Set `COMETA_NETWORK` to `mainnet`, `preprod` or `preview`. Set
+Set `COMETA_NETWORK` to `mainnet`, `preprod` or `preview`. For the official service, set
 `BLOCKFROST_PROJECT_ID` to a project belonging to that network. The project ID is
 sent in the HTTP authentication header and is never printed by these examples.
 Keep credentials out of source files and shell history. For example, Bash can
@@ -16,6 +16,11 @@ export COMETA_NETWORK=preprod
 read -rs BLOCKFROST_PROJECT_ID
 export BLOCKFROST_PROJECT_ID
 ```
+
+For a custom service, set `BLOCKFROST_URL` to its complete API base URL, for
+example `http://localhost:3000/api/v0`. Leave `BLOCKFROST_PROJECT_ID` unset when
+that service does not require it. `COMETA_NETWORK` still selects the chain's
+network magic and slot schedule; it does not restrict the endpoint host.
 
 ## Query an address
 

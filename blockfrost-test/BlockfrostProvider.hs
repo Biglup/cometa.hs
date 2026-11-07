@@ -95,7 +95,7 @@ must :: (Show error) => Either error value -> IO value
 must = either (\failure -> assertFailure (show failure) >> fail "fixture") pure
 
 configuration :: IO Config.Config
-configuration = Config.defaultConfig Config.Preview <$> must (Config.mkProjectId "preview-fixture-not-a-real-project")
+configuration = Config.defaultConfig Config.Preview . Just <$> must (Config.mkProjectId "preview-fixture-not-a-real-project")
 
 address :: IO Address.Address
 address = do

@@ -38,6 +38,7 @@ import Data.ByteString (ByteString)
 import qualified Data.ByteString as B
 import Data.Maybe (fromMaybe, isNothing)
 import Data.Text (Text)
+import qualified Data.Text as TextValue
 import qualified Data.Text.Encoding as Text
 import qualified Network.HTTP.Client as Http
 import qualified Network.HTTP.Client.TLS as TLS
@@ -85,16 +86,17 @@ maximumResponseBytes :: Int
 maximumResponseBytes = 8 * 1024 * 1024
 
 withTransport :: Config.Config -> (Transport -> IO a) -> IO a
-withTransport config = withEndpoint config (Config.baseUrl (Config.network config))
+withTransport config = withEndpoint config (TextValue.unpack (Config.endpoint config))
 
--- | Private loopback-server fixture entrypoint; public callers choose a network,
--- never an arbitrary credential destination.
+-- | Private endpoint override for deterministic HTTP fixture servers.
 withEndpoint :: Config.Config -> String -> (Transport -> IO a) -> IO a
 withEndpoint config endpoint action =
-  either (const (ioError (userError "Invalid Blockfrost transport configuration"))) (const acquire) (Config.validateConfig config)
+  either
+    (const (ioError (userError "Invalid Blockfrost transport configuration")))
+    acquire
+    (Config.validateConfig config >> Config.parseEndpoint (TextValue.pack endpoint))
   where
-    acquire = do
-      template <- Http.parseRequest endpoint
+    acquire template = do
       manager <- Http.newManager settings
       drained <- newEmptyMVar
       bracket (newMVar (Just manager, 0)) (closeScope drained) $ \scope ->
@@ -141,12 +143,19 @@ sendOnce config template manager request = do
     Just (Right response) -> response
   where
     milliseconds = max 1 (min (Config.responseTimeoutMillis config) (fromMaybe (Config.responseTimeoutMillis config) (requestTimeoutMillis request)))
-    requestPath = B.dropWhileEnd (== 47) (Http.path template) <> B.concat ["/" <> URI.urlEncode False (Text.encodeUtf8 segment) | segment <- path request]
+    prefix = Http.path template
+    separator = if B.isSuffixOf "/" prefix then "" else "/"
+    requestPath = case path request of
+      [] -> prefix
+      segments -> prefix <> separator <> B.intercalate "/" (map (URI.urlEncode False . Text.encodeUtf8) segments)
+    operationQuery = [(Text.encodeUtf8 key, Just (Text.encodeUtf8 value)) | (key, value) <- query request]
+    baseQuery = filter (\(key, _) -> key `notElem` map fst operationQuery) (HTTP.parseQuery (Http.queryString template))
     headers =
-      [("project_id", Config.projectIdBytes (Config.projectId config)), ("Accept", "application/json")]
+      [("Accept", "application/json")]
+        <> [("project_id", Config.projectIdBytes credential) | Just credential <- [Config.projectId config]]
         <> [("Content-Type", contentType request) | not (B.null (contentType request))]
     prepared =
-      Http.setQueryString [(Text.encodeUtf8 key, Just (Text.encodeUtf8 value)) | (key, value) <- query request] $
+      Http.setQueryString (baseQuery <> operationQuery) $
         template
           { Http.method = case method request of Get -> "GET"; Post -> "POST",
             Http.path = requestPath,

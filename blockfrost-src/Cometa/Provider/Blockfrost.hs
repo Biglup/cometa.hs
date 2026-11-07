@@ -14,9 +14,9 @@
 -- limitations under the License.
 
 -- | A scoped Blockfrost backend for the ordinary 'Provider' record. Queries
--- return domain values and report explicit errors. Pagination uses ascending pages of
--- 100 results, rejects repeated identities, and permits at most 10000 pages per
--- query. Independent requests do not form an atomic ledger snapshot.
+-- return domain values and report explicit errors. Pagination uses ascending
+-- pages of 100 results, rejects repeated identities, and permits at most 10000
+-- pages per query. Independent requests do not form an atomic ledger snapshot.
 --
 -- Submission is explicit and never retried automatically. Confirmation means
 -- the transaction appears in a block; it does not establish finality. Remote
@@ -25,7 +25,7 @@
 -- explicitly; local "Cometa.Evaluation.Native" supports the binding's native VM.
 --
 -- @
--- withProvider (defaultConfig Preview project) $ \provider ->
+-- withProvider (defaultConfig Preview (Just project)) $ \provider ->
 --   Cometa.Provider.utxosAt provider address
 -- @
 module Cometa.Provider.Blockfrost
@@ -49,10 +49,14 @@ import Cometa.Provider.Blockfrost.Internal.Provider (providerWithTransport)
 
 -- DEFINITIONS ----------------------------------------------------------------
 
--- | Validate configuration, share one scoped HTTP transport, and run a caller
--- workflow with one expected-error boundary. Supply credentials from application
--- configuration; no environment variables or files are read implicitly. Escaped
--- provider operations fail with 'Cometa.Error.RuntimeClosed' after the scope.
+-- | Validate an absolute HTTP or HTTPS endpoint and configuration, share one
+-- scoped HTTP transport, and run a caller workflow with one expected-error
+-- boundary. Supply credentials from application configuration, or omit them for
+-- a service that does not require authentication. Custom path prefixes and base
+-- query parameters are retained; operation
+-- query parameters take precedence. No environment variables or files are read
+-- implicitly. Escaped provider operations fail with
+-- 'Cometa.Error.RuntimeClosed' after the scope.
 -- Scope exit waits for active requests; cancellation propagates after cleanup.
 withProvider :: Config -> (Provider -> IO (Either Error a)) -> IO (Either Error a)
 withProvider config action = case Config.validateConfig config of

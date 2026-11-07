@@ -5,12 +5,26 @@ HTTP and TLS dependencies stay in that component. The backend implements the
 ordinary `Cometa.Provider` record, so query results can feed the existing
 transaction builder and signer workflows.
 
-Read a project identifier from application configuration, validate it once with
-`Blockfrost.mkProjectId`, and select `Mainnet`, `Preprod`, or `Preview` explicitly.
-`Blockfrost.defaultConfig network project` supplies a 30-second request timeout
-and a one-second confirmation poll interval. Both configurable intervals must be
-between 1 and 60000 milliseconds. Project identifiers and complete configuration
-values have no `Show` instance.
+Choose `Mainnet`, `Preprod`, or `Preview` for the chain's network magic.
+`Blockfrost.defaultConfig network Nothing` uses its official endpoint without a
+project header. For authenticated services, validate the project identifier with
+`Blockfrost.mkProjectId` and pass `Just project` instead.
+
+Set `endpoint` to use another Blockfrost-compatible service, proxy or local server.
+It accepts an absolute HTTP or HTTPS URL, including a base path and query parameters.
+The selected network remains independent of the URL. With `OverloadedStrings`:
+
+```haskell
+let config =
+      (Blockfrost.defaultConfig Blockfrost.Preprod Nothing)
+        { Blockfrost.endpoint = "http://localhost:3000/api/v0" }
+```
+
+The defaults are a 30-second request timeout and a one-second confirmation poll
+interval; both can be set between 1 and 60000 milliseconds. Project identifiers
+and complete configuration values have no `Show` instance. Without a project ID,
+no `project_id` header is sent. Base URL query parameters are retained; operation
+parameters such as pagination take precedence over the same names in the URL.
 
 ```haskell
 result <- Blockfrost.withProvider config $ \provider ->

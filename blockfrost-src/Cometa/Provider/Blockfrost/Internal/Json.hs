@@ -231,13 +231,16 @@ evaluationPayload transaction resolved = do
       reference <- traverse scriptValue (Output.referenceScript output)
       let value = Output.value output
           assets = KeyMap.fromList [(Key.fromText (Policy.toHex policy <> if AssetName.toHex name == "" then "" else "." <> AssetName.toHex name), toJSONInteger quantity) | (Native policy name, quantity) <- Amount.toList value]
+          -- The hosted evaluator rejects a present empty assets map. Omit the
+          -- optional field for Ada-only values; nonempty maps retain their keys.
+          valueFields = ["coins" .= Amount.quantity Ada value] <> ["assets" .= Object assets | not (KeyMap.null assets)]
           (datumHash, datum) = case Output.datum output of
             Datum.NoDatum -> (Null, Null)
             Datum.DatumHash hash -> (String (Hex.encodeHex (Datum.hashBytes hash)), Null)
             Datum.InlineDatum encoded -> (Null, String (Hex.encodeHex (Data.toCbor encoded)))
       pure
         [ object ["txId" .= TxId.toHex (Input.transactionId input), "index" .= Input.index input],
-          object ["address" .= Address.toText (Output.address output), "value" .= object ["coins" .= Amount.quantity Ada value, "assets" .= Object assets], "datumHash" .= datumHash, "datum" .= datum, "script" .= fromMaybe Null reference]
+          object ["address" .= Address.toText (Output.address output), "value" .= object valueFields, "datumHash" .= datumHash, "datum" .= datum, "script" .= fromMaybe Null reference]
         ]
     scriptValue (Script.Native script) = object . pure . ("native" .=) <$> nativeValue script
     scriptValue (Script.Plutus script) = case Plutus.version script of
