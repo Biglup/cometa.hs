@@ -2935,14 +2935,28 @@ JSON inspection retain explicit pending ledger entries; this is not a claim
 of complete Dijkstra building or live-network conformance.
 
 
-### Deferred ergonomics review
+### Deferred-redeemer ergonomics pass
 
-A future API ergonomics pass may introduce explicit `ToPlutusData` conversion
-for domain redeemers, keeping `Either Error` in deferred callbacks and preserving
-exact bytes for existing encoded values. This is intentionally deferred: current
-building work retains `EncodedPlutusData` and does not add generic derivation or
-implicit constructor-tag choices. Review schema compatibility and complete caller
-workflows before adopting the class.
+Scope updated 2026-11-08: include this work in the improved Haskell ergonomics
+pass. It is no longer postponed. Existing deferred callbacks and native index
+lookups already provide the underlying functionality; this pass adds Haskell
+conveniences without requiring new cardano-c APIs.
+
+- Review sc-tools and other relevant Haskell caller workflows before choosing
+  public names or abstractions. Demonstrate the improvement with complete examples.
+- Explore typed input/output references and composable helpers that resolve their
+  final indices from the balanced draft, avoiding repeated manual lookup code.
+- Review explicit domain-redeemer conversion, such as a justified `ToPlutusData`
+  abstraction. Do not introduce implicit constructor tags or generic derivation
+  without an explicit schema contract.
+- Preserve the existing callback API, exact bytes of encoded redeemers, total
+  lookup/error handling, and top-level versus subtransaction index semantics.
+- Test equivalence with explicit callbacks, reordered inputs, missing/ambiguous
+  references, all applicable script purposes, callback failures and cleanup.
+  Update runnable examples and Haddock with the accepted conveniences.
+
+These are planned improvements, not implemented API guarantees. Keep the existing
+single build-error boundary; do not require a new effects framework.
 
 
 ### P12: Dijkstra building and contextual accounting
@@ -3230,7 +3244,8 @@ check. Injected evaluators must implement subtransaction targets for such batche
 Next is the Blockfrost provider and applicable native example workflows (P13),
 followed by the remaining symbol/inspection audit and release hardening. This
 batch does not establish live-network Dijkstra acceptance. The ToPlutusData
-ergonomics proposal remains deferred to a separate API review.
+ergonomics proposal was deferred in this batch and is now included in the
+improved ergonomics pass above (2026-11-08).
 
 
 ### P13: Blockfrost provider and connected workflows
@@ -3403,7 +3418,8 @@ component with tests enabled and passes the same 493 tests.
 Live preprod validation is recorded below. Staking, governance and Dijkstra
 workflow cases above remain offline validation. P14 still covers the remaining native-symbol
 mapping audit, performance review and final cross-platform/release hardening.
-The deferred-redeemer ergonomics pass remains explicitly deferred. Newer remote
+Deferred-redeemer ergonomics were deferred here; the 2026-11-08 scope update
+above includes them in the improved ergonomics pass. Newer remote
 Blockfrost evaluation dialects are also not claimed by this implementation.
 
 
