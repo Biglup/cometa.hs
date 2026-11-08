@@ -24,6 +24,7 @@ module Cometa.Provider.Blockfrost.Internal.Http
     Transport (..),
     withTransport,
     withEndpoint,
+    withEndpointSettings,
     maximumResponseBytes,
   )
 where
@@ -31,6 +32,7 @@ where
 -- IMPORTS --------------------------------------------------------------------
 
 import qualified Cometa.Provider.Blockfrost.Internal.Config as Config
+import qualified Cometa.Provider.Blockfrost.Internal.Connection as Connection
 import Control.Concurrent.MVar (MVar, modifyMVar, newEmptyMVar, newMVar, putMVar, takeMVar, withMVar)
 import Control.Exception (bracket, finally, mask, try, uninterruptibleMask_)
 import Control.Monad (when)
@@ -41,7 +43,6 @@ import Data.Text (Text)
 import qualified Data.Text as TextValue
 import qualified Data.Text.Encoding as Text
 import qualified Network.HTTP.Client as Http
-import qualified Network.HTTP.Client.TLS as TLS
 import qualified Network.HTTP.Types as HTTP
 import qualified Network.HTTP.Types.URI as URI
 import System.Timeout (timeout)
@@ -90,25 +91,22 @@ withTransport config = withEndpoint config (TextValue.unpack (Config.endpoint co
 
 -- | Private endpoint override for deterministic HTTP fixture servers.
 withEndpoint :: Config.Config -> String -> (Transport -> IO a) -> IO a
-withEndpoint config endpoint action =
+withEndpoint = withEndpointSettings Connection.managerSettings
+
+-- Private settings injection keeps fixture trust roots separate from system roots.
+withEndpointSettings :: IO Http.ManagerSettings -> Config.Config -> String -> (Transport -> IO a) -> IO a
+withEndpointSettings acquireSettings config endpoint action =
   either
     (const (ioError (userError "Invalid Blockfrost transport configuration")))
     acquire
     (Config.validateConfig config >> Config.parseEndpoint (TextValue.pack endpoint))
   where
     acquire template = do
+      settings <- acquireSettings
       manager <- Http.newManager settings
       drained <- newEmptyMVar
       bracket (newMVar (Just manager, 0)) (closeScope drained) $ \scope ->
         action (Transport (sendScoped scope drained config template) (scopeOpen scope))
-    -- http-client closeManager has been a deprecated no-op since 0.5. Managers
-    -- reap automatically; disallow idle sockets so scope exit needs no GC to
-    -- release connections. Disable the library's reused-connection retries too.
-    settings =
-      TLS.tlsManagerSettings
-        { Http.managerRetryableException = const False,
-          Http.managerIdleConnectionCount = 0
-        }
 
 -- | Check scope liveness without opening a connection or performing HTTP.
 scopeOpen :: Scope -> IO (Either HttpFailure ())

@@ -16,7 +16,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 
 -- | Offline native deferred-argument registration, resolution and lifetime tests.
-module DeferredRedeemer (tests) where
+module DeferredRedeemer (tests, fixture, scriptFixture) where
 
 -- IMPORTS --------------------------------------------------------------------
 

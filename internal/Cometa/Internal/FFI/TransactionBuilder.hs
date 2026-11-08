@@ -17,7 +17,7 @@
 
 -- | Callback-capable fresh native builder operation. Both contexts and byte
 -- buffers borrow through return; transaction and diagnostic buffers transfer.
-module Cometa.Internal.FFI.TransactionBuilder (cBuild) where
+module Cometa.Internal.FFI.TransactionBuilder (cBuild, cBalance) where
 
 -- IMPORTS --------------------------------------------------------------------
 
@@ -29,3 +29,6 @@ import Foreign.Ptr (Ptr)
 
 foreign import ccall safe "cometa_transaction_builder_build"
   cBuild :: Ptr Context -> Ptr Context -> Ptr Context -> Ptr Word8 -> CSize -> Ptr Word8 -> CSize -> Ptr (Ptr Buffer) -> Ptr (Ptr Buffer) -> Ptr Word64 -> IO NativeCode
+
+foreign import ccall safe "cometa_transaction_balance"
+  cBalance :: Ptr Context -> Ptr Context -> Ptr Context -> Ptr Word8 -> CSize -> Ptr Word8 -> CSize -> Ptr (Ptr Buffer) -> Ptr (Ptr Buffer) -> Ptr Word64 -> IO NativeCode

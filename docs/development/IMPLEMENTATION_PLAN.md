@@ -3973,3 +3973,135 @@ allocation at process exit; the explicit single-test-thread/two-capability run
 used by the final check reported zero errors without suppression. No native
 allocation appeared in that diagnostic stack. Windows validation remains pending
 hosted CI; no live-network transactions were submitted in this slice.
+
+### Contextual balancing, protocol inspection and independent accounting
+
+The next slice starts from merged PR24 (`654c2a4`). PR24 passed Linux, macOS,
+quality and documentation checks. Its Windows public/runtime suites passed, and
+incomplete-request teardown passed; the Blockfrost suite still timed out later.
+PR25 first runs the lifetime test in isolation and adds early listener/acquisition
+traces. A passing Linux suite is not evidence that this remaining Windows failure
+is fixed.
+
+#### Standalone balancing design and ownership
+
+Reviewed cardano-api `5e63165a4bb7481a03d2e50464dc9c4f106c9fa5`,
+[Tx/Internal/Fee.hs](https://github.com/IntersectMBO/cardano-api/blob/5e63165a4bb7481a03d2e50464dc9c4f106c9fa5/cardano-api/src/Cardano/Api/Tx/Internal/Fee.hs),
+`makeTransactionBodyAutoBalance`: an existing body, resolved input context,
+protocol snapshot, change destination and witness estimate produce a balanced
+unsigned result. Cometa reuses its existing Builder.Config and callback records;
+resolved context and authorized additional wallet candidates remain distinct.
+It retains the native balancer's deposit assumptions rather than introducing
+cardano-api's separate ledger-state deposit maps.
+
+`Transaction.Balancing.balance` accepts an existing transaction and resolved
+snapshots. `balanceWithRedeemers` additionally associates callbacks with original
+purpose/index identifiers. C maps original spending identities to fresh redeemer
+owners, so inserted inputs update both immediate and deferred spending indices.
+All runtimes remain gated until C returns and every native owner is released.
+The input transaction remains Haskell-owned and unchanged. Expected callback
+errors, lazy exceptions and asynchronous cancellation use the existing protected
+runtime boundary. Existing output entries are payments, not inferred change.
+The imported fee and configured floor remain lower bounds.
+
+Source audit found native body and redeemer/list setters preserve decoded CBOR
+caches. The adapter clears only the unsigned outer body cache and creates fresh
+outer redeemer wrappers retaining exact payload owners. It never recursively
+clears witness datums, auxiliary data or signed intent bodies. Native serialization
+can normalize enclosing subtransaction array framing; retaining signed components
+is distinct from retaining every framing byte. Tests verify signatures and exact
+body/witness/auxiliary bytes for an indefinite imported intent envelope.
+
+The native low-level balancer does not install the final script-data commitment.
+The Haskell boundary reserves a 32-byte field before fee balancing, selects only
+languages required by the completed outer body's actual script purposes, computes
+the final native commitment and replaces that field. Required scripts can be
+provided by outer/nested witnesses or relevant spent/reference UTxOs. Unused wallet
+scripts and unused supplied languages do not enter the commitment. Missing scripts
+or required protocol models are explicit failures. The traversal audits every
+certificate, voter, governance guardrail and guard variant against native
+builder_build.c and scripts_needed.c; raw mint keys retain imported zero/empty
+policy groups. Datum-only witnesses use empty language views.
+
+Fee/value bounds are checked before native arithmetic and callback entry.
+Additional wallet funding uses only configured candidates; resolved-only or
+collateral-only funds cannot be selected. Nested resolved UTxOs are supplied to
+the native operation, which excludes their spent/reference identities from outer
+selection. Regular spending and collateral MAY overlap: the pinned cardano-api
+`c2212851b06b9c2acc5bb0bfe1b8a8e8cf2be03a` Fee.hs explicitly documents this, so
+no invented disjointness restriction is added. Final conservation, execution-unit
+limits, selected-key/Byron witness reserves and signed nested budgets are checked.
+
+#### Protocol and Dijkstra inspection
+
+Reviewed cardano-api Serialise/Json.hs at the same `5e63165a` revision and the
+pinned native protocol_params and transaction_body JSON writers. Eleven new named
+operations cover cost models, execution prices, both voting-threshold records,
+legacy protocol proposals, account intervals and Dijkstra association maps.
+The native cost-model map writer emits only language IDs 0–3; direct cost-model
+inspection still renders an unknown model's costs. Fraction components remain
+exact (for example 6/4); there is no implicit floating JSON policy. Intervals with
+both bounds absent fail native construction, while reversed bounds remain a
+descriptive value rather than a ledger-validity assertion. Exact native schemas,
+boundaries, omissions, malformed framing and lifetime tests cover these contracts.
+
+#### Independent properties
+
+`test/Fixtures/TRANSACTION_ACCOUNTING.md` records pinned source inspiration and
+license notices. Three generated property groups exercise public binding calls
+with independent Integer/Map equations for deposits, refunds, withdrawals,
+signed mint, donations, direct deposits and top/sub/batch conservation. Pool
+deposits deduplicate at body scope and across a batch. Extra reference/collateral
+snapshots contribute no spending supply. Tag variants reach native parsing while
+original transaction bytes remain unchanged. These are original generated tests,
+not claims of ledger acceptance or copied unpinned ledger fixtures.
+
+
+#### Windows transport cancellation and verification
+
+The isolated Windows lifetime test passed in run 42481594749. Streaming output
+then located the hang in cancellation of a client socket read. The default
+http-client/crypton-connection socket backend uses blocking Windows reads that
+cannot receive the asynchronous exception used by the request deadline.
+
+The private connection backend now uses network 3.2.12's cancellable, joined
+socket operations for connection establishment, reads and writes. TLS retains
+default certificate/hostname validation, SNI and the system trust store. CONNECT
+proxies retain the target hostname and buffered response bytes. Parallel address
+attempts close losing sockets, and masking protects acquisition through ownership
+publication. DNS waiting is interruptible; an outstanding OS resolver worker owns
+only its resolver state until completion. Cleanup closes the TLS context without
+starting a potentially blocking close-notify write.
+
+Reviewed primary sources: http-client 0.7.19 Connection.hs/Manager.hs,
+http-client-tls 0.3.6.4 TLS.hs, crypton-connection 0.4.5 Connection.hs/Types.hs,
+tls 2.2.2 Backend.hs, network 3.2.12.0 Wait.hs/Win32.Cancel.hs and socket tests,
+and async 2.2.6 withAsyncUsing. Deterministic TLS fixtures exercise trusted,
+untrusted and mismatched-host certificates, CONNECT, stalled handshakes and
+blocked-read/write cancellation. Fixture keys are newly authored public localhost
+test material. CI runs the three suites sequentially to make failures attributable.
+
+All 615 tests pass locally (385 public, 172 runtime, 58 Blockfrost), with warnings
+as errors. The maximum signed token quantity can be transferred without combining
+consumed and produced quantities into an artificial overflow. Numeric overflow
+preflight applies to authorized funding candidates, not unrelated snapshots.
+HTTP/TLS, contextual balancing, language selection, inspection and independent
+accounting pass targeted Valgrind checks without lost allocations or errors.
+Hosted Windows validation is pending the completed PR's CI run. No transactions
+were submitted during this slice.
+
+
+Hosted run 42484170693 confirms Windows HTTP/TLS read and write cancellation,
+handshake timeout, certificate rejection and CONNECT all pass. Its sole HTTP
+failure was a refused-loopback fixture: Windows can take about two seconds to
+report connection refusal, while the fixture used a longer request timeout inside
+a two-second test guard. The regression now uses a 250ms request deadline and
+accepts only the typed refusal or timeout result, verifies the transport remains
+open, and verifies it is closed after scope exit. The outer two-second guard is
+unchanged. Chromium's net/socket/tcp_socket_win.cc (blob
+`d06a16058a6b812e391f6dcf30b1b6e388645030`) documents this Windows retry behavior.
+The same run exposed a redundant foldl' import under GHC 9.10; a qualified call
+supports both compiler baselines without suppressing warnings. A follow-up hosted
+run validates these two portability corrections. All 54 offline example entry
+points pass locally, and a credential-free production TLS request to Blockfrost's
+preprod health endpoint returned HTTP 200 using the system trust store.

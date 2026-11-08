@@ -28,7 +28,10 @@
  * 20 metadatum, 21 metadata, 22 auxiliary data, 23 input, 24 datum, 25 redeemer;
  * 26 execution units, 27 protocol version, 28 unit interval, 29 relay,
  * 30 pool metadata, 31 constitution, 32 voter, 33 voting procedure,
- * 34 verification witness, 35 bootstrap witness.
+ * 34 verification witness, 35 bootstrap witness;
+ * 36 cost model, 37 cost models, 38 execution prices, 39 pool thresholds,
+ * 40 DRep thresholds, 41 legacy proposed updates, 42 legacy update proposal,
+ * 43 balance interval, 44 account intervals, 45 direct deposits, 46 required guards.
  * \param input Borrowed complete CBOR bytes, valid through return.
  * \param size Byte count of input.
  * \param output Transferred JSON byte buffer on success, NULL on failure.

@@ -83,3 +83,33 @@ sets and verification/bootstrap witness sets use those array schemas; no
 additional collection-specific interface is needed. Metadata lists and maps have
 tagged schemas: inspect `Metadata.list values` or `Metadata.map pairs` as a
 metadatum instead.
+
+## Protocol collections and Dijkstra account requirements
+
+`Inspection.costModel` returns an ordered array of decimal cost strings; its
+language identifier belongs to the surrounding model map. `Inspection.costModels`
+returns named `plutus_v1` through `plutus_v4` fields. This native inspection schema
+omits unknown language identifiers even though `CostModels` retains them. Inspect
+an individual future-language model with `costModel` when its costs matter; use
+the original CBOR for complete interchange. Inspection leaves the source model
+map unchanged.
+
+Execution prices and pool/DRep voting thresholds have named inspectors. Prices
+may exceed one lovelace, and rational components remain unreduced: a supplied
+`6/4` is represented by numerator `"6"` and denominator `"4"`. Threshold records
+retain each named field separately. `Inspection.proposedUpdates` inspects legacy
+genesis-authorized changes as a hash-keyed object; `Inspection.updateProposal`
+adds the epoch, represented as a JSON number. These views do not establish era
+eligibility or authority to update protocol parameters.
+
+`Inspection.balanceInterval` distinguishes an exact balance from a range with
+an inclusive lower and exclusive upper bound. Balances use decimal strings;
+absent bounds become null. The native schema rejects a range with both bounds
+absent. It describes reversed bounds without proving the requirement satisfiable.
+`Inspection.balanceIntervals`, `directDeposits` and `requiredGuards` accept the
+same validated `Fields.Entries` values used to assemble a transaction body. They
+return ordered arrays of `key`/`value` objects. Account keys use reward-address
+text; deposit zero remains `"0"`. Guard keys use tagged credentials and absent
+script data becomes null. Inline script-data maps retain duplicate entries and
+pair order. These are the same schemas nested in top-level and subtransaction
+body inspection.

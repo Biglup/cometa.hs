@@ -64,6 +64,17 @@ module Cometa.Inspection
     votingProcedure,
     verificationWitness,
     bootstrapWitness,
+    costModel,
+    costModels,
+    exUnitPrices,
+    poolVotingThresholds,
+    drepVotingThresholds,
+    proposedUpdates,
+    updateProposal,
+    balanceInterval,
+    balanceIntervals,
+    directDeposits,
+    requiredGuards,
   )
 where
 
@@ -71,6 +82,7 @@ where
 
 import qualified Codec.CBOR.Encoding as Encoding
 import qualified Codec.CBOR.Write as Write
+import qualified Cometa.Address.Reward as Reward
 import qualified Cometa.Certificate as Certificate
 import qualified Cometa.Credential as Credential
 import Cometa.Error (Error (NativeContractViolation))
@@ -87,14 +99,20 @@ import qualified Cometa.PlutusData as Data
 import qualified Cometa.Pool.Metadata as PoolMetadata
 import qualified Cometa.Pool.Parameters as Pool
 import qualified Cometa.Pool.Relay as Relay
+import qualified Cometa.Protocol.CostModels as Models
+import qualified Cometa.Protocol.DRepVotingThresholds as DRepThresholds
+import qualified Cometa.Protocol.ExUnitPrices as Prices
 import qualified Cometa.Protocol.ExUnits as ExUnits
 import qualified Cometa.Protocol.Parameters.Update as Update
+import qualified Cometa.Protocol.PoolVotingThresholds as PoolThresholds
+import qualified Cometa.Protocol.ProposedUpdates as Proposed
 import qualified Cometa.Protocol.Version as Version
 import qualified Cometa.Script as Script
 import qualified Cometa.Script.Native as Native
 import qualified Cometa.Script.Plutus as Plutus
 import qualified Cometa.Transaction.AuxiliaryData as Auxiliary
 import qualified Cometa.Transaction.Datum as Datum
+import qualified Cometa.Transaction.Fields as Fields
 import qualified Cometa.Transaction.Input as Input
 import Cometa.Transaction.Inspection (body, subBody, subTransaction, transaction)
 import qualified Cometa.Transaction.Output as Output
@@ -106,6 +124,8 @@ import qualified Cometa.UnitInterval as Unit
 import qualified Cometa.Value as Value
 import Data.Aeson (Value (Object))
 import qualified Data.Aeson.KeyMap as KeyMap
+import Data.ByteString (ByteString)
+import Data.Word (Word64)
 
 -- DEFINITIONS ----------------------------------------------------------------
 
@@ -284,3 +304,89 @@ verificationWitness = Internal.inspect "inspection.verificationWitness" 34 . Wit
 -- | Inspect a Byron witness key, signature, chain code and attributes as hexadecimal.
 bootstrapWitness :: Witness.BootstrapWitness -> IO (Either Error Value)
 bootstrapWitness = Internal.inspect "inspection.bootstrapWitness" 35 . Witness.encodeBootstrapCbor
+
+-- | Inspect ordered signed costs as decimal strings. The language belongs to the
+-- enclosing map and is absent from this array.
+costModel :: Models.CostModel -> IO (Either Error Value)
+costModel = Internal.inspect "inspection.costModel" 36 . costModelBytes
+
+-- | Inspect known Plutus V1–V4 cost arrays. Unknown language identifiers are
+-- omitted by this schema; input values and encodings remain unchanged.
+costModels :: Models.CostModels -> IO (Either Error Value)
+costModels = Internal.inspect "inspection.costModels" 37 . Models.encodeCbor
+
+-- | Inspect exact lovelace prices for memory and steps. Original
+-- numerator/denominator components are retained, including prices greater than
+-- one.
+exUnitPrices :: Prices.ExUnitPrices -> IO (Either Error Value)
+exUnitPrices = Internal.inspect "inspection.exUnitPrices" 38 . Prices.encodeCbor
+
+-- | Inspect all five stake-pool approval thresholds as exact rational components.
+poolVotingThresholds :: PoolThresholds.PoolVotingThresholds -> IO (Either Error Value)
+poolVotingThresholds = Internal.inspect "inspection.poolVotingThresholds" 39 . PoolThresholds.encodeCbor
+
+-- | Inspect all ten DRep approval thresholds as exact rational components.
+drepVotingThresholds :: DRepThresholds.DRepVotingThresholds -> IO (Either Error Value)
+drepVotingThresholds = Internal.inspect "inspection.drepVotingThresholds" 40 . DRepThresholds.encodeCbor
+
+-- | Inspect legacy genesis-authorized sparse changes as an object keyed by
+-- hexadecimal genesis hashes. No authorization or era eligibility is
+-- established.
+proposedUpdates :: Proposed.ProposedUpdates -> IO (Either Error Value)
+proposedUpdates = Internal.inspect "inspection.proposedUpdates" 41 . Proposed.encodeCbor
+
+-- | Inspect a legacy update proposal and activation epoch. Epoch is a JSON
+-- number, unlike decimal-string ledger quantities.
+updateProposal :: Proposed.UpdateProposal -> IO (Either Error Value)
+updateProposal = Internal.inspect "inspection.updateProposal" 42 . Proposed.encodeProposal
+
+-- | Inspect an exact lovelace balance or inclusive-lower/exclusive-upper range.
+-- Absent bounds are null; contradictory bounds are described without ledger-
+-- state validation. A range with both bounds absent returns a native invalid-
+-- argument error.
+balanceInterval :: Fields.BalanceInterval -> IO (Either Error Value)
+balanceInterval = Internal.inspect "inspection.balanceInterval" 43 . balanceIntervalBytes
+
+-- | Inspect account balance requirements as ordered key/value entries. Keys are
+-- reward addresses; bounds use the balance-interval schema.
+balanceIntervals :: Fields.Entries Reward.RewardAddress Fields.BalanceInterval -> IO (Either Error Value)
+balanceIntervals = Internal.inspect "inspection.balanceIntervals" 44 . balanceIntervalsBytes
+
+-- | Inspect reward-account deposits as ordered key/value entries, preserving
+-- present zero amounts as decimal strings.
+directDeposits :: Fields.Entries Reward.RewardAddress Word64 -> IO (Either Error Value)
+directDeposits = Internal.inspect "inspection.directDeposits" 45 . directDepositsBytes
+
+-- | Inspect required guard credentials and optional exact script data as ordered
+-- key/value entries. Absent data is null; script-data map order and duplicate
+-- keys are retained.
+requiredGuards :: Fields.Entries (Credential.Credential Credential.Guard) (Maybe Data.EncodedPlutusData) -> IO (Either Error Value)
+requiredGuards = Internal.inspect "inspection.requiredGuards" 46 . requiredGuardsBytes
+
+costModelBytes :: Models.CostModel -> ByteString
+costModelBytes model = Write.toStrictByteString (Encoding.encodeListLen 2 <> Encoding.encodeWord8 (Models.languageId model)) <> Models.encodeCostModelCbor model
+
+balanceIntervalEncoding :: Fields.BalanceInterval -> Encoding.Encoding
+balanceIntervalEncoding interval = case interval of
+  Fields.ExactBalance amount -> Encoding.encodeWord64 amount
+  Fields.BalanceRange lower upper -> Encoding.encodeListLen 2 <> maybe Encoding.encodeNull Encoding.encodeWord64 lower <> maybe Encoding.encodeNull Encoding.encodeWord64 upper
+
+balanceIntervalBytes :: Fields.BalanceInterval -> ByteString
+balanceIntervalBytes = Write.toStrictByteString . balanceIntervalEncoding
+
+associationBytes :: (key -> Encoding.Encoding) -> (value -> Encoding.Encoding) -> Fields.Entries key value -> ByteString
+associationBytes encodeKey encodeValue entries = Write.toStrictByteString (Encoding.encodeMapLen (fromIntegral (length pairs)) <> foldMap (\(key, payload) -> encodeKey key <> encodeValue payload) pairs)
+  where
+    pairs = Fields.entries entries
+
+balanceIntervalsBytes :: Fields.Entries Reward.RewardAddress Fields.BalanceInterval -> ByteString
+balanceIntervalsBytes = associationBytes (Encoding.encodeBytes . Reward.toBytes) balanceIntervalEncoding
+
+directDepositsBytes :: Fields.Entries Reward.RewardAddress Word64 -> ByteString
+directDepositsBytes = associationBytes (Encoding.encodeBytes . Reward.toBytes) Encoding.encodeWord64
+
+requiredGuardsBytes :: Fields.Entries (Credential.Credential Credential.Guard) (Maybe Data.EncodedPlutusData) -> ByteString
+requiredGuardsBytes entries = Write.toStrictByteString (Encoding.encodeMapLen (fromIntegral (length pairs))) <> foldMap encodePair pairs
+  where
+    pairs = Fields.entries entries
+    encodePair (key, payload) = Credential.encodeCbor key <> maybe (Write.toStrictByteString Encoding.encodeNull) Data.toCbor payload

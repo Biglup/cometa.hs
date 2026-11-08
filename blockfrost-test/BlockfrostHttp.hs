@@ -23,6 +23,7 @@ import Cometa.Error (Error (..))
 import qualified Cometa.Provider as Provider
 import qualified Cometa.Provider.Blockfrost as Blockfrost
 import qualified Cometa.Provider.Blockfrost.Internal.Config as Config
+import qualified Cometa.Provider.Blockfrost.Internal.Connection as Connection
 import qualified Cometa.Provider.Blockfrost.Internal.Http as Http
 import Control.Concurrent (forkFinally, killThread, threadDelay, yield)
 import Control.Concurrent.MVar (modifyMVar_, newEmptyMVar, newMVar, putMVar, readMVar, takeMVar, tryPutMVar, tryTakeMVar)
@@ -32,6 +33,7 @@ import Control.Monad (forM_, void, when)
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Char8 as C
+import qualified Data.ByteString.Lazy as Lazy
 import Data.Char (toLower)
 import Data.Either (isLeft)
 import Data.IORef (newIORef, readIORef, writeIORef)
@@ -39,9 +41,14 @@ import Data.List (find)
 import Data.Maybe (isNothing)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
+import qualified Data.X509.CertificateStore as Certificates
+import qualified Data.X509.Memory as Certificates
+import qualified Network.HTTP.Client as Client
 import qualified Network.HTTP.Types.URI as URI
 import qualified Network.Socket as Socket
 import qualified Network.Socket.ByteString as Socket
+import qualified Network.TLS as Tls
+import qualified Network.TLS.Extra.Cipher as Cipher
 import System.Environment (lookupEnv)
 import System.IO (hPutStrLn, stderr)
 import System.Timeout (timeout)
@@ -76,6 +83,12 @@ tests =
       testCase "HTTP failures retain status without redirects or retries" statuses,
       testCase "whole-request timeout and body-size limits release response scope" limits,
       testCase "asynchronous cancellation propagates and later requests recover" cancellation,
+      testCase "TLS validates trusted roots and rejects untrusted or mismatched hosts" tlsValidation,
+      testCase "TLS blocked-read cancellation propagates and later requests recover" tlsCancellation,
+      testCase "TLS cancellation joins blocked writes without a close-notify write" tlsWriteCancellation,
+      testCase "TLS handshake timeout cancels its socket operations" tlsHandshakeTimeout,
+      testCase "TLS CONNECT proxy retains target hostname verification" tlsProxy,
+      testCase "refused local connections obey request deadlines and close their scope" refusedConnection,
       testCase "escaped transports close and scope teardown joins active sends" lifetime
     ]
 
@@ -233,7 +246,17 @@ limits = do
       Http.send transport request >>= (@?= Left Http.ResponseTooLarge)
 
 cancellation :: IO ()
-cancellation = do
+cancellation = cancellationScenario withServer $ \configured endpoint ->
+  Http.withTransport configured {Config.endpoint = Text.pack endpoint}
+
+tlsCancellation :: IO ()
+tlsCancellation = do
+  let settings = Connection.managerSettingsWithStore fixtureRoots
+  cancellationScenario withTlsServer $ \configured endpoint ->
+    Http.withEndpointSettings (pure settings) configured (tlsEndpoint endpoint)
+
+cancellationScenario :: ((WireRequest -> IO ByteString) -> (String -> IO ()) -> IO ()) -> (Config.Config -> String -> (Http.Transport -> IO ()) -> IO ()) -> IO ()
+cancellationScenario server transportScope = do
   configured <- config
   started <- newEmptyMVar
   gate <- newEmptyMVar
@@ -241,23 +264,134 @@ cancellation = do
         if requestLine incoming == "GET /api/v0/blocked HTTP/1.1"
           then putMVar started () >> takeMVar gate >> pure (response 200 "late" [])
           else pure (response 200 "recovered" [])
-  withServer handler $ \endpoint ->
-    Http.withTransport configured {Config.endpoint = Text.pack endpoint} $ \transport -> do
+  server handler $ \endpoint -> cleanupWithin $
+    transportScope configured endpoint $ \transport -> do
       finished <- newEmptyMVar
       worker <- forkFinally (Http.send transport request {Http.path = ["blocked"]}) (putMVar finished)
       ( do
           within (takeMVar started)
+          traceFixture "cancellation requesting ThreadKilled while response is withheld"
           killThread worker
           outcome <- within (takeMVar finished)
           case outcome of
             Left failure -> fromException failure @?= Just ThreadKilled
             Right _ -> assertFailure "asynchronous cancellation became an expected HTTP failure"
+          traceFixture "cancellation joined; sending recovery request on same transport"
           Http.send transport request >>= (@?= Right 200) . fmap Http.status
         )
         `finally` void (tryPutMVar gate ())
 
+tlsValidation :: IO ()
+tlsValidation = do
+  configured <- config
+  let trusted = Connection.managerSettingsWithStore fixtureRoots
+      untrusted = Connection.managerSettingsWithStore (Certificates.makeCertificateStore [])
+  forM_ [(trusted, False, Right 200), (untrusted, False, Left Http.ConnectionFailure), (trusted, True, Left Http.ConnectionFailure)] $ \(settings, wrongHost, expected) ->
+    withTlsServer (\_ -> pure (response 200 "trusted" [])) $ \endpoint -> do
+      let target = if wrongHost then "https://127.0.0.1:" <> drop (length ("https://localhost:" :: String)) (tlsEndpoint endpoint) else tlsEndpoint endpoint
+      cleanupWithin $ Http.withEndpointSettings (pure settings) configured target $ \transport ->
+        Http.send transport request >>= (@?= expected) . fmap Http.status
+
+tlsWriteCancellation :: IO ()
+tlsWriteCancellation = do
+  configured <- config
+  started <- newEmptyMVar
+  gate <- newEmptyMVar
+  let peer socket _ = withTlsContext socket $ \_ -> putMVar started () >> takeMVar gate
+  withSocketServer (pure ()) peer $ \endpoint -> cleanupWithin $
+    Http.withEndpointSettings (pure (Connection.managerSettingsWithStore fixtureRoots)) configured (tlsEndpoint endpoint) $ \transport -> do
+      finished <- newEmptyMVar
+      worker <- forkFinally (Http.send transport request {Http.method = Http.Post, Http.body = B.replicate (8 * 1024 * 1024) 7}) (putMVar finished)
+      within (takeMVar started)
+      -- The peer has completed TLS but does not consume any HTTP/application
+      -- bytes. A payload larger than normal TCP buffers exercises backend writes.
+      threadDelay 50000
+      killThread worker
+      outcome <- within (takeMVar finished)
+      case outcome of
+        Left failure -> fromException failure @?= Just ThreadKilled
+        Right result -> assertFailure ("blocked TLS write returned before cancellation: " <> show result)
+
+tlsHandshakeTimeout :: IO ()
+tlsHandshakeTimeout = do
+  configured <- config
+  gate <- newEmptyMVar
+  -- A TCP peer accepts the connection but never sends any TLS handshake bytes.
+  withSocketServer (pure ()) (\_ _ -> takeMVar gate) $ \endpoint ->
+    cleanupWithin $ Http.withEndpointSettings (pure (Connection.managerSettingsWithStore fixtureRoots)) configured {Config.responseTimeoutMillis = 50} (tlsEndpoint endpoint) $ \transport ->
+      Http.send transport request >>= (@?= Left Http.Timeout)
+
+tlsProxy :: IO ()
+tlsProxy = do
+  configured <- config
+  connected <- newEmptyMVar
+  withSocketServer (pure ()) (proxyConnection connected) $ \endpoint -> do
+    port <- endpointPort endpoint
+    let settings = Client.managerSetSecureProxy (Client.useProxy (Client.Proxy "127.0.0.1" (fromIntegral port))) (Connection.managerSettingsWithStore fixtureRoots)
+    cleanupWithin $ Http.withEndpointSettings (pure settings) configured "https://localhost:443/api/v0" $ \transport ->
+      Http.send transport request >>= (@?= Right 200) . fmap Http.status
+    within (takeMVar connected) >>= (@?= "CONNECT localhost:443 HTTP/1.1")
+  where
+    proxyConnection connected socket cancelled = do
+      connectRequest <- receive socket cancelled
+      putMVar connected (requestLine connectRequest)
+      Socket.sendAll socket "HTTP/1.1 200 Connection established\r\n\r\n"
+      serveTls (\_ -> pure (response 200 "proxied" [])) socket cancelled
+
+refusedConnection :: IO ()
+refusedConnection = Socket.withSocketsDo $ do
+  configured <- config
+  address <- bracket (Socket.socket Socket.AF_INET Socket.Stream Socket.defaultProtocol) Socket.close $ \socket -> do
+    Socket.bind socket (Socket.SockAddrInet 0 (Socket.tupleToHostAddress (127, 0, 0, 1)))
+    Socket.getSocketName socket
+  case address of
+    Socket.SockAddrInet port _ -> do
+      escaped <- newEmptyMVar
+      -- Windows can retry loopback SYNs for about two seconds before reporting
+      -- refusal. Bound the request explicitly: either refusal or its earlier
+      -- deadline is correct, while the unchanged fixture deadline still detects
+      -- a connect/cancellation operation that fails to join.
+      cleanupWithin $ Http.withTransport configured {Config.endpoint = Text.pack ("http://127.0.0.1:" <> show port <> "/api/v0"), Config.responseTimeoutMillis = 250} $ \transport -> do
+        outcome <- Http.send transport request
+        assertBool "refused connection neither failed nor reached its request deadline" (outcome == Left Http.ConnectionFailure || outcome == Left Http.Timeout)
+        Http.checkOpen transport >>= (@?= Right ())
+        putMVar escaped transport
+      transport <- within (takeMVar escaped)
+      Http.checkOpen transport >>= (@?= Left Http.Closed)
+    _ -> assertFailure "unexpected refused fixture socket family"
+
+tlsEndpoint :: String -> String
+tlsEndpoint endpoint = "https://localhost:" <> drop (length ("http://127.0.0.1:" :: String)) endpoint
+
+fixtureRoots :: Certificates.CertificateStore
+fixtureRoots = Certificates.makeCertificateStore (Certificates.readSignedObjectFromMemory fixtureCertificate)
+
+withTlsServer :: (WireRequest -> IO ByteString) -> (String -> IO a) -> IO a
+withTlsServer handler = withSocketServer (pure ()) (serveTls handler)
+
+serveTls :: (WireRequest -> IO ByteString) -> Socket.Socket -> STM () -> IO ()
+serveTls handler socket _ = withTlsContext socket $ \context -> do
+  incoming <- receiveWith (Tls.recvData context)
+  reply <- handler incoming
+  Tls.sendData context (Lazy.fromStrict reply)
+
+withTlsContext :: Socket.Socket -> (Tls.Context -> IO a) -> IO a
+withTlsContext socket action = do
+  credential <- require (Tls.credentialLoadX509FromMemory fixtureCertificate fixturePrivateKey)
+  backend <- Connection.socketBackend socket
+  let defaults = Tls.defaultParamsServer
+      parameters =
+        defaults
+          { Tls.serverShared = (Tls.serverShared defaults) {Tls.sharedCredentials = Tls.Credentials [credential]},
+            Tls.serverSupported = Tls.defaultSupported {Tls.supportedCiphers = Cipher.ciphersuite_default}
+          }
+  bracket (Tls.contextNew backend parameters) Tls.contextClose $ \context -> do
+    Tls.handshake context
+    action context
+
 lifetime :: IO ()
 lifetime = do
+  traceFixture "lifetime entered test action"
   configured <- config
   started <- newEmptyMVar
   gate <- newEmptyMVar
@@ -265,6 +399,7 @@ lifetime = do
   escaped <- newEmptyMVar
   workerResult <- newEmptyMVar
   let handler _ = putMVar started () >> takeMVar gate >> pure (response 200 "done" [])
+  traceFixture "lifetime entering server acquisition"
   withServer handler $ \endpoint -> do
     traceFixture "lifetime starting owner and send"
     owner <-
@@ -380,8 +515,19 @@ withServer :: (WireRequest -> IO ByteString) -> (String -> IO a) -> IO a
 withServer = withServerReady (pure ())
 
 withServerReady :: IO () -> (WireRequest -> IO ByteString) -> (String -> IO a) -> IO a
-withServerReady connectionReady handler action = Socket.withSocketsDo $ mask $ \restore -> do
+withServerReady connectionReady handler = withSocketServer connectionReady serve
+  where
+    serve connection cancelled = do
+      incoming <- receive connection cancelled
+      bytes <- handler incoming
+      outcome <- Socket.sendAllWith connection bytes cancelled
+      either (const (throwIO ThreadKilled)) pure outcome
+
+withSocketServer :: IO () -> (Socket.Socket -> STM () -> IO ()) -> (String -> IO a) -> IO a
+withSocketServer connectionReady serve action = Socket.withSocketsDo $ mask $ \restore -> do
+  traceFixture "server acquiring listener"
   listener <- open
+  traceFixture "server querying listener address"
   address <- Socket.getSocketName listener `onException` Socket.close listener
   port <- case address of
     Socket.SockAddrInet value _ -> pure value
@@ -392,13 +538,22 @@ withServerReady connectionReady handler action = Socket.withSocketsDo $ mask $ \
   bracket
     (forkFinally (restore (acceptLoop listener workers stopping)) (putMVar accepted) `onException` Socket.close listener)
     (const (cleanupWithin (stop listener address workers stopping accepted)))
-    (\_ -> restore (action ("http://127.0.0.1:" <> show port <> "/api/v0")))
+    ( \_ -> do
+        traceFixture "server entering client action"
+        restore (action ("http://127.0.0.1:" <> show port <> "/api/v0"))
+    )
   where
-    open = bracketOnError (Socket.socket Socket.AF_INET Socket.Stream Socket.defaultProtocol) Socket.close $ \listener -> do
+    open = bracketOnError createSocket Socket.close $ \listener -> do
+      traceFixture "server setting listener reuse option"
       Socket.setSocketOption listener Socket.ReuseAddr 1
+      traceFixture "server binding listener"
       Socket.bind listener (Socket.SockAddrInet 0 (Socket.tupleToHostAddress (127, 0, 0, 1)))
+      traceFixture "server listening"
       Socket.listen listener 8
       pure listener
+    createSocket = do
+      traceFixture "server creating socket"
+      Socket.socket Socket.AF_INET Socket.Stream Socket.defaultProtocol
     acceptLoop listener workers stopping = mask $ \restore -> do
       (connection, _) <- Socket.accept listener
       shouldStop <- readTVarIO stopping
@@ -409,7 +564,7 @@ withServerReady connectionReady handler action = Socket.withSocketsDo $ mask $ \
           let cancelled = check =<< readTVar stopping
           worker <-
             forkFinally
-              (restore (connectionReady >> receive connection cancelled >>= sendResponse connection cancelled))
+              (restore (connectionReady >> serve connection cancelled))
               (const (Socket.close connection `finally` putMVar finished ()))
               `onException` Socket.close connection
           modifyMVar_ workers (pure . ((worker, finished) :))
@@ -429,12 +584,6 @@ withServerReady connectionReady handler action = Socket.withSocketsDo $ mask $ \
         `finally` do
           connections <- readMVar workers
           forM_ connections $ \(worker, finished) -> killThread worker >> readMVar finished
-    sendResponse connection cancelled incoming = do
-      bytes <- handler incoming
-      -- The cancellable operations own and join their Windows OVERLAPPED I/O.
-      -- Plain recv/send and shutdown cannot establish that those calls ended.
-      outcome <- Socket.sendAllWith connection bytes cancelled
-      either (const (throwIO ThreadKilled)) pure outcome
 
 -- timeout cannot interrupt a safe blocking foreign call, and killThread waits
 -- synchronously for delivery. Give the cleanup worker ownership until it joins;
@@ -454,7 +603,12 @@ cleanupWithinMicros deadline action = do
     Just result -> either throwIO pure result
 
 receive :: Socket.Socket -> STM () -> IO WireRequest
-receive connection cancelled = do
+receive connection cancelled = receiveWith $ do
+  outcome <- Socket.recvWith connection 4096 cancelled
+  either (const (throwIO ThreadKilled)) pure outcome
+
+receiveWith :: IO ByteString -> IO WireRequest
+receiveWith receiveChunk = do
   (headers, rest) <- headerBytes B.empty
   let lines' = C.split '\n' (B.filter (/= 13) headers)
       line = case lines' of [] -> B.empty; value : _ -> value
@@ -476,9 +630,6 @@ receive connection cancelled = do
       | otherwise = do
           chunk <- receiveChunk
           if B.null chunk then fail "incomplete fixture body" else remainingBytes size (accumulated <> chunk)
-    receiveChunk = do
-      outcome <- Socket.recvWith connection 4096 cancelled
-      either (const (throwIO ThreadKilled)) pure outcome
 
 response :: Int -> ByteString -> [(ByteString, ByteString)] -> ByteString
 response code bytes headers =
@@ -505,3 +656,32 @@ traceFixture :: String -> IO ()
 traceFixture phase = do
   enabled <- lookupEnv "COMETA_HTTP_FIXTURE_TRACE"
   when (enabled == Just "1") (hPutStrLn stderr ("HTTP fixture: " <> phase))
+
+-- Newly authored localhost-only TLS fixture. These PUBLIC test credentials have
+-- no wallet or production use. Certificate validity is 2020-2120 and SAN contains
+-- localhost only, so a 127.0.0.1 endpoint must fail hostname verification.
+fixtureCertificate :: ByteString
+fixtureCertificate =
+  C.unlines
+    [ "-----BEGIN CERTIFICATE-----",
+      "MIIBhjCCASygAwIBAgIBATAKBggqhkjOPQQDAjAUMRIwEAYDVQQDDAlsb2NhbGhv",
+      "c3QwIBcNMjAwMTAxMDAwMDAwWhgPMjEyMDAxMDEwMDAwMDBaMBQxEjAQBgNVBAMM",
+      "CWxvY2FsaG9zdDBZMBMGByqGSM49AgEGCCqGSM49AwEHA0IABIbSghSljv2c93Tj",
+      "CkxU2qvUzPch2gZDuuPriZMMv1e6uoOCZqCE6+VC2TfDGegPQFZq6SsXtrUdJruP",
+      "u17S3bejbTBrMA8GA1UdEwEB/wQFMAMBAf8wDgYDVR0PAQH/BAQDAgKEMBMGA1Ud",
+      "JQQMMAoGCCsGAQUFBwMBMBQGA1UdEQQNMAuCCWxvY2FsaG9zdDAdBgNVHQ4EFgQU",
+      "Atnqaqx2desr7wObh/tm/LyDWyAwCgYIKoZIzj0EAwIDSAAwRQIgRyVixABHThhu",
+      "jzjA1TqXWdfnYZmhmm4AqNH8QVmBMy4CIQCCi1wVU6EeyQcxLIAEiov5w0yz8Jd3",
+      "wgDMGpEmTZedZg==",
+      "-----END CERTIFICATE-----"
+    ]
+
+fixturePrivateKey :: ByteString
+fixturePrivateKey =
+  C.unlines
+    [ "-----BEGIN EC PRIVATE KEY-----",
+      "MHcCAQEEIKxMaeDo1qhVDq1GdXY1GAOUsRd6Ngx3drYGjpxtPyFFoAoGCCqGSM49",
+      "AwEHoUQDQgAEhtKCFKWO/Zz3dOMKTFTaq9TM9yHaBkO64+uJkwy/V7q6g4JmoITr",
+      "5ULZN8MZ6A9AVmrpKxe2tR0mu4+7XtLdtw==",
+      "-----END EC PRIVATE KEY-----"
+    ]

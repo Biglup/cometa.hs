@@ -67,7 +67,10 @@ jobs:
         timeout-minutes: 15
         env:
           COMETA_HTTP_FIXTURE_TRACE: "1"
-        run: cabal test all --test-show-details=streaming
+        run: |
+          cabal test cometa-test --test-show-details=streaming
+          cabal test cometa-runtime-test --test-show-details=streaming
+          cabal test cometa-blockfrost-test --test-show-details=streaming
       - name: Run examples
         run: |
           cabal run cometa-hash
