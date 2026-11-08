@@ -3798,3 +3798,14 @@ classified as plumbing. Remaining collection encodings and representation choice
 are recorded in TRANSACTION_CONSTRUCTION.md for the next completeness slice.
 The existing preprod record predates the new native pin; no additional on-chain
 execution is claimed by this validation.
+
+
+#### Merged native proposal support
+
+On 2026-11-08, cardano-c PR222 merged as
+`b98afee9de25c09f29d1c5fe4af3e538d1830d44`. The native dependency pin now
+references this merged revision. Its tree matches the validated PR head
+`a19dbc91`; the follow-up fixed MISRA, extended native regression coverage and
+documented the existing unit-redeemer defaults without changing the public ABI.
+The public API inventory is unchanged. Haskell Windows CI remains an independent
+open validation issue.
