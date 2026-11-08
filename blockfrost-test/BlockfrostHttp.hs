@@ -258,6 +258,7 @@ cancellation = do
 
 lifetime :: IO ()
 lifetime = do
+  traceFixture "lifetime entered test action"
   configured <- config
   started <- newEmptyMVar
   gate <- newEmptyMVar
@@ -265,6 +266,7 @@ lifetime = do
   escaped <- newEmptyMVar
   workerResult <- newEmptyMVar
   let handler _ = putMVar started () >> takeMVar gate >> pure (response 200 "done" [])
+  traceFixture "lifetime entering server acquisition"
   withServer handler $ \endpoint -> do
     traceFixture "lifetime starting owner and send"
     owner <-
@@ -381,7 +383,9 @@ withServer = withServerReady (pure ())
 
 withServerReady :: IO () -> (WireRequest -> IO ByteString) -> (String -> IO a) -> IO a
 withServerReady connectionReady handler action = Socket.withSocketsDo $ mask $ \restore -> do
+  traceFixture "server acquiring listener"
   listener <- open
+  traceFixture "server querying listener address"
   address <- Socket.getSocketName listener `onException` Socket.close listener
   port <- case address of
     Socket.SockAddrInet value _ -> pure value
@@ -392,13 +396,22 @@ withServerReady connectionReady handler action = Socket.withSocketsDo $ mask $ \
   bracket
     (forkFinally (restore (acceptLoop listener workers stopping)) (putMVar accepted) `onException` Socket.close listener)
     (const (cleanupWithin (stop listener address workers stopping accepted)))
-    (\_ -> restore (action ("http://127.0.0.1:" <> show port <> "/api/v0")))
+    ( \_ -> do
+        traceFixture "server entering client action"
+        restore (action ("http://127.0.0.1:" <> show port <> "/api/v0"))
+    )
   where
-    open = bracketOnError (Socket.socket Socket.AF_INET Socket.Stream Socket.defaultProtocol) Socket.close $ \listener -> do
+    open = bracketOnError createSocket Socket.close $ \listener -> do
+      traceFixture "server setting listener reuse option"
       Socket.setSocketOption listener Socket.ReuseAddr 1
+      traceFixture "server binding listener"
       Socket.bind listener (Socket.SockAddrInet 0 (Socket.tupleToHostAddress (127, 0, 0, 1)))
+      traceFixture "server listening"
       Socket.listen listener 8
       pure listener
+    createSocket = do
+      traceFixture "server creating socket"
+      Socket.socket Socket.AF_INET Socket.Stream Socket.defaultProtocol
     acceptLoop listener workers stopping = mask $ \restore -> do
       (connection, _) <- Socket.accept listener
       shouldStop <- readTVarIO stopping

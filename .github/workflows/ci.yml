@@ -63,6 +63,12 @@ jobs:
         run: python tools/build-native.py .native/cardano-c .native/build --configure-cabal
       - name: Build with warnings as errors
         run: cabal build all
+      - name: Diagnose Windows transport lifetime
+        if: runner.os == 'Windows'
+        timeout-minutes: 3
+        env:
+          COMETA_HTTP_FIXTURE_TRACE: "1"
+        run: cabal test cometa-blockfrost-test --test-show-details=streaming --test-options="-p escaped"
       - name: Run tests
         timeout-minutes: 15
         env:
