@@ -21,6 +21,15 @@ module Cometa.Governance.Action
     Removals,
     removalsFromList,
     removalsToList,
+    EncodedRemovals,
+    encodeRemovals,
+    encodeRemovalsWith,
+    decodeRemovals,
+    fromRemovals,
+    toRemovals,
+    removalsCbor,
+    removalsSetEncoding,
+    withRemovalsSetEncoding,
     Withdrawals,
     withdrawalsFromList,
     withdrawalsToList,
@@ -41,6 +50,7 @@ import Cometa.Address.Reward (RewardAddress)
 import qualified Cometa.Address.Reward as Reward
 import Cometa.Credential (CommitteeCold, Credential, ScriptHash)
 import qualified Cometa.Credential as Credential
+import Cometa.Encoding.Set (SetEncoding)
 import Cometa.Error (Error (..))
 import Cometa.Governance.ActionId (ActionId)
 import qualified Cometa.Governance.ActionId as ActionId
@@ -49,6 +59,7 @@ import qualified Cometa.Governance.Committee as Committee
 import Cometa.Governance.Constitution (Constitution)
 import qualified Cometa.Governance.Constitution as Constitution
 import qualified Cometa.Internal.ProposalCbor as Cbor
+import qualified Cometa.Internal.SetEncoding as SetEncoding
 import Cometa.Protocol.Parameters.Update (Update)
 import qualified Cometa.Protocol.Parameters.Update as Update
 import Cometa.Protocol.Version (ProtocolVersion)
@@ -67,6 +78,16 @@ import Data.Word (Word64)
 -- | Cold credentials to remove, sorted by kind and hash. Repeated credentials
 -- are retained. Ledger acceptance is a separate check.
 newtype Removals = Removals [Credential CommitteeCold] deriving (Eq, Ord, Show)
+
+-- | A standalone removal collection retaining its exact CBOR representation.
+-- Equality and ordering compare bytes; inspect credentials with 'toRemovals'.
+data EncodedRemovals = EncodedRemovals !ByteString !Removals deriving (Show)
+
+instance Eq EncodedRemovals where
+  left == right = removalsCbor left == removalsCbor right
+
+instance Ord EncodedRemovals where
+  compare left right = compare (removalsCbor left) (removalsCbor right)
 
 -- | Unique reward accounts and lovelace amounts, including zero amounts.
 newtype Withdrawals = Withdrawals (Map RewardAddress Word64) deriving (Eq, Ord, Show)
@@ -110,6 +131,42 @@ removalsFromList = Removals . sort
 -- | Sorted removal credentials, including duplicates.
 removalsToList :: Removals -> [Credential CommitteeCold]
 removalsToList (Removals values) = values
+
+-- | Fresh tagged definite array of sorted credentials, retaining duplicates.
+encodeRemovals :: Removals -> ByteString
+encodeRemovals = Cbor.encode . removalsEncoding
+
+-- | Fresh definite array with the requested outer set tag.
+encodeRemovalsWith :: SetEncoding -> Removals -> ByteString
+encodeRemovalsWith requested = SetEncoding.withEncoding requested . encodeRemovals
+
+-- | Decode a standalone credential collection, retaining all imported bytes.
+-- Optional tag 258, definite and indefinite arrays, and duplicate credentials
+-- are accepted; invalid fields or trailing bytes return 'InvalidProposalCbor'.
+decodeRemovals :: ByteString -> Either Error EncodedRemovals
+decodeRemovals bytes = EncodedRemovals bytes . removalsFromList <$> Cbor.decode (Cbor.setList Cbor.credentialDecoder) bytes
+
+-- | Assign fresh tagged encoding to a removal collection.
+fromRemovals :: Removals -> EncodedRemovals
+fromRemovals value = EncodedRemovals (encodeRemovals value) value
+
+-- | Inspect sorted removal credentials without changing retained bytes.
+toRemovals :: EncodedRemovals -> Removals
+toRemovals (EncodedRemovals _ value) = value
+
+-- | Exact imported bytes or fresh bytes assigned by 'fromRemovals'.
+removalsCbor :: EncodedRemovals -> ByteString
+removalsCbor (EncodedRemovals bytes _) = bytes
+
+-- | Observe the exact standalone removal collection's outer set tag.
+removalsSetEncoding :: EncodedRemovals -> SetEncoding
+removalsSetEncoding = SetEncoding.encoding . removalsCbor
+
+-- | Change only the outer tag, retaining every array and credential byte.
+-- Requesting the current representation preserves the entire encoding exactly.
+withRemovalsSetEncoding :: SetEncoding -> EncodedRemovals -> EncodedRemovals
+withRemovalsSetEncoding requested (EncodedRemovals bytes values) =
+  EncodedRemovals (SetEncoding.withEncoding requested bytes) values
 
 -- | Reject repeated reward accounts with 'DuplicateTreasuryWithdrawal', even
 -- when amounts agree. Values are lovelace; no minimum or positivity is imposed.

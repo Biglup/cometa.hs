@@ -59,6 +59,7 @@ import qualified Scripts
 import qualified SetEncoding
 import qualified SlotConfig
 import qualified SoftwareKeyHandler
+import qualified StandaloneSetEncoding
 import System.Mem (performGC)
 import System.Timeout (timeout)
 import Test.Tasty (TestTree, defaultMain, testGroup)
@@ -66,6 +67,7 @@ import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 import Test.Tasty.Hedgehog (testProperty)
 import qualified Transaction
 import qualified TransactionBody
+import qualified TransactionDeferred
 import qualified TransactionWitnesses
 import qualified Value
 
@@ -79,6 +81,7 @@ main =
         Cip8.tests,
         CompleteAddress.tests,
         TransactionBody.tests,
+        TransactionDeferred.tests,
         PublicTransaction.tests,
         TransactionWitnesses.tests,
         Proposals.tests,
@@ -88,6 +91,7 @@ main =
         ProtocolValues.tests,
         Collections.tests,
         SetEncoding.tests,
+        StandaloneSetEncoding.tests,
         SlotConfig.tests,
         Parameters.tests,
         Scripts.tests,

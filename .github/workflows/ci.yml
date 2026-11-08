@@ -63,9 +63,13 @@ jobs:
         run: python tools/build-native.py .native/cardano-c .native/build --configure-cabal
       - name: Build with warnings as errors
         run: cabal build all
-      - name: Run tests and example
+      - name: Run tests
+        timeout-minutes: 15
+        env:
+          COMETA_HTTP_FIXTURE_TRACE: "1"
+        run: cabal test all --test-show-details=streaming
+      - name: Run examples
         run: |
-          cabal test all --test-show-details=direct
           cabal run cometa-hash
           cabal run cometa-cbor
           cabal run cometa-signing

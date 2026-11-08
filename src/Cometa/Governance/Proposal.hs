@@ -32,6 +32,9 @@ module Cometa.Governance.Proposal
     toCbor,
     EncodedProposals,
     encodeProposals,
+    encodeProposalsWith,
+    setEncoding,
+    withSetEncoding,
     decodeProposals,
     fromProposals,
     toProposals,
@@ -45,12 +48,14 @@ import qualified Codec.CBOR.Decoding as D
 import qualified Codec.CBOR.Encoding as E
 import Cometa.Address.Reward (RewardAddress)
 import qualified Cometa.Address.Reward as Reward
+import Cometa.Encoding.Set (SetEncoding)
 import Cometa.Error (Error)
 import Cometa.Governance.Action (Action)
 import qualified Cometa.Governance.Action as Action
 import Cometa.Governance.Anchor (Anchor)
 import qualified Cometa.Governance.Anchor as Anchor
 import qualified Cometa.Internal.ProposalCbor as Cbor
+import qualified Cometa.Internal.SetEncoding as SetEncoding
 import Data.ByteString (ByteString)
 import Data.Word (Word64)
 
@@ -162,6 +167,21 @@ toProposals (EncodedProposals _ value) = value
 -- | Exact imported collection CBOR, or fresh encoding from 'fromProposals'.
 proposalsCbor :: EncodedProposals -> ByteString
 proposalsCbor (EncodedProposals bytes _) = bytes
+
+-- | Fresh definite collection with the requested outer tag. Nested proposals
+-- keep their usual encoding; order and duplicates are retained.
+encodeProposalsWith :: SetEncoding -> Proposals -> ByteString
+encodeProposalsWith requested = SetEncoding.withEncoding requested . encodeProposals
+
+-- | Observe the exact proposal collection's outer set tag.
+setEncoding :: EncodedProposals -> SetEncoding
+setEncoding = SetEncoding.encoding . proposalsCbor
+
+-- | Change only the outer tag, retaining every array and proposal byte.
+-- Requesting the current representation preserves the complete encoding exactly.
+withSetEncoding :: SetEncoding -> EncodedProposals -> EncodedProposals
+withSetEncoding requested (EncodedProposals bytes values) =
+  EncodedProposals (SetEncoding.withEncoding requested bytes) values
 
 proposalDecoder :: D.Decoder s Proposal
 proposalDecoder =

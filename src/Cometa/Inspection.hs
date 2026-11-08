@@ -54,6 +54,16 @@ module Cometa.Inspection
     input,
     datum,
     redeemer,
+    exUnits,
+    protocolVersion,
+    unitInterval,
+    relay,
+    poolMetadata,
+    constitution,
+    voter,
+    votingProcedure,
+    verificationWitness,
+    bootstrapWitness,
   )
 where
 
@@ -67,14 +77,19 @@ import Cometa.Error (Error (NativeContractViolation))
 import qualified Cometa.Governance.Action as Action
 import qualified Cometa.Governance.ActionId as ActionId
 import qualified Cometa.Governance.Anchor as Anchor
+import qualified Cometa.Governance.Constitution as Constitution
 import qualified Cometa.Governance.DRep as DRep
 import qualified Cometa.Governance.Proposal as Proposal
 import qualified Cometa.Governance.Voting as Voting
 import qualified Cometa.Internal.Inspection as Internal
 import qualified Cometa.Metadata as Metadata
 import qualified Cometa.PlutusData as Data
+import qualified Cometa.Pool.Metadata as PoolMetadata
 import qualified Cometa.Pool.Parameters as Pool
+import qualified Cometa.Pool.Relay as Relay
+import qualified Cometa.Protocol.ExUnits as ExUnits
 import qualified Cometa.Protocol.Parameters.Update as Update
+import qualified Cometa.Protocol.Version as Version
 import qualified Cometa.Script as Script
 import qualified Cometa.Script.Native as Native
 import qualified Cometa.Script.Plutus as Plutus
@@ -85,7 +100,9 @@ import Cometa.Transaction.Inspection (body, subBody, subTransaction, transaction
 import qualified Cometa.Transaction.Output as Output
 import qualified Cometa.Transaction.Redeemer as Redeemer
 import qualified Cometa.Transaction.Utxo as Utxo
+import qualified Cometa.Transaction.Witness as Witness
 import qualified Cometa.Transaction.Witnesses as Witnesses
+import qualified Cometa.UnitInterval as Unit
 import qualified Cometa.Value as Value
 import Data.Aeson (Value (Object))
 import qualified Data.Aeson.KeyMap as KeyMap
@@ -227,3 +244,43 @@ inspectDatum = fmap (fmap Just) . Internal.inspect "inspection.datum" 24 . Write
 -- units. Does not execute the script or check its budget against a transaction.
 redeemer :: Redeemer.Redeemer -> IO (Either Error Value)
 redeemer = Internal.inspect "inspection.redeemer" 25 . Redeemer.encodeCbor
+
+-- | Inspect declared memory and CPU steps as decimal strings; no evaluation is performed.
+exUnits :: ExUnits.ExUnits -> IO (Either Error Value)
+exUnits = Internal.inspect "inspection.exUnits" 26 . ExUnits.encodeCbor
+
+-- | Inspect protocol major and minor versions as JSON numbers.
+protocolVersion :: Version.ProtocolVersion -> IO (Either Error Value)
+protocolVersion = Internal.inspect "inspection.protocolVersion" 27 . Version.encodeCbor
+
+-- | Inspect the exact rational numerator and denominator as decimal strings.
+unitInterval :: Unit.UnitInterval -> IO (Either Error Value)
+unitInterval = Internal.inspect "inspection.unitInterval" 28 . Unit.encodeCbor
+
+-- | Inspect a pool relay, preserving absent ports and IP addresses as null.
+relay :: Relay.Relay -> IO (Either Error Value)
+relay = Internal.inspect "inspection.relay" 29 . Relay.encodeCbor
+
+-- | Inspect a pool metadata URL and hash without fetching the URL.
+poolMetadata :: PoolMetadata.Metadata -> IO (Either Error Value)
+poolMetadata = Internal.inspect "inspection.poolMetadata" 30 . PoolMetadata.encodeCbor
+
+-- | Inspect a constitution anchor and optional guardrails hash; absence omits the hash.
+constitution :: Constitution.Constitution -> IO (Either Error Value)
+constitution = Internal.inspect "inspection.constitution" 31 . Constitution.encodeCbor
+
+-- | Inspect a committee, DRep or stake-pool voting identity with its role tag.
+voter :: Voting.Voter -> IO (Either Error Value)
+voter = Internal.inspect "inspection.voter" 32 . Voting.encodeVoter
+
+-- | Inspect a vote choice and optional explanation anchor; absence omits the anchor.
+votingProcedure :: Voting.VotingProcedure -> IO (Either Error Value)
+votingProcedure = Internal.inspect "inspection.votingProcedure" 33 . Voting.encodeProcedure
+
+-- | Inspect a verification key and signature without verifying the signature.
+verificationWitness :: Witness.VerificationWitness -> IO (Either Error Value)
+verificationWitness = Internal.inspect "inspection.verificationWitness" 34 . Witness.encodeCbor
+
+-- | Inspect a Byron witness key, signature, chain code and attributes as hexadecimal.
+bootstrapWitness :: Witness.BootstrapWitness -> IO (Either Error Value)
+bootstrapWitness = Internal.inspect "inspection.bootstrapWitness" 35 . Witness.encodeBootstrapCbor

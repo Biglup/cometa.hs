@@ -94,3 +94,52 @@ its configured deposit. Duplicate proposals fail at the build boundary.
 ledger-state assertion. It does not fund the transaction or donate that amount.
 Repeated identical assertions combine; conflicting values fail. Zero is preserved
 explicitly. `Plan.donate amount` is the separate operation for contributing funds.
+
+## Compose deferred redeemers
+
+Use `Cometa.Transaction.Deferred` when an argument depends on positions in the
+current builder draft. Compose a `Query` with ordinary `do` notation or
+applicative operators, then provide your application's script-data encoding:
+
+```haskell
+import qualified Cometa.PlutusData as Data
+import qualified Cometa.Transaction.Deferred as Deferred
+import qualified Cometa.Transaction.Plan as Plan
+
+-- reference and destinationOutput are previously validated public values.
+let positions = (,) <$> Deferred.inputIndex reference
+                    <*> Deferred.outputIndex destinationOutput
+    encodePositions (input, output) =
+      Data.Constr 0 [Data.Integer (toInteger input), Data.Integer (toInteger output)]
+    argument = Deferred.redeemer encodePositions positions
+    plan = Plan.spendWithDeferredRedeemer resolvedInput argument Nothing
+```
+
+Required lookups return `InvalidBuildingRequest` when an object is absent.
+`outputIndex` compares the complete semantic output, including its inline datum
+encoding, and requires a unique match. `outputIndexWhere` accepts a predicate
+when your application identifies an output by selected fields; it also fails
+when several outputs match. This avoids silently choosing one of two payments
+to the same address. Other indices follow `Transaction.Indices` ordering and
+first-duplicate rules. Redeemer rank is distinct from its authorized body-item
+index. Certificate lookup uses native normalization and remains available through
+the existing effectful `Indices.findCertificate`, outside these pure queries.
+
+`Deferred.draft` exposes the current transaction and `Deferred.selectedInputs`
+exposes the callback's selected spending-input snapshot. `Deferred.fromEither`
+incorporates your own validation; the first error propagates unchanged. Test a
+query with `Deferred.run query draft selectedInputs` before attaching it to a
+plan. This runner uses exactly the supplied snapshot without validating or
+reordering it.
+
+`Deferred.encodedRedeemer` accepts a query returning `EncodedPlutusData` and
+preserves its exact bytes. `Deferred.redeemer` instead takes an explicit encoder
+from your query result to semantic `PlutusData`. Both produce the existing raw
+callback type, which remains available for custom policies. The same callbacks
+fit `SubTransaction.Plan`: queries inspect the supplied transaction draft's
+body, without automatically descending into nested subtransactions.
+
+Balancing may invoke a callback several times with changing drafts. Queries
+recompute positions each time; do not treat a previous position or the current
+redeemer bytes as a stable final transaction property. Queries have no network
+or native effects and do not change the draft.

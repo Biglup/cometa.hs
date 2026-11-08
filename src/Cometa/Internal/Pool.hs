@@ -57,6 +57,7 @@ module Cometa.Internal.Pool
     parametersDecoder,
     parametersDecoderWithFieldCount,
     parametersValueEncoding,
+    parametersValueEncodingWith,
     parametersValueDecoder,
     encode,
     decodeComplete,
@@ -71,6 +72,7 @@ import qualified Codec.CBOR.Read as Read
 import qualified Codec.CBOR.Write as Write
 import qualified Cometa.Address.Reward as Reward
 import qualified Cometa.Credential as Credential
+import Cometa.Encoding.Set (SetEncoding (..))
 import Cometa.Error (Error (..))
 import qualified Cometa.Internal.ProtocolValues as Protocol
 import Control.Monad (replicateM, unless, when)
@@ -375,7 +377,10 @@ parametersFieldCount :: PoolParameters -> Word
 parametersFieldCount value = maybe 9 (const 10) (blsKey value)
 
 parametersEncoding :: PoolParameters -> Encode.Encoding
-parametersEncoding value =
+parametersEncoding = parametersEncodingWith TaggedSet
+
+parametersEncodingWith :: SetEncoding -> PoolParameters -> Encode.Encoding
+parametersEncodingWith requested value =
   Encode.encodeBytes (Credential.keyHashBytes (operator value))
     <> Encode.encodeBytes (vrfKeyHashBytes (vrfKeyHash value))
     <> foldMap blsEncoding (blsKey value)
@@ -383,7 +388,7 @@ parametersEncoding value =
     <> Encode.encodeWord64 (cost value)
     <> Protocol.encodeUnitInterval (margin value)
     <> Encode.encodeBytes (Reward.toBytes (rewardAccount value))
-    <> Encode.encodeTag 258
+    <> (case requested of TaggedSet -> Encode.encodeTag 258; UntaggedSet -> mempty)
     <> Encode.encodeListLen (fromIntegral (Set.size (owners value)))
     <> foldMap (Encode.encodeBytes . Credential.keyHashBytes) (Set.toAscList (owners value))
     <> Encode.encodeListLen (fromIntegral (length (relays value)))
@@ -418,7 +423,11 @@ parametersDecoderWithFieldCount = do
   pure (count, PoolParameters poolOperator vrf bls poolPledge poolCost poolMargin account ownerSet relayList reference)
 
 parametersValueEncoding :: PoolParameters -> Encode.Encoding
-parametersValueEncoding value = Encode.encodeListLen (fromIntegral (parametersFieldCount value)) <> parametersEncoding value
+parametersValueEncoding = parametersValueEncodingWith TaggedSet
+
+-- | The explicit tag choice applies only to the pool owner set.
+parametersValueEncodingWith :: SetEncoding -> PoolParameters -> Encode.Encoding
+parametersValueEncodingWith requested value = Encode.encodeListLen (fromIntegral (parametersFieldCount value)) <> parametersEncodingWith requested value
 
 parametersValueDecoder :: Decode.Decoder s PoolParameters
 parametersValueDecoder = do
@@ -431,8 +440,8 @@ parametersValueDecoder = do
 ownersDecoder :: Decode.Decoder s (Set (Credential.KeyHash Credential.Stake))
 ownersDecoder = do
   token <- Decode.peekTokenType
-  when (token == Decode.TypeTag) $ do
-    tag <- Decode.decodeTag
+  when (token == Decode.TypeTag || token == Decode.TypeTag64) $ do
+    tag <- Decode.decodeTag64
     unless (tag == 258) (fail "Incorrect pool-owner set tag")
   values <- listOf (validated Credential.keyHashFromBytes =<< Decode.decodeBytes)
   let unique = Set.fromList values

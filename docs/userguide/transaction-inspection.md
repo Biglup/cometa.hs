@@ -45,7 +45,11 @@ The same inspection module provides named operations for values, scripts,
 credentials, certificates, governance actions and proposals, pool parameters,
 protocol updates, Plutus data, outputs, witnesses, resolved UTxOs, DReps, action
 identifiers, anchors, voting procedures, metadata, auxiliary data, input references
-and redeemers. Each accepts its corresponding typed
+and redeemers. Execution units, protocol versions and unit intervals retain their
+exact integer components. Pool relays and metadata, constitutions, individual
+voters and vote procedures, and verification/bootstrap witnesses also have named
+inspectors. These inspect supplied fields without fetching URLs, resolving DNS,
+checking voting eligibility or verifying signatures. Each accepts its corresponding typed
 public value, performs no network queries and returns an owned `Aeson.Value`.
 `Inspection.datum` additionally represents absence: `NoDatum` returns `Nothing`
 without a native allocation; datum hashes and inline data return `Just` the
@@ -74,7 +78,8 @@ the exact source bytes and auxiliary-data hash unchanged.
 
 For an ordinary list whose native schema is a plain JSON array, traverse the
 corresponding element inspector and render the resulting list with Aeson. Native
-script lists, certificate sets and redeemer lists use those array schemas; no
+script lists, certificate sets, redeemer lists, input/output collections, datum
+sets and verification/bootstrap witness sets use those array schemas; no
 additional collection-specific interface is needed. Metadata lists and maps have
 tagged schemas: inspect `Metadata.list values` or `Metadata.map pairs` as a
 metadatum instead.

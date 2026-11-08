@@ -45,6 +45,7 @@ import qualified Cometa.Transaction as Tx
 import qualified Cometa.Transaction.Body as Body
 import qualified Cometa.Transaction.Builder as Builder
 import qualified Cometa.Transaction.Datum as Datum
+import qualified Cometa.Transaction.Deferred as Deferred
 import qualified Cometa.Transaction.Fields as Fields
 import qualified Cometa.Transaction.Input as Input
 import qualified Cometa.Transaction.Output as Output
@@ -60,6 +61,7 @@ import qualified Data.ByteString as B
 import Data.Either (isLeft)
 import Data.IORef (modifyIORef', newIORef, readIORef)
 import Data.List (elemIndex, isInfixOf, sort)
+import Data.Word (Word64)
 import qualified Fixtures.ProtocolParameters as Fixture
 import System.Timeout (timeout)
 import Test.Tasty (TestTree, testGroup)
@@ -71,7 +73,8 @@ tests :: TestTree
 tests =
   testGroup
     "Deferred redeemers"
-    [ testCase "canonical spending index and selected snapshots survive repeated balances" spending,
+    [ testCase "query adapters match raw callbacks through native balancing and cleanup" querySpending,
+      testCase "canonical spending index and selected snapshots survive repeated balances" spending,
       testCase "native VM accepts the resolved late mint argument" nativeMinting,
       testCase "one policy group mints several assets with one redeemer" minting,
       testCase "withdrawal and certificate callbacks share one balanced draft" otherPurposes,
@@ -312,3 +315,54 @@ nativeMinting = do
   let expected = Data.fromData (Data.Integer (toInteger (Body.fee (Body.toBody (Tx.body tx)))))
   map Redeemer.argument (redeemers tx) @?= [expected]
   assertBool "native evaluator left zero budgets" (all ((/= ExUnits 0 0) . Redeemer.executionUnits) (redeemers tx))
+
+-- Compiles the query/explicit-encoder workflow shown in transaction-building.md
+-- and compares it at the native builder boundary with the raw callback contract.
+querySpending :: IO ()
+querySpending = do
+  baseline <- Runtime.liveContexts
+  (config, output, input, script) <- scriptFixture
+  precedingId <- must (Id.fromBytes (B.replicate 32 1))
+  precedingOutput <- must (Output.mkOutput (Builder.changeAddress config) (Value.lovelace 3000000) Datum.NoDatum Nothing)
+  let preceding = Utxo.utxo (Input.input precedingId 0) precedingOutput
+      encodePositions :: (Word64, Word64) -> Data.PlutusData
+      encodePositions (inputIndex, outputIndex) = Data.Constr 0 [Data.Integer (toInteger inputIndex), Data.Integer (toInteger outputIndex)]
+      positions = (,) <$> Deferred.inputIndex (Utxo.input input) <*> Deferred.outputIndex output
+      checkedPositions = do
+        transaction <- Deferred.draft
+        selected <- Deferred.selectedInputs
+        let canonical = Fields.fieldInputs (Body.bodyFields (Body.toBody (Tx.body transaction)))
+        Deferred.fromEither $
+          if map Utxo.input selected == sort canonical
+            then Right ()
+            else Left (InvalidBuildingRequest "Query selected-input snapshot differs from draft")
+        positions
+      adapted = Deferred.redeemer encodePositions checkedPositions
+      raw transaction selected = do
+        let fields = Body.bodyFields (Body.toBody (Tx.body transaction))
+            canonical = Fields.fieldInputs fields
+        if map Utxo.input selected == sort canonical
+          then Right ()
+          else Left (InvalidBuildingRequest "Query selected-input snapshot differs from draft")
+        inputIndex <- maybe (Left (InvalidBuildingRequest "Raw input missing")) Right (elemIndex (Utxo.input input) canonical)
+        outputIndex <- case [index | (index, candidate) <- zip [0 :: Int ..] (Fields.fieldOutputs fields), candidate == output] of
+          [index] -> Right index
+          _ -> Left (InvalidBuildingRequest "Raw output missing or ambiguous")
+        pure (Data.fromData (encodePositions (fromIntegral inputIndex, fromIntegral outputIndex)))
+      plan callback = Plan.spendWithDeferredRedeemer input callback Nothing <> Plan.spend preceding <> Plan.attachScript script <> Plan.payTo output
+  rawTransaction <- Builder.build config (plan raw) >>= must
+  replicateM_ 3 $ do
+    adaptedTransaction <- Builder.build config (plan adapted) >>= must
+    Tx.encodeCbor adaptedTransaction @?= Tx.encodeCbor rawTransaction
+    redeemers adaptedTransaction @?= redeemers rawTransaction
+    map Redeemer.index (redeemers adaptedTransaction) @?= [1]
+    map Redeemer.argument (redeemers adaptedTransaction) @?= [Data.fromData (encodePositions (1, 0))]
+    Runtime.liveContexts >>= (@?= baseline)
+  let expected = InvalidBuildingRequest "Deferred query refused draft"
+      rejected = Deferred.redeemer Data.Integer (Deferred.fromEither (Left expected))
+  Builder.build config (plan rejected) >>= (@?= Left expected)
+  Runtime.liveContexts >>= (@?= baseline)
+  missingId <- must (Id.fromBytes (B.replicate 32 99))
+  let missing = Deferred.redeemer (Data.Integer . toInteger) (Deferred.inputIndex (Input.input missingId 0))
+  Builder.build config (plan missing) >>= (@?= Left (InvalidBuildingRequest "Deferred spending input is missing"))
+  Runtime.liveContexts >>= (@?= baseline)
