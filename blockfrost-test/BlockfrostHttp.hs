@@ -88,7 +88,7 @@ tests =
       testCase "TLS cancellation joins blocked writes without a close-notify write" tlsWriteCancellation,
       testCase "TLS handshake timeout cancels its socket operations" tlsHandshakeTimeout,
       testCase "TLS CONNECT proxy retains target hostname verification" tlsProxy,
-      testCase "refused local connections fail without hanging" refusedConnection,
+      testCase "refused local connections obey request deadlines and close their scope" refusedConnection,
       testCase "escaped transports close and scope teardown joins active sends" lifetime
     ]
 
@@ -345,9 +345,19 @@ refusedConnection = Socket.withSocketsDo $ do
     Socket.bind socket (Socket.SockAddrInet 0 (Socket.tupleToHostAddress (127, 0, 0, 1)))
     Socket.getSocketName socket
   case address of
-    Socket.SockAddrInet port _ ->
-      cleanupWithin $ Http.withTransport configured {Config.endpoint = Text.pack ("http://127.0.0.1:" <> show port <> "/api/v0")} $ \transport ->
-        Http.send transport request >>= (@?= Left Http.ConnectionFailure)
+    Socket.SockAddrInet port _ -> do
+      escaped <- newEmptyMVar
+      -- Windows can retry loopback SYNs for about two seconds before reporting
+      -- refusal. Bound the request explicitly: either refusal or its earlier
+      -- deadline is correct, while the unchanged fixture deadline still detects
+      -- a connect/cancellation operation that fails to join.
+      cleanupWithin $ Http.withTransport configured {Config.endpoint = Text.pack ("http://127.0.0.1:" <> show port <> "/api/v0"), Config.responseTimeoutMillis = 250} $ \transport -> do
+        outcome <- Http.send transport request
+        assertBool "refused connection neither failed nor reached its request deadline" (outcome == Left Http.ConnectionFailure || outcome == Left Http.Timeout)
+        Http.checkOpen transport >>= (@?= Right ())
+        putMVar escaped transport
+      transport <- within (takeMVar escaped)
+      Http.checkOpen transport >>= (@?= Left Http.Closed)
     _ -> assertFailure "unexpected refused fixture socket family"
 
 tlsEndpoint :: String -> String

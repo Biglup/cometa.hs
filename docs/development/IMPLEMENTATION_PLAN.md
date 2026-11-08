@@ -4089,3 +4089,19 @@ HTTP/TLS, contextual balancing, language selection, inspection and independent
 accounting pass targeted Valgrind checks without lost allocations or errors.
 Hosted Windows validation is pending the completed PR's CI run. No transactions
 were submitted during this slice.
+
+
+Hosted run 42484170693 confirms Windows HTTP/TLS read and write cancellation,
+handshake timeout, certificate rejection and CONNECT all pass. Its sole HTTP
+failure was a refused-loopback fixture: Windows can take about two seconds to
+report connection refusal, while the fixture used a longer request timeout inside
+a two-second test guard. The regression now uses a 250ms request deadline and
+accepts only the typed refusal or timeout result, verifies the transport remains
+open, and verifies it is closed after scope exit. The outer two-second guard is
+unchanged. Chromium's net/socket/tcp_socket_win.cc (blob
+`d06a16058a6b812e391f6dcf30b1b6e388645030`) documents this Windows retry behavior.
+The same run exposed a redundant foldl' import under GHC 9.10; a qualified call
+supports both compiler baselines without suppressing warnings. A follow-up hosted
+run validates these two portability corrections. All 54 offline example entry
+points pass locally, and a credential-free production TLS request to Blockfrost's
+preprod health endpoint returned HTTP 200 using the system trust store.
