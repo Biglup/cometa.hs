@@ -26,6 +26,7 @@ import qualified Callback
 import qualified Cbor
 import qualified Certificates
 import qualified Cip8
+import qualified Collections
 import qualified Cometa
 import qualified Cometa.Crypto.Blake2b as Blake2b
 import Cometa.Error (Error (..))
@@ -55,6 +56,7 @@ import qualified Proposals
 import qualified ProtocolValues
 import qualified PublicTransaction
 import qualified Scripts
+import qualified SetEncoding
 import qualified SlotConfig
 import qualified SoftwareKeyHandler
 import System.Mem (performGC)
@@ -84,6 +86,8 @@ main =
         Pool.tests,
         Governance.tests,
         ProtocolValues.tests,
+        Collections.tests,
+        SetEncoding.tests,
         SlotConfig.tests,
         Parameters.tests,
         Scripts.tests,

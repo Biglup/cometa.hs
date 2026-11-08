@@ -137,8 +137,11 @@ setList :: D.Decoder s a -> D.Decoder s [a]
 setList parser = do
   token <- D.peekTokenType
   case token of
-    D.TypeTag -> do
-      tag <- D.decodeTag
-      unless (tag == 258) (fail "Invalid set tag")
+    D.TypeTag -> checkTag
+    D.TypeTag64 -> checkTag
     _ -> pure ()
   list parser
+  where
+    checkTag = do
+      tag <- D.decodeTag64
+      unless (tag == 258) (fail "Invalid set tag")

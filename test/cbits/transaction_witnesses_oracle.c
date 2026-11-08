@@ -73,6 +73,10 @@ static cardano_error_t
 rebuild_vkey_witness_set(cardano_vkey_witness_set_t* source, cardano_vkey_witness_set_t** output)
 {
   cardano_error_t result = cardano_vkey_witness_set_new(output);
+  if (result == CARDANO_SUCCESS)
+  {
+    result = cardano_vkey_witness_set_set_use_tag(*output, cardano_vkey_witness_set_get_use_tag(source));
+  }
   for (size_t i = 0; result == CARDANO_SUCCESS && i < cardano_vkey_witness_set_get_length(source); ++i)
   {
     cardano_vkey_witness_t* old   = NULL;
@@ -96,6 +100,10 @@ static cardano_error_t
 rebuild_bootstrap_witness_set(cardano_bootstrap_witness_set_t* source, cardano_bootstrap_witness_set_t** output)
 {
   cardano_error_t result = cardano_bootstrap_witness_set_new(output);
+  if (result == CARDANO_SUCCESS)
+  {
+    result = cardano_bootstrap_witness_set_set_use_tag(*output, cardano_bootstrap_witness_set_get_use_tag(source));
+  }
   for (size_t i = 0; result == CARDANO_SUCCESS && i < cardano_bootstrap_witness_set_get_length(source); ++i)
   {
     cardano_bootstrap_witness_t* old   = NULL;

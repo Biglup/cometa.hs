@@ -35,3 +35,12 @@ keys or network access.
 :language: haskell
 :start-at: "{-# LANGUAGE OverloadedStrings #-}"
 ```
+
+## Collection tags
+
+`Witnesses.encodeCborWith` selects tagged or untagged encoding for all present
+witness sets. `Witnesses.setEncoding` observes one `SetField`, and
+`Witnesses.withSetEncoding` edits it without changing nested script or datum bytes.
+Redeemers are not controlled by this option. Absent collections remain absent.
+Changing a datum-set representation can require a new script-data hash; update
+that body commitment and sign again before submission.

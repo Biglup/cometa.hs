@@ -66,3 +66,25 @@ merge duplicate keys and change their order.
 A decoded child retains its own bytes. Building a new array or map writes a new
 container around those children. To preserve an entire original encoding,
 export the original `Cbor` value instead of rebuilding it.
+
+## Standalone ledger collections
+
+`Cometa.Encoding.Collections` encodes and decodes three collection shapes:
+
+| Functions | Haskell values |
+| --- | --- |
+| `encodeAssetNamesCbor`, `decodeAssetNamesCbor` | `[(AssetName, Integer)]` for one policy's quantities |
+| `encodeWithdrawalsCbor`, `decodeWithdrawalsCbor` | `[(RewardAddress, Word64)]` |
+| `encodeHashesCbor`, `decodeHashesCbor` | `[Blake2bHash]` |
+
+Lists preserve duplicate entries and explicit zero quantities. Codecs use native
+collection ordering; they do not apply the normalization rules of `Value` or
+`Data.Map`. Asset quantities are checked against signed 64-bit bounds when
+encoding; withdrawal amounts cover the full unsigned 64-bit range. Empty maps
+and hash collections are representable even where a containing transaction field
+would prohibit them.
+
+Hash arrays use tag 258 by default. `encodeHashesCborWith UntaggedSet` produces an
+untagged array; decoding accepts either form. This is a representation choice:
+native hash-set re-encoding always emits the tagged form. Persist the original
+bytes separately when exact imported encoding matters.

@@ -3809,3 +3809,72 @@ references this merged revision. Its tree matches the validated PR head
 documented the existing unit-redeemer defaults without changing the public ABI.
 The public API inventory is unchanged. Haskell Windows CI remains an independent
 open validation issue.
+
+
+### Serialization and native reliability slice (2026-11-08)
+
+Standalone codecs use `Cometa.Encoding.Collections` and ordinary typed lists.
+Reviewed cardano-api `c2212851b06b9c2acc5bb0bfe1b8a8e8cf2be03a`
+Value/Internal.hs (normalized policy maps) and Tx/Internal/Body.hs at
+`5e63165a4bb7481a03d2e50464dc9c4f106c9fa5` (typed withdrawal associations).
+Cometa deliberately preserves duplicate keys and zero entries because the native
+standalone collections retain them. Integer quantities are checked at encoding;
+withdrawals retain Word64 bounds. Native source/order contracts and oracle tests
+cover six additional serialization ledger entries, without inventing mutable
+collection wrappers.
+
+Before choosing tag controls, reviewed cardano-ledger
+`7827506b7518284d7f9dbbe3502a20431e513fe9`,
+[Binary/Encoding/Encoder.hs](https://github.com/IntersectMBO/cardano-ledger/blob/7827506b7518284d7f9dbbe3502a20431e513fe9/libs/cardano-ledger-binary/src/Cardano/Ledger/Binary/Encoding/Encoder.hs),
+`encodeSet`: protocol-version-dependent tags and array lengths show why semantic
+sets and exact bytes need separate contracts. Cometa offers explicit SetEncoding
+and schema-specific SetField choices, preserving encoded nested data. This is not
+an era validator. Native hash/certificate/proposal collections always encode tags;
+Haskell untagged controls are schema-level choices, not claims of native setter
+parity. Existing transaction setBody semantic no-ops are unchanged; explicit
+setBodySetEncoding compares exact bytes and removes stale key/bootstrap witnesses.
+
+The first upstream selector properties invoke real native strategies through
+Cometa.CoinSelection, with independent Map/Integer accounting and minimum-Ada
+calculations. Exact source revision, retained NOTICE, generation constraints and
+limits are recorded in test/Fixtures/COIN_SELECTION.md. Heavier ledger integration,
+additional builder workflows and crypto vectors remain planned in section 19.7.
+
+#### Windows fixture follow-up
+
+The earlier close-before-cancel fix did not resolve the six-hour Windows timeout.
+Reviewed network 3.2.12.0 (Network/Socket/Syscall.hs, Types.hsc and Shutdown.hs):
+threaded Windows accept is a safe blocking FFI call. Microsoft's
+[closesocket contract](https://learn.microsoft.com/en-us/windows/win32/api/winsock/nf-winsock-closesocket)
+forbids concurrent closesocket and other Winsock calls on the same socket.
+The fixture now wakes accept with a loopback connection after setting a stop flag,
+joins its worker before closing the listener, and shuts down active connections
+before cancellation/join. Cleanup deadlines wait on a separate owning worker;
+a deadline is an explicit test failure, never a skipped or successful cleanup.
+Regressions cover idle listeners, incomplete peer requests, blocked handlers and
+continuation exceptions. Windows correctness still requires the new CI run;
+Linux tests alone do not establish it.
+
+
+#### Validation of this slice
+
+All 572 tests pass locally: 374 public, 146 runtime and 52 Blockfrost tests.
+The six collection tests, six encoding-control tests and fourteen native selector
+tests pass Valgrind with zero errors and no definitely, indirectly or possibly
+lost bytes. Linux HTTP checks also pass 100 fixture stress runs and 20 full-suite
+stress runs. The full build, Ormolu, HLint, changed C formatting, native inventory,
+package checks, source distribution, strict Sphinx HTML/link checks and portable
+Haddock builds pass. No new live-network transactions were submitted.
+Windows remains subject to hosted CI verification.
+
+The regression pass found native hash collections accept indefinite arrays but
+require definite digest byte strings; the new decoder matches that restriction.
+It also found the shared Haskell set parser missed full-width encodings of tag258;
+it now accepts both CBOR tag token widths, with exact-preservation tests.
+Native input/hash collections can normalize untagged input to tagged output;
+tests distinguish that normalization from exact encoding correspondence.
+
+The final 52-test HTTP suite also passes Valgrind with zero errors or lost
+allocations. Instrumentation exposed a test race where a 25ms client deadline
+could precede handler entry; the final regression uses a raw loopback peer and
+explicit handler-entry handshake, with unchanged cleanup deadlines.

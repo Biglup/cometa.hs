@@ -40,6 +40,7 @@ module Cometa.Transaction
     hasScriptData,
     transactionId,
     setBody,
+    setBodySetEncoding,
     setFee,
     setScriptValidity,
     setAuxiliaryData,
@@ -53,6 +54,7 @@ where
 import qualified Codec.CBOR.Decoding as D
 import qualified Codec.CBOR.Read as R
 import qualified Codec.CBOR.Term as T
+import Cometa.Encoding.Set (SetEncoding)
 import Cometa.Error (Error (..))
 import qualified Cometa.Transaction.AuxiliaryData as Auxiliary
 import qualified Cometa.Transaction.Body as Body
@@ -303,3 +305,14 @@ decodeFrame bytes = do
             (ByteString.drop witnessEnd bytes)
         )
     boolBytes valid = ByteString.singleton (if valid then 0xf5 else 0xf4)
+
+-- | Change a present body's collection tag, retaining unrelated field bytes.
+-- An encoding change removes outer key/bootstrap signatures even when the body
+-- has the same semantic values. Absent fields and unchanged tags are exact no-ops.
+-- Recheck fees and protocol encoding requirements before signing again.
+setBodySetEncoding :: Body.SetField -> SetEncoding -> Transaction -> Transaction
+setBodySetEncoding field requested transaction
+  | replacement == body transaction = transaction
+  | otherwise = transaction {transactionBody = replacement, transactionWitnesses = Witnesses.removeKeyWitnesses (witnesses transaction)}
+  where
+    replacement = Body.withSetEncoding field requested (body transaction)

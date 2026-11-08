@@ -26,8 +26,8 @@ import qualified Cometa.Provider.Blockfrost.Internal.Config as Config
 import qualified Cometa.Provider.Blockfrost.Internal.Http as Http
 import Control.Concurrent (forkFinally, killThread, threadDelay, yield)
 import Control.Concurrent.MVar (modifyMVar_, newEmptyMVar, newMVar, putMVar, readMVar, takeMVar, tryPutMVar, tryTakeMVar)
-import Control.Exception (AsyncException (ThreadKilled), bracket, finally, fromException, mask)
-import Control.Monad (forM_, forever, void)
+import Control.Exception (AsyncException (ThreadKilled), IOException, SomeException, bracket, bracketOnError, catch, finally, fromException, mask, onException, throwIO, try)
+import Control.Monad (forM_, void, when)
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Char8 as C
@@ -62,6 +62,9 @@ tests =
     "Blockfrost HTTP transport"
     [ testCase "opaque credentials and bounded schedules reject unsafe input" configuration,
       testCase "fixture cleanup joins an idle listener without a client" fixtureCleanup,
+      testCase "fixture cleanup joins an incomplete request and blocked handler" fixtureConnections,
+      testCase "fixture cleanup preserves continuation exceptions" fixtureException,
+      testCase "fixture cleanup deadline reports failure while cleanup retains ownership" fixtureDeadline,
       testCase "public provider uses custom base paths with optional credentials" customEndpoints,
       testCase "custom endpoint queries survive pagination and selected network magic" endpointQueries,
       testCase "invalid URLs fail before callback without echoing secrets" invalidEndpoints,
@@ -293,45 +296,149 @@ waitClosed transport = do
     Left failure -> assertFailure (show failure)
     Right () -> yield >> waitClosed transport
 
--- A listener with no incoming connection must still terminate within the fixture
--- deadline. On threaded Windows, accept is a safe blocking FFI call: sending an
--- asynchronous exception before closing its socket would wait indefinitely.
+-- The stop signal must work both before accept starts and while it is blocked.
+-- A real loopback connection wakes Windows' safe blocking accept; neither closing
+-- a socket from another thread nor throwing an async exception establishes this.
 fixtureCleanup :: IO ()
-fixtureCleanup = within $ forM_ [1 .. 20 :: Int] $ \_ ->
-  withServer (\_ -> pure (response 200 "unused" [])) (\_ -> threadDelay 1000)
+fixtureCleanup = forM_ [1 .. 20 :: Int] $ \iteration -> do
+  called <- newIORef False
+  withServer (\_ -> writeIORef called True >> pure B.empty) $ \_ ->
+    when (even iteration) (threadDelay 1000)
+  readIORef called >>= (@?= False)
+
+fixtureConnections :: IO ()
+fixtureConnections = Socket.withSocketsDo $ do
+  entered <- newEmptyMVar
+  received <- newEmptyMVar
+  gate <- newEmptyMVar
+  let handler _ = putMVar entered () >> takeMVar gate >> pure B.empty
+  -- Keep the peer alive beyond fixture exit: cleanup must release a worker in
+  -- recv itself, rather than depending on a well-behaved client sending EOF.
+  bracket (Socket.socket Socket.AF_INET Socket.Stream Socket.defaultProtocol) Socket.close $ \peer ->
+    withServerReady (putMVar received ()) handler $ \endpoint -> do
+      port <- endpointPort endpoint
+      Socket.connect peer (Socket.SockAddrInet port (Socket.tupleToHostAddress (127, 0, 0, 1)))
+      Socket.sendAll peer "GET /unfinished HTTP/1.1\r\n"
+      within (takeMVar received)
+  -- Wait for the handler itself, rather than racing HTTP request startup against
+  -- a short client timeout. The peer remains open while fixture exit cancels a
+  -- worker that has finished socket input and is blocked in Haskell code.
+  bracket (Socket.socket Socket.AF_INET Socket.Stream Socket.defaultProtocol) Socket.close $ \peer ->
+    withServer handler $ \endpoint -> do
+      port <- endpointPort endpoint
+      Socket.connect peer (Socket.SockAddrInet port (Socket.tupleToHostAddress (127, 0, 0, 1)))
+      Socket.sendAll peer "GET /blocked HTTP/1.1\r\nHost: fixture\r\n\r\n"
+      within (takeMVar entered)
+
+fixtureException :: IO ()
+fixtureException = do
+  outcome <- (withServer (\_ -> pure B.empty) (\_ -> ioError (userError "fixture continuation failed")) >> pure False) `catch` expected
+  assertBool "continuation exception survives joined fixture cleanup" outcome
+  where
+    expected :: IOException -> IO Bool
+    expected failure = pure ("fixture continuation failed" `Text.isInfixOf` Text.pack (show failure))
+
+fixtureDeadline :: IO ()
+fixtureDeadline = do
+  gate <- newEmptyMVar
+  finished <- newEmptyMVar
+  ( do
+      outcome <- within (try (cleanupWithinMicros 10000 (takeMVar gate `finally` putMVar finished ())) :: IO (Either SomeException ()))
+      case outcome of
+        Left failure -> assertBool "cleanup timeout is a visible failure" ("fixture cleanup timed out" `Text.isInfixOf` Text.pack (show failure))
+        Right () -> assertFailure "cleanup timeout became success"
+      tryTakeMVar finished >>= assertBool "unfinished cleanup retains ownership" . isNothing
+    )
+    `finally` (putMVar gate () >> within (takeMVar finished))
+
+endpointPort :: String -> IO Socket.PortNumber
+endpointPort endpoint = case reads (takeWhile (/= '/') (drop (length ("http://127.0.0.1:" :: String)) endpoint)) of
+  [(port, "")] -> pure port
+  _ -> assertFailure "invalid local fixture endpoint" >> fail "fixture endpoint"
 
 -- A local HTTP fixture owns its listener, accept worker and every connection
 -- worker. No public endpoint is contacted, and only a fixed fake project ID is used.
 withServer :: (WireRequest -> IO ByteString) -> (String -> IO a) -> IO a
-withServer handler action = Socket.withSocketsDo $ bracket open Socket.close $ \listener -> mask $ \restore -> do
-  address <- Socket.getSocketName listener
+withServer = withServerReady (pure ())
+
+withServerReady :: IO () -> (WireRequest -> IO ByteString) -> (String -> IO a) -> IO a
+withServerReady connectionReady handler action = Socket.withSocketsDo $ mask $ \restore -> do
+  listener <- open
+  address <- Socket.getSocketName listener `onException` Socket.close listener
   port <- case address of
     Socket.SockAddrInet value _ -> pure value
-    _ -> assertFailure "unexpected fixture socket family" >> fail "fixture"
+    _ -> Socket.close listener >> assertFailure "unexpected fixture socket family" >> fail "fixture"
   workers <- newMVar []
+  stopping <- newMVar False
   accepted <- newEmptyMVar
-  bracket (forkFinally (restore (acceptLoop listener workers)) (const (putMVar accepted ()))) (stop listener workers accepted) $ \_ ->
-    restore (action ("http://127.0.0.1:" <> show port <> "/api/v0"))
+  bracket
+    (forkFinally (restore (acceptLoop listener workers stopping)) (putMVar accepted) `onException` Socket.close listener)
+    (const (cleanupWithin (stop listener address workers stopping accepted)))
+    (\_ -> restore (action ("http://127.0.0.1:" <> show port <> "/api/v0")))
   where
-    open = do
-      listener <- Socket.socket Socket.AF_INET Socket.Stream Socket.defaultProtocol
+    open = bracketOnError (Socket.socket Socket.AF_INET Socket.Stream Socket.defaultProtocol) Socket.close $ \listener -> do
       Socket.setSocketOption listener Socket.ReuseAddr 1
       Socket.bind listener (Socket.SockAddrInet 0 (Socket.tupleToHostAddress (127, 0, 0, 1)))
       Socket.listen listener 8
       pure listener
-    acceptLoop listener workers = forever $ mask $ \restore -> do
+    acceptLoop listener workers stopping = mask $ \restore -> do
       (connection, _) <- Socket.accept listener
-      finished <- newEmptyMVar
-      worker <- forkFinally (restore (receive connection >>= handler >>= Socket.sendAll connection)) (const (Socket.close connection `finally` putMVar finished ()))
-      modifyMVar_ workers (pure . ((connection, worker, finished) :))
-    stop listener workers accepted acceptWorker = do
-      -- Close sockets before throwing: Windows blocking accept/recv calls are
-      -- safe FFI calls and cannot deliver asynchronous exceptions until return.
-      (Socket.close listener >> void (within (killThread acceptWorker >> takeMVar accepted)))
+      shouldStop <- readMVar stopping
+      if shouldStop
+        then Socket.close connection
+        else do
+          finished <- newEmptyMVar
+          connectionOpen <- newMVar True
+          let closeConnection = modifyMVar_ connectionOpen $ \isOpen -> do
+                when isOpen (Socket.close connection)
+                pure False
+              shutdownConnection = modifyMVar_ connectionOpen $ \isOpen -> do
+                -- A finished worker may already have closed its socket. The
+                -- same lock protects shutdown and close against descriptor reuse.
+                when isOpen (Socket.shutdown connection Socket.ShutdownBoth `catch` ignoreSocketError)
+                pure isOpen
+          worker <-
+            forkFinally
+              (restore (connectionReady >> receive connection >>= handler >>= Socket.sendAll connection))
+              (const (closeConnection `finally` putMVar finished ()))
+              `onException` closeConnection
+          modifyMVar_ workers (pure . ((shutdownConnection, worker, finished) :))
+          restore (acceptLoop listener workers stopping)
+    stop listener address workers stopping accepted = do
+      modifyMVar_ stopping (const (pure True))
+      -- Do not close the listener concurrently with accept. In network-3.2.12.0
+      -- withFdSocket takes no lock, and Winsock does not promise that closesocket
+      -- cancels a synchronous accept. Wake it normally, join, then close.
+      ( do
+          bracket (Socket.socket Socket.AF_INET Socket.Stream Socket.defaultProtocol) Socket.close $ \wake ->
+            Socket.connect wake address
+          outcome <- readMVar accepted
+          Socket.close listener
+          either throwIO pure outcome
+        )
         `finally` do
           connections <- readMVar workers
-          mapM_ (\(connection, _, _) -> Socket.close connection) connections
-          within (mapM_ (\(_, worker, finished) -> killThread worker >> takeMVar finished) connections)
+          forM_ connections $ \(shutdownConnection, _, _) -> shutdownConnection
+          forM_ connections $ \(_, worker, finished) -> killThread worker >> readMVar finished
+    ignoreSocketError :: IOException -> IO ()
+    ignoreSocketError _ = pure ()
+
+-- timeout cannot interrupt a safe blocking foreign call, and killThread waits
+-- synchronously for delivery. Give the cleanup worker ownership until it joins;
+-- the test thread waits only on an interruptible MVar, so a failed shutdown is a
+-- bounded test failure rather than a six-hour CI hang. Successful cleanup joins
+-- every worker and closes every socket before returning.
+cleanupWithin :: IO () -> IO ()
+cleanupWithin = cleanupWithinMicros 2000000
+
+cleanupWithinMicros :: Int -> IO () -> IO ()
+cleanupWithinMicros deadline action = do
+  finished <- newEmptyMVar
+  _ <- forkFinally action (putMVar finished)
+  outcome <- timeout deadline (takeMVar finished)
+  case outcome of
+    Nothing -> assertFailure "local HTTP fixture cleanup timed out"
+    Just result -> either throwIO pure result
 
 receive :: Socket.Socket -> IO WireRequest
 receive connection = do

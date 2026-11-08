@@ -30,6 +30,10 @@ module Cometa.Transaction.Witnesses
     merge,
     EncodedWitnesses,
     encodeCbor,
+    encodeCborWith,
+    SetField (..),
+    setEncoding,
+    withSetEncoding,
     decodeCbor,
     fromWitnesses,
     toWitnesses,
@@ -44,7 +48,9 @@ where
 
 import qualified Codec.CBOR.Decoding as D
 import qualified Codec.CBOR.Encoding as E
+import Cometa.Encoding.Set (SetEncoding)
 import Cometa.Error (Error (..))
+import qualified Cometa.Internal.SetEncoding as SetEncoding
 import qualified Cometa.Internal.TransactionCbor as C
 import qualified Cometa.PlutusData as Data
 import qualified Cometa.Script as Script
@@ -72,6 +78,26 @@ data Witnesses = Witnesses
 
 instance Eq Witnesses where
   a == b = fields a == fields b
+
+-- | Set-valued witness fields. Redeemers have a separate collection format.
+data SetField
+  = -- | Verification-key witnesses.
+    VerificationKeys
+  | -- | Native scripts.
+    NativeScripts
+  | -- | Byron bootstrap witnesses.
+    BootstrapWitnesses
+  | -- | Plutus V1 scripts.
+    PlutusV1Scripts
+  | -- | Witness datums.
+    Datums
+  | -- | Plutus V2 scripts.
+    PlutusV2Scripts
+  | -- | Plutus V3 scripts.
+    PlutusV3Scripts
+  | -- | Plutus V4 scripts.
+    PlutusV4Scripts
+  deriving (Eq, Ord, Show, Enum, Bounded)
 
 -- DEFINITIONS ----------------------------------------------------------------
 
@@ -248,3 +274,35 @@ removeKeyWitnesses encoded =
    in if length retained == length (fields value)
         then encoded
         else fromWitnesses value {witnessVerificationWitnesses = [], witnessBootstrapWitnesses = [], fields = retained}
+
+-- | Encode with the requested tag on each present witness set. Nested datum and
+-- script bytes remain unchanged; no absent collection is introduced.
+encodeCborWith :: SetEncoding -> Witnesses -> ByteString
+encodeCborWith requested value = toCbor (foldr (`withSetEncoding` requested) (fromWitnesses value) [minBound .. maxBound])
+
+-- | Observe a witness collection's set tag; absent collections return 'Nothing'.
+setEncoding :: SetField -> EncodedWitnesses -> Maybe SetEncoding
+setEncoding field (EncodedWitnesses _ value) = SetEncoding.encoding <$> lookup (setFieldKey field) (fields value)
+
+-- | Change only a present witness collection's set tag. Unchanged tags and absent
+-- fields preserve the original envelope. Changes use a definite outer map while
+-- retaining field order and exact nested bytes. Changing datum-set bytes can
+-- require a new script-data hash and renewed transaction signatures.
+withSetEncoding :: SetField -> SetEncoding -> EncodedWitnesses -> EncodedWitnesses
+withSetEncoding field requested original@(EncodedWitnesses _ value)
+  | updated == fields value = original
+  | otherwise = EncodedWitnesses (encodeFields updated) value {fields = updated}
+  where
+    updated = [(key, if key == setFieldKey field then SetEncoding.withEncoding requested bytes else bytes) | (key, bytes) <- fields value]
+
+-- | Ledger map key of a supported set-valued witness field.
+setFieldKey :: SetField -> Word
+setFieldKey field = case field of
+  VerificationKeys -> 0
+  NativeScripts -> 1
+  BootstrapWitnesses -> 2
+  PlutusV1Scripts -> 3
+  Datums -> 4
+  PlutusV2Scripts -> 6
+  PlutusV3Scripts -> 7
+  PlutusV4Scripts -> 8

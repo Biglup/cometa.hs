@@ -66,12 +66,18 @@ This slice completes the identified treasury/proposing builder gaps. It does not
 claim complete native function coverage. The remaining coherent serialization
 work is:
 
-- Standalone per-policy asset-name quantity maps, withdrawal maps (including
-  empty maps), and variable-length hash sets. Reuse Haskell values without
-  introducing mutable C collection wrappers; specify zero/duplicate/order rules.
-- Explicit tagged/untagged fresh set encoding and observation of individual
-  collection tags. Retaining imported bytes is not equivalent to choosing new
-  encodings. Body edits must preserve the existing signature invalidation policy.
+Standalone asset-name maps, withdrawal maps and variable-length hash sets now
+have codecs in `Cometa.Encoding.Collections`, with typed lists preserving native
+zero/duplicate/order behavior. Body and witness `SetField` controls expose their
+outer collection tags. Explicit transaction-level tag edits remove stale key
+signatures. These controls do not recursively normalize embedded values or imply
+that every native collection exposes a mutable tag setter.
+
+Remaining work:
+
+- Audit tag controls for standalone certificate/proposal collections, pool-owner
+  sets and committee credential sets separately; the body controls do not claim
+  recursive coverage of nested collections.
 - Remaining standalone CIP-116 leaf values and collection shapes. Ordinary
   traversal suffices for native array schemas only after their exact shape and
   ordering are verified; the ledger keeps other outputs pending.

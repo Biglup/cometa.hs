@@ -16,7 +16,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 -- | Typed witness workflows, exact identity, native reconstruction and failures.
-module TransactionWitnesses (tests) where
+module TransactionWitnesses (tests, sample, agree) where
 
 -- IMPORTS --------------------------------------------------------------------
 

@@ -28,7 +28,8 @@ import qualified Cometa.AssetId as Asset
 import qualified Cometa.AssetName as Name
 import qualified Cometa.CoinSelection as Selection
 import qualified Cometa.Credential as Credential
-import Cometa.Error (Error (InvalidSelectionRequest))
+import Cometa.Error (Error (InvalidSelectionRequest, NativeError))
+import qualified Cometa.Error.Code as Code
 import qualified Cometa.Internal.CoinSelection as Wire
 import qualified Cometa.Internal.CoinSelection.Native as Native
 import qualified Cometa.Internal.FFI.CoinSelection as FFI
@@ -49,11 +50,13 @@ import Control.Monad (forM_, replicateM, replicateM_, (>=>))
 import qualified Data.ByteString as B
 import Data.Either (isLeft)
 import Data.Int (Int64)
+import qualified Data.Map.Strict as Map
+import qualified Data.Set as Set
 import Data.Word (Word64)
 import qualified Fixtures.ProtocolParameters as Fixture
 import Foreign.Marshal.Alloc (alloca)
 import Foreign.Storable (peek)
-import Hedgehog (Property, evalEither, evalIO, forAll, property, (===))
+import Hedgehog (Gen, Property, PropertyT, assert, classify, evalEither, evalIO, forAll, property, (===))
 import qualified Hedgehog.Gen as Gen
 import qualified Hedgehog.Range as Range
 import System.Mem (performGC)
@@ -75,7 +78,10 @@ tests =
       testCase "aggregate native arithmetic bounds fail before selection" checkBounds,
       testCase "signed implicit surplus preserves coin and native-asset change" checkSigned,
       testCase "repeated and concurrent invocations survive GC and callback dispatch" checkLifecycle,
-      testProperty "generated native strategies preserve full accounting" propAccounting
+      testProperty "generated native strategies preserve full accounting" propAccounting,
+      testProperty "upstream multiasset exact and surplus selection laws" propMultiassetSelection,
+      testProperty "upstream generated insufficient coin and token supplies fail" propInsufficientSupply,
+      testProperty "upstream generated splitting preserves quantities and size bounds" propSplitBundles
     ]
 
 must :: (Show e) => Either e a -> IO a
@@ -244,3 +250,127 @@ propAccounting = property $ do
   forM_ [Selection.largestFirst, Selection.randomImproveWithSeed seed, Selection.randomImproveWithOptions seed Selection.Minimal] $ \selector -> do
     result <- evalIO (Selection.select selector request) >>= evalEither
     Selection.validateSelection request result === Right ()
+
+-- The following properties adapt BalanceSpec's exact/surplus/insufficient supply
+-- and bundle-splitting laws, using small positive bundle generators with
+-- integrated shrinking. See Fixtures/COIN_SELECTION.md for the pinned source,
+-- upstream notices, and differences from its unbounded mock constraints.
+-- Expected accounting uses Integer maps, never Value's arithmetic or a C oracle.
+type Quantities = Map.Map Asset.AssetId Integer
+
+quantitySum :: [[(Asset.AssetId, Integer)]] -> Quantities
+quantitySum = Map.filter (/= 0) . Map.fromListWith (+) . concat
+
+selectionLaws :: Selection.SelectionRequest -> Selection.Selection -> PropertyT IO ()
+selectionLaws request result = do
+  let selected = Selection.selected result
+      references = map Utxo.input selected
+      eligible = Selection.preselected request ++ Selection.available request
+      selectedAmounts = quantitySum (map (Value.toList . Output.value . Utxo.output) selected)
+      spentAndChange = quantitySum (Value.toList (Selection.target request) : map (Value.toList . Output.value) (Selection.change result))
+      remainingReferences = Set.fromList (map Utxo.input (Selection.remaining result))
+      selectedReferences = Set.fromList references
+  assert (all (`elem` eligible) selected)
+  length references === Set.size selectedReferences
+  assert (all (`elem` selected) (Selection.preselected request))
+  remainingReferences === Set.difference (Set.fromList (map Utxo.input (Selection.available request))) selectedReferences
+  length (Selection.remaining result) === Set.size remainingReferences
+  selectedAmounts === spentAndChange
+  forM_ (Selection.change result) $ \output -> do
+    Output.address output === Selection.changeAddress request
+    assert (all ((>= 0) . snd) (Value.toList (Output.value output)))
+    -- All generated outputs have minimum Ada in the 5-byte CBOR coin range.
+    -- Calculate its Babbage UTxO cost with a fixed-width placeholder, so no
+    -- native minimum-Ada call or native arithmetic supplies the expectation.
+    placeholder <- evalEither (Output.mkOutput (Output.address output) (Value.fromList ((Asset.Ada, 1000000) : filter ((/= Asset.Ada) . fst) (Value.toList (Output.value output)))) Datum.NoDatum Nothing)
+    let minimumAda = (160 + toInteger (B.length (Output.encodeCbor placeholder))) * 4310
+    assert (minimumAda >= 65536 && minimumAda <= 4294967295)
+    assert (Map.findWithDefault 0 Asset.Ada (quantitySum [Value.toList (Output.value output)]) >= minimumAda)
+
+fixtureAssets :: IO [Asset.AssetId]
+fixtureAssets = do
+  policies <- mapM (must . Policy.fromBytes . B.replicate 28) [9, 10]
+  names <- mapM (must . Name.fromBytes . B.singleton) [1 .. 8]
+  pure [Asset.Native policy name | name <- names, policy <- policies]
+
+genBundles :: [Asset.AssetId] -> Gen [[(Asset.AssetId, Integer)]]
+genBundles assets = do
+  count <- Gen.int (Range.linear 1 8)
+  assetCount <- Gen.int (Range.linear 1 6)
+  Gen.list (Range.singleton count) $ do
+    coin <- Gen.integral (Range.linear 30000000 100000000)
+    amounts <- Gen.list (Range.singleton assetCount) (Gen.integral (Range.linear 1 10000))
+    pure ((Asset.Ada, coin) : zip assets amounts)
+
+seededAlgorithms :: Word64 -> [Selection.Selector]
+seededAlgorithms seed = [Selection.largestFirst, Selection.randomImproveWithSeed seed, Selection.randomImproveWithOptions seed Selection.Minimal]
+
+propMultiassetSelection :: Property
+propMultiassetSelection = property $ do
+  assets <- evalIO fixtureAssets
+  bundles <- forAll (genBundles assets)
+  seed <- forAll (Gen.word64 Range.constantBounded)
+  exact <- forAll Gen.bool
+  overlap <- forAll Gen.bool
+  mandatory <- forAll Gen.bool
+  classify "exact supply" exact
+  classify "surplus supply" (not exact)
+  classify "overlapping mandatory input" (mandatory && overlap)
+  classify "multiple policies" (any ((> 2) . length) bundles)
+  let total = quantitySum bundles
+      requested = if exact then total else Map.map (`div` 2) total
+  base <- evalIO (requestFor (map Value.fromList bundles) (Value.fromList (Map.toList requested)))
+  request <- case Selection.available base of
+    first : rest | mandatory -> evalEither (Selection.mkSelectionRequest ((options base) {Selection.selectionPreselected = [first], Selection.selectionAvailable = if overlap then first : rest else rest}))
+    _ -> pure base
+  forM_ (seededAlgorithms seed) $ \selector -> do
+    result <- evalIO (Selection.select selector request) >>= evalEither
+    selectionLaws request result
+    -- Check marshaled snapshots against the generated quantities as well as
+    -- conservation: altered input quantities must not satisfy the oracle.
+    forM_ (Selection.selected result) $ \selected ->
+      assert (Value.toList (Output.value (Utxo.output selected)) `elem` map (Map.toAscList . quantitySum . (: [])) bundles)
+    if exact then Selection.change result === [] else assert (not (null (Selection.change result)))
+
+propInsufficientSupply :: Property
+propInsufficientSupply = property $ do
+  assets <- evalIO fixtureAssets
+  bundles <- forAll (genBundles assets)
+  seed <- forAll (Gen.word64 Range.constantBounded)
+  missingCoin <- forAll Gen.bool
+  deficit <- forAll (Gen.integral (Range.linear 1 10000))
+  classify "insufficient Ada" missingCoin
+  classify "insufficient native asset" (not missingCoin)
+  let total = quantitySum bundles
+  missingAsset <- if missingCoin then pure Asset.Ada else forAll (Gen.element (Map.keys (Map.delete Asset.Ada total)))
+  let requested = Map.insertWith (+) missingAsset deficit total
+  request <- evalIO (requestFor (map Value.fromList bundles) (Value.fromList (Map.toList requested)))
+  forM_ (seededAlgorithms seed) $ \selector -> do
+    result <- evalIO (Selection.select selector request)
+    case result of
+      Left (NativeError _ code _) -> Code.toNumber code === 1100
+      _ -> assert False
+
+propSplitBundles :: Property
+propSplitBundles = property $ do
+  assets <- evalIO fixtureAssets
+  count <- forAll (Gen.int (Range.linear 4 16))
+  limit <- forAll (Gen.int (Range.linear 65 80))
+  amount <- forAll (Gen.element [1, 23, 24, 255, 256, 65535, 65536, 4294967295, 4294967296, toInteger (maxBound :: Int64)])
+  seed <- forAll (Gen.word64 Range.constantBounded)
+  classify "signed int64 quantity endpoint" (amount == toInteger (maxBound :: Int64))
+  classify "quantity above word32" (amount > 4294967295)
+  let raw = (Asset.Ada, 500000000) : [(asset, amount) | asset <- take count assets]
+  base <- evalIO (requestFor [Value.fromList raw] (Value.lovelace 1000000))
+  request <- evalEither (Selection.mkSelectionRequest ((options base) {Selection.selectionParameters = (Selection.parameters base) {Parameters.parameterMaxValueSize = Just (fromIntegral limit)}}))
+  forM_ (seededAlgorithms seed) $ \selector -> do
+    result <- evalIO (Selection.select selector request) >>= evalEither
+    selectionLaws request result
+    assert (length (Selection.change result) > 1)
+    forM_ (Selection.change result) $ \output -> do
+      let quantities = Value.toList (Output.value output)
+      assert (all (\(_, quantity) -> quantity <= toInteger (maxBound :: Int64)) quantities)
+      -- The native bundle assessment reserves the total Ada supply width.
+      -- Public CBOR encoding independently measures the resulting ledger value.
+      bytes <- evalEither (Value.encodeCbor (Value.fromList ((Asset.Ada, 45000000000000000) : filter ((/= Asset.Ada) . fst) quantities)))
+      assert (B.length bytes <= limit)
