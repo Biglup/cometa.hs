@@ -34,6 +34,8 @@ module Cometa.Internal.Certificate
     fromCertificates,
     toCertificates,
     certificatesCbor,
+    certificatesSetEncoding,
+    withCertificatesSetEncoding,
   )
 where
 
@@ -45,10 +47,12 @@ import qualified Codec.CBOR.Read as Read
 import qualified Codec.CBOR.Term as Term
 import qualified Codec.CBOR.Write as Write
 import qualified Cometa.Credential as Credential
+import Cometa.Encoding.Set (SetEncoding)
 import Cometa.Error (Error (..))
 import qualified Cometa.Governance.Anchor as Anchor
 import qualified Cometa.Governance.DRep as DRep
 import qualified Cometa.Internal.Pool as Pool
+import qualified Cometa.Internal.SetEncoding as SetEncoding
 import Control.Monad (foldM, replicateM, unless, when)
 import Data.ByteString (ByteString)
 import qualified Data.ByteString.Lazy as Lazy
@@ -173,6 +177,15 @@ toCertificates (EncodedCertificates _ value) = value
 certificatesCbor :: EncodedCertificates -> ByteString
 certificatesCbor (EncodedCertificates bytes _) = bytes
 
+-- | Observe the outer collection tag without changing its exact envelope.
+certificatesSetEncoding :: EncodedCertificates -> SetEncoding
+certificatesSetEncoding = SetEncoding.encoding . certificatesCbor
+
+-- | Change only the outer tag; retain every array and certificate byte.
+withCertificatesSetEncoding :: SetEncoding -> EncodedCertificates -> EncodedCertificates
+withCertificatesSetEncoding requested (EncodedCertificates bytes values) =
+  EncodedCertificates (SetEncoding.withEncoding requested bytes) values
+
 certificateEncoding :: Certificate -> Encode.Encoding
 certificateEncoding certificate = case certificate of
   StakeRegistration stake -> Encode.encodeListLen 2 <> Encode.encodeWord 0 <> credentialEncoding stake
@@ -289,8 +302,8 @@ rewardsDecoder = do
 certificatesDecoder :: Decode.Decoder s Certificates
 certificatesDecoder = do
   token <- Decode.peekTokenType
-  when (token == Decode.TypeTag) $ do
-    tag <- Decode.decodeTag
+  when (token == Decode.TypeTag || token == Decode.TypeTag64) $ do
+    tag <- Decode.decodeTag64
     unless (tag == 258) (fail "Expected certificate set tag 258")
   size <- Decode.decodeListLenOrIndef
   Certificates <$> sequenceEntries size certificateDecoder

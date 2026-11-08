@@ -25,7 +25,10 @@
  * 4 value, 5 script, 6 credential, 7 certificate, 8 proposal, 9 pool parameters,
  * 10 protocol update, 11 Plutus data, 12 output, 13 witnesses, 14 UTxO,
  * 15 DRep, 16 action id, 17 anchor, 18 voting procedures, 19 governance action,
- * 20 metadatum, 21 metadata, 22 auxiliary data, 23 input, 24 datum, 25 redeemer.
+ * 20 metadatum, 21 metadata, 22 auxiliary data, 23 input, 24 datum, 25 redeemer;
+ * 26 execution units, 27 protocol version, 28 unit interval, 29 relay,
+ * 30 pool metadata, 31 constitution, 32 voter, 33 voting procedure,
+ * 34 verification witness, 35 bootstrap witness.
  * \param input Borrowed complete CBOR bytes, valid through return.
  * \param size Byte count of input.
  * \param output Transferred JSON byte buffer on success, NULL on failure.

@@ -26,6 +26,7 @@ import qualified Cometa.Provider.Blockfrost.Internal.Config as Config
 import qualified Cometa.Provider.Blockfrost.Internal.Http as Http
 import Control.Concurrent (forkFinally, killThread, threadDelay, yield)
 import Control.Concurrent.MVar (modifyMVar_, newEmptyMVar, newMVar, putMVar, readMVar, takeMVar, tryPutMVar, tryTakeMVar)
+import Control.Concurrent.STM (STM, atomically, check, newTVarIO, readTVar, readTVarIO, writeTVar)
 import Control.Exception (AsyncException (ThreadKilled), IOException, SomeException, bracket, bracketOnError, catch, finally, fromException, mask, onException, throwIO, try)
 import Control.Monad (forM_, void, when)
 import Data.ByteString (ByteString)
@@ -41,6 +42,8 @@ import qualified Data.Text.Encoding as Text
 import qualified Network.HTTP.Types.URI as URI
 import qualified Network.Socket as Socket
 import qualified Network.Socket.ByteString as Socket
+import System.Environment (lookupEnv)
+import System.IO (hPutStrLn, stderr)
 import System.Timeout (timeout)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertBool, assertFailure, testCase, (@?=))
@@ -263,30 +266,42 @@ lifetime = do
   workerResult <- newEmptyMVar
   let handler _ = putMVar started () >> takeMVar gate >> pure (response 200 "done" [])
   withServer handler $ \endpoint -> do
+    traceFixture "lifetime starting owner and send"
     owner <-
       forkFinally
         ( Http.withTransport configured {Config.endpoint = Text.pack endpoint} $ \transport -> do
             putMVar escaped transport
             _ <- forkFinally (Http.send transport request) (putMVar workerResult)
             within (readMVar started)
+            traceFixture "lifetime owner leaving transport callback"
         )
         (putMVar finished)
     ( do
         transport <- within (takeMVar escaped)
+        traceFixture "lifetime waiting for handler entry"
         within (readMVar started)
         -- Scope exit has invalidated new work, but must wait for the old response.
+        traceFixture "lifetime waiting for scope closure"
         within (waitClosed transport)
+        traceFixture "lifetime scope closed; checking active send remains joined"
         tryTakeMVar finished >>= assertBool "scope joins in-flight send" . isNothing
         Http.send transport request >>= (@?= Left Http.Closed)
+        traceFixture "lifetime releasing response gate"
         putMVar gate ()
+        traceFixture "lifetime waiting for send result"
         outcome <- within (takeMVar workerResult)
         either (assertFailure . show) (\result -> fmap Http.status result @?= Right 200) outcome
-        within (takeMVar finished) >>= either (assertFailure . show) pure
+        traceFixture "lifetime waiting for owner exit"
+        within (readMVar finished) >>= either (assertFailure . show) pure
         closedAgain <- Http.checkOpen transport
         closedAgain @?= Left Http.Closed
         Http.send transport request >>= (@?= Left Http.Closed)
       )
-      `finally` (void (tryPutMVar gate ()) >> killThread owner)
+      `finally` do
+        traceFixture "lifetime finalizer releasing gate and joining owner cancellation"
+        void (tryPutMVar gate ())
+        cleanupWithin (killThread owner >> readMVar finished >> pure ())
+    traceFixture "lifetime leaving server scope"
 
 waitClosed :: Http.Transport -> IO ()
 waitClosed transport = do
@@ -314,12 +329,14 @@ fixtureConnections = Socket.withSocketsDo $ do
   let handler _ = putMVar entered () >> takeMVar gate >> pure B.empty
   -- Keep the peer alive beyond fixture exit: cleanup must release a worker in
   -- recv itself, rather than depending on a well-behaved client sending EOF.
+  traceFixture "incomplete client starting"
   bracket (Socket.socket Socket.AF_INET Socket.Stream Socket.defaultProtocol) Socket.close $ \peer ->
     withServerReady (putMVar received ()) handler $ \endpoint -> do
       port <- endpointPort endpoint
       Socket.connect peer (Socket.SockAddrInet port (Socket.tupleToHostAddress (127, 0, 0, 1)))
       Socket.sendAll peer "GET /unfinished HTTP/1.1\r\n"
       within (takeMVar received)
+  traceFixture "incomplete client cleanup joined; blocked handler starting"
   -- Wait for the handler itself, rather than racing HTTP request startup against
   -- a short client timeout. The peer remains open while fixture exit cancels a
   -- worker that has finished socket input and is blocked in Haskell code.
@@ -329,6 +346,7 @@ fixtureConnections = Socket.withSocketsDo $ do
       Socket.connect peer (Socket.SockAddrInet port (Socket.tupleToHostAddress (127, 0, 0, 1)))
       Socket.sendAll peer "GET /blocked HTTP/1.1\r\nHost: fixture\r\n\r\n"
       within (takeMVar entered)
+  traceFixture "blocked handler cleanup joined"
 
 fixtureException :: IO ()
 fixtureException = do
@@ -369,7 +387,7 @@ withServerReady connectionReady handler action = Socket.withSocketsDo $ mask $ \
     Socket.SockAddrInet value _ -> pure value
     _ -> Socket.close listener >> assertFailure "unexpected fixture socket family" >> fail "fixture"
   workers <- newMVar []
-  stopping <- newMVar False
+  stopping <- newTVarIO False
   accepted <- newEmptyMVar
   bracket
     (forkFinally (restore (acceptLoop listener workers stopping)) (putMVar accepted) `onException` Socket.close listener)
@@ -383,29 +401,21 @@ withServerReady connectionReady handler action = Socket.withSocketsDo $ mask $ \
       pure listener
     acceptLoop listener workers stopping = mask $ \restore -> do
       (connection, _) <- Socket.accept listener
-      shouldStop <- readMVar stopping
+      shouldStop <- readTVarIO stopping
       if shouldStop
         then Socket.close connection
         else do
           finished <- newEmptyMVar
-          connectionOpen <- newMVar True
-          let closeConnection = modifyMVar_ connectionOpen $ \isOpen -> do
-                when isOpen (Socket.close connection)
-                pure False
-              shutdownConnection = modifyMVar_ connectionOpen $ \isOpen -> do
-                -- A finished worker may already have closed its socket. The
-                -- same lock protects shutdown and close against descriptor reuse.
-                when isOpen (Socket.shutdown connection Socket.ShutdownBoth `catch` ignoreSocketError)
-                pure isOpen
+          let cancelled = check =<< readTVar stopping
           worker <-
             forkFinally
-              (restore (connectionReady >> receive connection >>= handler >>= Socket.sendAll connection))
-              (const (closeConnection `finally` putMVar finished ()))
-              `onException` closeConnection
-          modifyMVar_ workers (pure . ((shutdownConnection, worker, finished) :))
+              (restore (connectionReady >> receive connection cancelled >>= sendResponse connection cancelled))
+              (const (Socket.close connection `finally` putMVar finished ()))
+              `onException` Socket.close connection
+          modifyMVar_ workers (pure . ((worker, finished) :))
           restore (acceptLoop listener workers stopping)
     stop listener address workers stopping accepted = do
-      modifyMVar_ stopping (const (pure True))
+      atomically (writeTVar stopping True)
       -- Do not close the listener concurrently with accept. In network-3.2.12.0
       -- withFdSocket takes no lock, and Winsock does not promise that closesocket
       -- cancels a synchronous accept. Wake it normally, join, then close.
@@ -418,10 +428,13 @@ withServerReady connectionReady handler action = Socket.withSocketsDo $ mask $ \
         )
         `finally` do
           connections <- readMVar workers
-          forM_ connections $ \(shutdownConnection, _, _) -> shutdownConnection
-          forM_ connections $ \(_, worker, finished) -> killThread worker >> readMVar finished
-    ignoreSocketError :: IOException -> IO ()
-    ignoreSocketError _ = pure ()
+          forM_ connections $ \(worker, finished) -> killThread worker >> readMVar finished
+    sendResponse connection cancelled incoming = do
+      bytes <- handler incoming
+      -- The cancellable operations own and join their Windows OVERLAPPED I/O.
+      -- Plain recv/send and shutdown cannot establish that those calls ended.
+      outcome <- Socket.sendAllWith connection bytes cancelled
+      either (const (throwIO ThreadKilled)) pure outcome
 
 -- timeout cannot interrupt a safe blocking foreign call, and killThread waits
 -- synchronously for delivery. Give the cleanup worker ownership until it joins;
@@ -440,8 +453,8 @@ cleanupWithinMicros deadline action = do
     Nothing -> assertFailure "local HTTP fixture cleanup timed out"
     Just result -> either throwIO pure result
 
-receive :: Socket.Socket -> IO WireRequest
-receive connection = do
+receive :: Socket.Socket -> STM () -> IO WireRequest
+receive connection cancelled = do
   (headers, rest) <- headerBytes B.empty
   let lines' = C.split '\n' (B.filter (/= 13) headers)
       line = case lines' of [] -> B.empty; value : _ -> value
@@ -456,13 +469,16 @@ receive connection = do
       if not (B.null suffix)
         then pure (prefix, B.drop 4 suffix)
         else do
-          chunk <- Socket.recv connection 4096
+          chunk <- receiveChunk
           if B.null chunk || B.length accumulated > 65536 then fail "incomplete fixture headers" else headerBytes (accumulated <> chunk)
     remainingBytes size accumulated
       | B.length accumulated >= size = pure (B.take size accumulated)
       | otherwise = do
-          chunk <- Socket.recv connection 4096
+          chunk <- receiveChunk
           if B.null chunk then fail "incomplete fixture body" else remainingBytes size (accumulated <> chunk)
+    receiveChunk = do
+      outcome <- Socket.recvWith connection 4096 cancelled
+      either (const (throwIO ThreadKilled)) pure outcome
 
 response :: Int -> ByteString -> [(ByteString, ByteString)] -> ByteString
 response code bytes headers =
@@ -482,3 +498,10 @@ within :: IO a -> IO a
 within action = do
   result <- timeout 2000000 action
   maybe (assertFailure "local HTTP fixture timed out" >> fail "fixture timeout") pure result
+
+-- Enabled only for CI diagnosis: each phase is flushed through stderr even when
+-- a Windows foreign call or an uninterruptible owner prevents test completion.
+traceFixture :: String -> IO ()
+traceFixture phase = do
+  enabled <- lookupEnv "COMETA_HTTP_FIXTURE_TRACE"
+  when (enabled == Just "1") (hPutStrLn stderr ("HTTP fixture: " <> phase))

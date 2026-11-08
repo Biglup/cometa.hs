@@ -3878,3 +3878,98 @@ The final 52-test HTTP suite also passes Valgrind with zero errors or lost
 allocations. Instrumentation exposed a test race where a 25ms client deadline
 could precede handler entry; the final regression uses a raw loopback peer and
 explicit handler-entry handshake, with unchanged cleanup deadlines.
+
+#### Standalone collection representation audit (2026-11-08)
+
+Before extending the standalone codecs, reviewed cardano-ledger
+`7827506b7518284d7f9dbbe3502a20431e513fe9`,
+[Binary/Encoding/Encoder.hs](https://github.com/IntersectMBO/cardano-ledger/blob/7827506b7518284d7f9dbbe3502a20431e513fe9/libs/cardano-ledger-binary/src/Cardano/Ledger/Binary/Encoding/Encoder.hs)
+(`encodeSet`, reviewed from the cached primary source
+`/tmp/cometa-ledger-encoder-review.hs`). Its protocol-version-dependent tags and
+array lengths inform the distinction between semantic assembly and exact-byte
+edits. The caller workflow here is to decode once, inspect the retained outer tag,
+request a specific tag, and serialize the same nested bytes. Fresh semantic values
+instead use explicit `encodeCborWith`/`encodeProposalsWith`/`encodeRemovalsWith`
+choices. Cometa leaves protocol-version selection with the caller and retains
+ordered duplicate certificates/proposals rather than converting them to `Set`.
+
+Source audit of cardano-c `a19dbc9185112ab2d7126c9c28058388a37bdccc`
+(`/tmp/cardano-c-construction-native`) found unconditional tag-258 writes in
+`lib/src/certs/certificate_set.c`,
+`lib/src/proposal_procedures/{proposal_procedure_set,credential_set}.c` and
+`lib/src/pool_params/pool_owners.c`. These APIs have no `set_use_tag`; their
+untagged Haskell encoding choices are schema-level controls, not native setter
+parity. Pool parameters retain their existing semantic-only decoding contract:
+`encodeCborWith` controls the owner-set tag during fresh serialization and does not
+claim to preserve an imported pool registration or signed transaction. Certificate,
+proposal and removal exact envelopes alter only the outer tag, preserving even
+nonminimal tag widths on no-ops, indefinite arrays, nested integers and imported
+credential order. Removal semantic inspection remains sorted and duplicate
+preserving, matching the existing `Removals` contract.
+
+`test/StandaloneSetEncoding.hs` adds focused exact-byte and semantic regressions
+for these contracts, plus fresh tagged native reconstruction checks reusing the
+existing certificate, proposal and pool oracles. Invalid removal schemas and wrong
+outer tags are rejected. All new values remain Haskell-owned and add no production
+native allocations. Validation results are reported with the integrated branch;
+source freeze for this audit is the revisions above.
+
+
+#### Standalone inspection completion and Windows evidence (2026-11-08)
+
+Reviewed cardano-api JSON APIs at `5e63165a4bb7481a03d2e50464dc9c4f106c9fa5`
+(`Cardano.Api.Serialise.Json`) and the pinned native leaf writers. The explicit
+structured-JSON workflow remains `IO (Either Error Aeson.Value)`; no global
+instances select a representation implicitly. Ten additional inspectors cover
+execution units, protocol versions, rational intervals, relays, pool metadata,
+constitutions, voters, votes and both verification witness forms. Six native plain
+array writers are represented by traversing their element inspectors. Tests compare
+native schemas, optional fields, duplicate/order retention and rejected CBOR.
+
+Completed logs from superseded PR23 run `42452636037` establish that Windows
+passed the idle-listener regression but failed incomplete-client teardown, then
+hung in the transport-lifetime test. The source-reviewed `network-3.2.12.0`
+cancellable receive/send operations own and join their Windows OVERLAPPED I/O;
+the fixture now uses these with an STM stop signal instead of concurrent socket
+shutdown. This raises only the test dependency bound. Lifetime phase diagnostics
+and a bounded test cleanup worker expose failures previously hidden by synchronous
+cancellation. CI streams test output and imposes a test-step deadline separately
+from examples. Neither Linux success nor this source audit establishes a Windows
+fix; the hosted job must pass before that claim is made.
+
+
+#### Deferred query ergonomics (2026-11-08)
+
+Reviewed sc-tools `4546122230491db4839a4a42fc2bc601f7900909`,
+[Convex.BuildTx](https://github.com/input-output-hk/sc-tools/blob/4546122230491db4839a4a42fc2bc601f7900909/src/base/lib/Convex/BuildTx.hs):
+spending/reference/mint/withdrawal lookup helpers and the complete
+`spendPlutusWithRedeemerFn` caller workflow. Its partial `findIndex` helpers and
+recursive final-body construction informed explicit missing-reference failures
+and warnings about changing drafts. Cometa's optional `Transaction.Deferred.Query`
+composes pure draft observations with ordinary Functor/Applicative/Monad operations;
+an application encoder then produces the existing callback. Raw callbacks remain
+unchanged. Both top-level and subtransaction plans receive the same Transaction
+snapshot type, so the helpers work with either plan without another wrapper.
+
+Output queries require a unique match, including exact inline-datum encoding for
+equality-based lookup. Other indices preserve the existing observers' ordering
+and first-duplicate contracts. Certificate normalization remains effectful; it is
+not smuggled into a pure query. An explicit application encoder keeps the script's
+data schema visible without introducing a universal serialization type class.
+Tests cover required indices, missing/ambiguous matches, exact encoded data,
+changing drafts and query laws. Native builder tests verify callback compatibility
+and cleanup in addition to direct callback tests.
+
+
+#### Integrated verification
+
+All 583 tests pass locally (382 public, 149 runtime, 52 Blockfrost), with warnings
+as errors. The full example build, Ormolu, HLint, strict C syntax/formatting,
+native inventory, package checks and strict Sphinx HTML build pass. Inspection,
+standalone set encoding, native deferred callbacks and HTTP tests pass Valgrind
+with no definitely, indirectly or possibly lost allocations in their final runs.
+An initial short standalone-set run reported a 288-byte possible GHC worker TLS
+allocation at process exit; the explicit single-test-thread/two-capability run
+used by the final check reported zero errors without suppression. No native
+allocation appeared in that diagnostic stack. Windows validation remains pending
+hosted CI; no live-network transactions were submitted in this slice.

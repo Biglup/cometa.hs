@@ -23,12 +23,14 @@ module Cometa.Pool.Parameters
     vrfKeyHashFromBytes,
     vrfKeyHashBytes,
     encodeCbor,
+    encodeCborWith,
     decodeCbor,
   )
 where
 
 -- IMPORTS --------------------------------------------------------------------
 
+import Cometa.Encoding.Set (SetEncoding)
 import Cometa.Error (Error)
 import Cometa.Internal.Pool (PoolParameters (..), VrfKeyHash, vrfKeyHashBytes, vrfKeyHashFromBytes)
 import qualified Cometa.Internal.Pool as Internal
@@ -42,6 +44,12 @@ import Data.ByteString (ByteString)
 -- transaction identity.
 encodeCbor :: PoolParameters -> ByteString
 encodeCbor = Internal.encode Internal.parametersValueEncoding
+
+-- | Fresh definite parameters with the requested tag on the sorted owner set.
+-- Other fields use their usual encoding. This re-encodes semantic data; it is
+-- not an edit to an imported transaction's exact bytes.
+encodeCborWith :: SetEncoding -> PoolParameters -> ByteString
+encodeCborWith requested = Internal.encode (Internal.parametersValueEncodingWith requested)
 
 -- | Decode the complete array. Definite or indefinite arrays and
 -- nonminimal unsigned integers are accepted. All field bounds, arities, UTF-8

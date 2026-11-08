@@ -28,6 +28,9 @@ module Cometa.Certificate.Collection
     fromList,
     toList,
     encodeCbor,
+    encodeCborWith,
+    setEncoding,
+    withSetEncoding,
     EncodedCertificates,
     decodeCbor,
     fromCertificates,
@@ -39,9 +42,11 @@ where
 -- IMPORTS --------------------------------------------------------------------
 
 import Cometa.Certificate (Certificate)
+import Cometa.Encoding.Set (SetEncoding)
 import Cometa.Error (Error)
 import Cometa.Internal.Certificate (Certificates (..), EncodedCertificates, fromCertificates, toCertificates)
 import qualified Cometa.Internal.Certificate as Internal
+import qualified Cometa.Internal.SetEncoding as SetEncoding
 import Data.ByteString (ByteString)
 
 -- DEFINITIONS ----------------------------------------------------------------
@@ -61,6 +66,20 @@ toList (Certificates values) = values
 -- | Fresh definite array with set tag 258, preserving order and duplicates.
 encodeCbor :: Certificates -> ByteString
 encodeCbor = Internal.encodeCertificates
+
+-- | Fresh definite array with the requested outer set tag. Nested certificates
+-- keep their usual encoding; order and repeated certificates remain unchanged.
+encodeCborWith :: SetEncoding -> Certificates -> ByteString
+encodeCborWith requested = SetEncoding.withEncoding requested . encodeCbor
+
+-- | Observe the exact envelope's outer set tag.
+setEncoding :: EncodedCertificates -> SetEncoding
+setEncoding = Internal.certificatesSetEncoding
+
+-- | Change only the outer set tag, preserving every array and certificate byte.
+-- Requesting the current representation preserves the complete encoding exactly.
+withSetEncoding :: SetEncoding -> EncodedCertificates -> EncodedCertificates
+withSetEncoding = Internal.withCertificatesSetEncoding
 
 -- | Validate a complete certificate array with an optional set tag 258.
 -- Definite and indefinite arrays are accepted. Certificates obey the checks in

@@ -118,7 +118,7 @@ cometa_inspection_compute(unsigned int operation, const unsigned char* input, si
     return CARDANO_ERROR_POINTER_IS_NULL;
   }
   *output = NULL;
-  if (operation > 25U)
+  if (operation > 35U)
   {
     return CARDANO_ERROR_INVALID_ARGUMENT;
   }
@@ -127,35 +127,45 @@ cometa_inspection_compute(unsigned int operation, const unsigned char* input, si
     return CARDANO_ERROR_POINTER_IS_NULL;
   }
 
-  cardano_cbor_reader_t*           reader      = cardano_cbor_reader_new(input, size);
-  cardano_json_writer_t*           writer      = cardano_json_writer_new(CARDANO_JSON_FORMAT_COMPACT);
-  cardano_transaction_t*           transaction = NULL;
-  cardano_sub_transaction_t*       sub         = NULL;
-  cardano_transaction_body_t*      body        = NULL;
-  cardano_sub_transaction_body_t*  sub_body    = NULL;
-  cardano_value_t*                 value       = NULL;
-  cardano_script_t*                script      = NULL;
-  cardano_credential_t*            credential  = NULL;
-  cardano_certificate_t*           certificate = NULL;
-  cardano_proposal_procedure_t*    proposal    = NULL;
-  cardano_pool_params_t*           pool        = NULL;
-  cardano_protocol_param_update_t* update      = NULL;
-  cardano_plutus_data_t*           data        = NULL;
-  cardano_transaction_output_t*    tx_output   = NULL;
-  cardano_witness_set_t*           witnesses   = NULL;
-  cardano_utxo_t*                  utxo        = NULL;
-  cardano_drep_t*                  drep        = NULL;
-  cardano_governance_action_id_t*  action_id   = NULL;
-  cardano_anchor_t*                anchor      = NULL;
-  cardano_voting_procedures_t*     votes       = NULL;
-  cardano_metadatum_t*             metadatum   = NULL;
-  cardano_transaction_metadata_t*  metadata    = NULL;
-  cardano_auxiliary_data_t*        auxiliary   = NULL;
-  cardano_transaction_input_t*     tx_input    = NULL;
-  cardano_datum_t*                 datum       = NULL;
-  cardano_redeemer_t*              redeemer    = NULL;
-  size_t                           remaining   = 0U;
-  cardano_error_t                  result      = reader == NULL || writer == NULL ? CARDANO_ERROR_MEMORY_ALLOCATION_FAILED : CARDANO_SUCCESS;
+  cardano_cbor_reader_t*           reader                          = cardano_cbor_reader_new(input, size);
+  cardano_json_writer_t*           writer                          = cardano_json_writer_new(CARDANO_JSON_FORMAT_COMPACT);
+  cardano_transaction_t*           transaction                     = NULL;
+  cardano_sub_transaction_t*       sub                             = NULL;
+  cardano_transaction_body_t*      body                            = NULL;
+  cardano_sub_transaction_body_t*  sub_body                        = NULL;
+  cardano_value_t*                 value                           = NULL;
+  cardano_script_t*                script                          = NULL;
+  cardano_credential_t*            credential                      = NULL;
+  cardano_certificate_t*           certificate                     = NULL;
+  cardano_proposal_procedure_t*    proposal                        = NULL;
+  cardano_pool_params_t*           pool                            = NULL;
+  cardano_protocol_param_update_t* update                          = NULL;
+  cardano_plutus_data_t*           data                            = NULL;
+  cardano_transaction_output_t*    tx_output                       = NULL;
+  cardano_witness_set_t*           witnesses                       = NULL;
+  cardano_utxo_t*                  utxo                            = NULL;
+  cardano_drep_t*                  drep                            = NULL;
+  cardano_governance_action_id_t*  action_id                       = NULL;
+  cardano_anchor_t*                anchor                          = NULL;
+  cardano_voting_procedures_t*     votes                           = NULL;
+  cardano_metadatum_t*             metadatum                       = NULL;
+  cardano_transaction_metadata_t*  metadata                        = NULL;
+  cardano_auxiliary_data_t*        auxiliary                       = NULL;
+  cardano_transaction_input_t*     tx_input                        = NULL;
+  cardano_datum_t*                 datum                           = NULL;
+  cardano_redeemer_t*              redeemer                        = NULL;
+  cardano_ex_units_t*              inspection_ex_units             = NULL;
+  cardano_protocol_version_t*      inspection_protocol_version     = NULL;
+  cardano_unit_interval_t*         inspection_unit_interval        = NULL;
+  cardano_relay_t*                 inspection_relay                = NULL;
+  cardano_pool_metadata_t*         inspection_pool_metadata        = NULL;
+  cardano_constitution_t*          inspection_constitution         = NULL;
+  cardano_voter_t*                 inspection_voter                = NULL;
+  cardano_voting_procedure_t*      inspection_voting_procedure     = NULL;
+  cardano_vkey_witness_t*          inspection_verification_witness = NULL;
+  cardano_bootstrap_witness_t*     inspection_bootstrap_witness    = NULL;
+  size_t                           remaining                       = 0U;
+  cardano_error_t                  result                          = reader == NULL || writer == NULL ? CARDANO_ERROR_MEMORY_ALLOCATION_FAILED : CARDANO_SUCCESS;
 
   if (result == CARDANO_SUCCESS)
   {
@@ -247,6 +257,36 @@ cometa_inspection_compute(unsigned int operation, const unsigned char* input, si
         break;
       case 25U:
         result = cardano_redeemer_from_cbor(reader, &redeemer);
+        break;
+      case 26U:
+        result = cardano_ex_units_from_cbor(reader, &inspection_ex_units);
+        break;
+      case 27U:
+        result = cardano_protocol_version_from_cbor(reader, &inspection_protocol_version);
+        break;
+      case 28U:
+        result = cardano_unit_interval_from_cbor(reader, &inspection_unit_interval);
+        break;
+      case 29U:
+        result = cardano_relay_from_cbor(reader, &inspection_relay);
+        break;
+      case 30U:
+        result = cardano_pool_metadata_from_cbor(reader, &inspection_pool_metadata);
+        break;
+      case 31U:
+        result = cardano_constitution_from_cbor(reader, &inspection_constitution);
+        break;
+      case 32U:
+        result = cardano_voter_from_cbor(reader, &inspection_voter);
+        break;
+      case 33U:
+        result = cardano_voting_procedure_from_cbor(reader, &inspection_voting_procedure);
+        break;
+      case 34U:
+        result = cardano_vkey_witness_from_cbor(reader, &inspection_verification_witness);
+        break;
+      case 35U:
+        result = cardano_bootstrap_witness_from_cbor(reader, &inspection_bootstrap_witness);
         break;
       default:
         result = CARDANO_ERROR_INVALID_ARGUMENT;
@@ -342,6 +382,36 @@ cometa_inspection_compute(unsigned int operation, const unsigned char* input, si
       case 25U:
         result = cardano_redeemer_to_cip116_json(redeemer, writer);
         break;
+      case 26U:
+        result = cardano_ex_units_to_cip116_json(inspection_ex_units, writer);
+        break;
+      case 27U:
+        result = cardano_protocol_version_to_cip116_json(inspection_protocol_version, writer);
+        break;
+      case 28U:
+        result = cardano_unit_interval_to_cip116_json(inspection_unit_interval, writer);
+        break;
+      case 29U:
+        result = cardano_relay_to_cip116_json(inspection_relay, writer);
+        break;
+      case 30U:
+        result = cardano_pool_metadata_to_cip116_json(inspection_pool_metadata, writer);
+        break;
+      case 31U:
+        result = cardano_constitution_to_cip116_json(inspection_constitution, writer);
+        break;
+      case 32U:
+        result = cardano_voter_to_cip116_json(inspection_voter, writer);
+        break;
+      case 33U:
+        result = cardano_voting_procedure_to_cip116_json(inspection_voting_procedure, writer);
+        break;
+      case 34U:
+        result = cardano_vkey_witness_to_cip116_json(inspection_verification_witness, writer);
+        break;
+      case 35U:
+        result = cardano_bootstrap_witness_to_cip116_json(inspection_bootstrap_witness, writer);
+        break;
       default:
         result = CARDANO_ERROR_INVALID_ARGUMENT;
         break;
@@ -357,6 +427,16 @@ cometa_inspection_compute(unsigned int operation, const unsigned char* input, si
     cardano_buffer_unref(output);
     *output = NULL;
   }
+  cardano_ex_units_unref(&inspection_ex_units);
+  cardano_protocol_version_unref(&inspection_protocol_version);
+  cardano_unit_interval_unref(&inspection_unit_interval);
+  cardano_relay_unref(&inspection_relay);
+  cardano_pool_metadata_unref(&inspection_pool_metadata);
+  cardano_constitution_unref(&inspection_constitution);
+  cardano_voter_unref(&inspection_voter);
+  cardano_voting_procedure_unref(&inspection_voting_procedure);
+  cardano_vkey_witness_unref(&inspection_verification_witness);
+  cardano_bootstrap_witness_unref(&inspection_bootstrap_witness);
   cardano_redeemer_unref(&redeemer);
   cardano_datum_unref(&datum);
   cardano_transaction_input_unref(&tx_input);

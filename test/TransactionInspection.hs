@@ -29,6 +29,8 @@ import qualified Cometa.AssetName as AssetName
 import qualified Cometa.Certificate as Certificate
 import qualified Cometa.Certificate.Collection as Certificates
 import qualified Cometa.Credential as Credential
+import qualified Cometa.Crypto.Ed25519.PublicKey as PublicKey
+import qualified Cometa.Crypto.Ed25519.Signature as Signature
 import qualified Cometa.Governance.Action as Action
 import qualified Cometa.Governance.ActionId as ActionId
 import qualified Cometa.Governance.Anchor as Anchor
@@ -44,7 +46,9 @@ import qualified Cometa.Metadata as Metadata
 import qualified Cometa.NetworkId as Network
 import qualified Cometa.PlutusData as Data
 import qualified Cometa.PolicyId as PolicyId
+import qualified Cometa.Pool.Metadata as PoolMetadata
 import qualified Cometa.Pool.Parameters as Pool
+import qualified Cometa.Pool.Relay as Relay
 import qualified Cometa.Protocol.ExUnits as ExUnits
 import qualified Cometa.Protocol.Parameters.Update as Update
 import qualified Cometa.Protocol.Version as Version
@@ -63,6 +67,7 @@ import qualified Cometa.Transaction.Inspection as Inspection
 import qualified Cometa.Transaction.Output as Output
 import qualified Cometa.Transaction.Redeemer as Redeemer
 import qualified Cometa.Transaction.Utxo as Utxo
+import qualified Cometa.Transaction.Witness as Witness
 import qualified Cometa.Transaction.Witnesses as Witnesses
 import qualified Cometa.TransactionId as TxId
 import qualified Cometa.UnitInterval as Unit
@@ -92,7 +97,9 @@ tests :: TestTree
 tests =
   testGroup
     "Transaction JSON inspection"
-    [ testCase "standalone values match typed fields of pinned transaction JSON" standaloneCorpus,
+    [ testCase "standalone leaf schemas, optional fields and native lifetime boundaries" standaloneLeaves,
+      testCase "standalone leaf inspectors reject complete schema-invalid CBOR" standaloneLeafFailures,
+      testCase "standalone values match typed fields of pinned transaction JSON" standaloneCorpus,
       testCase "standalone governance, certificates, pools and protocol fields" standaloneDomains,
       testCase "complete pinned Conway/Dijkstra and native rich JSON matches" corpus,
       testCase "inspection leaves exact bytes, transaction IDs and signatures unchanged" identities,
@@ -272,6 +279,10 @@ standaloneCorpus = forM_ Fixture.fixtures $ \fixture -> do
       forM_ (zip (maybe [] Certificates.toList (Fields.fieldCertificates fields)) certs) $ \(cert, json) ->
         Standalone.certificate cert >>= (@?= Right json)
       let typed = Witnesses.toWitnesses witnesses
+      keyJson <- optionalArray "vkey_witnesses" witnessJson
+      bootstrapJson <- optionalArray "bootstraps" witnessJson
+      traverse (Standalone.verificationWitness >=> must) (Witnesses.verificationWitnesses typed) >>= (@?= keyJson)
+      traverse (Standalone.bootstrapWitness >=> must) (Witnesses.bootstrapWitnesses typed) >>= (@?= bootstrapJson)
       redeemers <- optionalArray "redeemers" witnessJson
       forM_ (zip (Witnesses.redeemers typed) redeemers) $ \(redeemer, json) -> Standalone.redeemer redeemer >>= (@?= Right json)
       datums <- optionalArray "plutus_data" witnessJson
@@ -486,3 +497,102 @@ standaloneDomains = do
   rendered <- traverse (evaluate . Lazy.toStrict . encode) snapshots
   performGC
   map (Lazy.toStrict . encode) snapshots @?= rendered
+
+-- Expected objects follow the pinned native writers, not global JSON instances.
+standaloneLeaves :: IO ()
+standaloneLeaves = do
+  stake <- keyFixture
+  pool <- keyFixture
+  committee <- keyFixture
+  scriptHash <- must (Credential.scriptHashFromBytes (B.replicate 28 2))
+  location <- must (Anchor.mkUrl "https://example.com/constitution")
+  digest <- must (Anchor.dataHashFromBytes (B.replicate 32 3))
+  dns <- must (Relay.mkDnsName "relay.example.com")
+  ipv4 <- must (Relay.ipv4FromText "192.0.2.1")
+  ipv6 <- must (Relay.ipv6FromText "2001:0db8:0000:0000:0000:0000:0000:0001")
+  metadataUrl <- must (PoolMetadata.mkUrl "")
+  metadataHash <- must (PoolMetadata.metadataHashFromBytes (B.replicate 32 4))
+  key <- must (PublicKey.fromBytes (B.replicate 32 5))
+  signature <- must (Signature.fromBytes (B.replicate 64 6))
+  bootstrap <- must (Witness.mkBootstrapWitness key signature (B.replicate 32 7) (B.pack [0, 255]))
+  let anchor = Anchor.Anchor location digest
+      anchorJson = object ["url" .= ("https://example.com/constitution" :: Text.Text), "data_hash" .= Text.replicate 32 "03"]
+      keyJson = object ["tag" .= ("pubkey_hash" :: Text.Text), "value" .= Text.replicate 28 "01"]
+      scriptJson = object ["tag" .= ("script_hash" :: Text.Text), "value" .= Text.replicate 28 "02"]
+      witness = Witness.verificationWitness key signature
+      witnessJson = object ["vkey" .= Text.replicate 32 "05", "signature" .= Text.replicate 64 "06"]
+      bootstrapJson = object ["vkey" .= Text.replicate 32 "05", "signature" .= Text.replicate 64 "06", "chain_code" .= Text.replicate 32 "07", "attributes" .= ("00ff" :: Text.Text)]
+      check kind bytes action expected = do
+        action >>= (@?= Right expected)
+        forM_ [B.empty, B.take (B.length bytes - 1) bytes, bytes <> B.singleton 0] (Internal.runUnchecked kind >=> (assertBool "Invalid leaf CBOR accepted" . isLeft))
+        snapshots <- replicateM 5 (action >>= must)
+        performGC
+        snapshots @?= replicate 5 expected
+  check 26 (ExUnits.encodeCbor (ExUnits.ExUnits 0 maxBound)) (Standalone.exUnits (ExUnits.ExUnits 0 maxBound)) (object ["mem" .= ("0" :: Text.Text), "steps" .= ("18446744073709551615" :: Text.Text)])
+  forM_ [0, maxBound] $ \minor -> do
+    let version = Version.ProtocolVersion maxBound minor
+    check 27 (Version.encodeCbor version) (Standalone.protocolVersion version) (object ["major" .= (18446744073709551615 :: Integer), "minor" .= toInteger minor])
+  forM_ [(0, 1), (1, 3), (2 ^ (64 :: Int) - 1, 2 ^ (64 :: Int) - 1)] $ \(numerator, denominator) -> do
+    interval <- must (Unit.mkUnitInterval numerator denominator)
+    check 28 (Unit.encodeCbor interval) (Standalone.unitInterval interval) (object ["numerator" .= Text.pack (show (Unit.numerator interval)), "denominator" .= Text.pack (show (Unit.denominator interval))])
+  let relayCases =
+        [ (Relay.SingleHostAddress Nothing Nothing Nothing, object ["tag" .= ("single_host_addr" :: Text.Text), "port" .= Null, "ipv4" .= Null, "ipv6" .= Null]),
+          (Relay.SingleHostAddress (Just 65535) (Just ipv4) Nothing, object ["tag" .= ("single_host_addr" :: Text.Text), "port" .= (65535 :: Int), "ipv4" .= ("192.0.2.1" :: Text.Text), "ipv6" .= Null]),
+          (Relay.SingleHostAddress (Just 0) (Just ipv4) (Just ipv6), object ["tag" .= ("single_host_addr" :: Text.Text), "port" .= (0 :: Int), "ipv4" .= ("192.0.2.1" :: Text.Text), "ipv6" .= ("2001:0db8:0000:0000:0000:0000:0000:0001" :: Text.Text)]),
+          (Relay.SingleHostName Nothing dns, object ["tag" .= ("single_host_name" :: Text.Text), "port" .= Null, "dns_name" .= ("relay.example.com" :: Text.Text)]),
+          (Relay.MultiHostName dns, object ["tag" .= ("multi_host_name" :: Text.Text), "dns_name" .= ("relay.example.com" :: Text.Text)])
+        ]
+  forM_ relayCases $ \(relay, json) -> check 29 (Relay.encodeCbor relay) (Standalone.relay relay) json
+  let metadata = PoolMetadata.Metadata metadataUrl metadataHash
+  check 30 (PoolMetadata.encodeCbor metadata) (Standalone.poolMetadata metadata) (object ["url" .= ("" :: Text.Text), "hash" .= Text.replicate 32 "04"])
+  forM_ [Nothing, Just scriptHash] $ \guard -> do
+    let constitution = Constitution.Constitution anchor guard
+        fields = ["anchor" .= anchorJson] <> maybe [] (const ["script_hash" .= Text.replicate 28 "02"]) guard
+    check 31 (Constitution.encodeCbor constitution) (Standalone.constitution constitution) (object fields)
+  let voterCases =
+        [ (Voting.CommitteeVoter (Credential.KeyCredential committee), object ["tag" .= ("cc_credential" :: Text.Text), "credential" .= keyJson]),
+          (Voting.CommitteeVoter (Credential.ScriptCredential scriptHash), object ["tag" .= ("cc_credential" :: Text.Text), "credential" .= scriptJson]),
+          (Voting.DRepVoter (Credential.KeyCredential stake), object ["tag" .= ("drep_credential" :: Text.Text), "credential" .= keyJson]),
+          (Voting.DRepVoter (Credential.ScriptCredential scriptHash), object ["tag" .= ("drep_credential" :: Text.Text), "credential" .= scriptJson]),
+          (Voting.StakePoolVoter pool, object ["tag" .= ("spo_keyhash" :: Text.Text), "pubkey_hash" .= Text.replicate 28 "01"])
+        ]
+  forM_ voterCases $ \(voter, json) -> check 32 (Voting.encodeVoter voter) (Standalone.voter voter) json
+  forM_ [(Voting.No, "no"), (Voting.Yes, "yes"), (Voting.Abstain, "abstain")] $ \(vote, label) ->
+    forM_ [Nothing, Just anchor] $ \explanation -> do
+      let procedure = Voting.VotingProcedure vote explanation
+          fields = ["vote" .= (label :: Text.Text)] <> maybe [] (const ["anchor" .= anchorJson]) explanation
+      check 33 (Voting.encodeProcedure procedure) (Standalone.votingProcedure procedure) (object fields)
+  check 34 (Witness.encodeCbor witness) (Standalone.verificationWitness witness) witnessJson
+  check 35 (Witness.encodeBootstrapCbor bootstrap) (Standalone.bootstrapWitness bootstrap) bootstrapJson
+
+  -- Array inspectors preserve order and duplicate entries, including witnesses.
+  supplied <- must (Witnesses.mkWitnesses [witness, witness] [bootstrap, bootstrap] [] [] [])
+  parent <- Standalone.witnesses (Witnesses.fromWitnesses supplied) >>= must
+  field "vkey_witnesses" parent >>= (@?= toJSON [witnessJson, witnessJson])
+  field "bootstraps" parent >>= (@?= toJSON [bootstrapJson, bootstrapJson])
+  emptyParent <- Standalone.witnesses (Witnesses.fromWitnesses Witnesses.empty) >>= must
+  optionalArray "vkey_witnesses" emptyParent >>= (@?= [])
+  optionalArray "bootstraps" emptyParent >>= (@?= [])
+
+-- Complete CBOR values exercise schema checks separately from framing errors.
+standaloneLeafFailures :: IO ()
+standaloneLeafFailures = do
+  let array entries = Encoding.encodeListLen (fromIntegral (length entries)) <> mconcat entries
+      bytes size = Encoding.encodeBytes (B.replicate size 0)
+      invalidCases =
+        [ (26, "negative memory", array [Encoding.encodeInt (-1), Encoding.encodeWord 0]),
+          (27, "minor exceeds Word32", array [Encoding.encodeWord 0, Encoding.encodeWord64 4294967296]),
+          (28, "wrong rational tag", Encoding.encodeTag 29 <> array [Encoding.encodeWord 0, Encoding.encodeWord 1]),
+          (29, "unknown relay kind", array [Encoding.encodeWord 3]),
+          (30, "metadata hash has integer type", array [Encoding.encodeString "", Encoding.encodeWord 0]),
+          (31, "constitution anchor is null", array [Encoding.encodeNull, Encoding.encodeNull]),
+          (32, "unknown voter role", array [Encoding.encodeWord 5, bytes 28]),
+          (33, "unknown vote choice", array [Encoding.encodeWord 3, Encoding.encodeNull]),
+          (34, "short verification key", array [bytes 31, bytes 64]),
+          (34, "short signature", array [bytes 32, bytes 63]),
+          (35, "bootstrap attributes have integer type", array [bytes 32, bytes 64, bytes 32, Encoding.encodeWord 0]),
+          (35, "short bootstrap verification key", array [bytes 31, bytes 64, bytes 32, bytes 0])
+        ]
+  forM_ invalidCases $ \(kind, label, encoded) -> do
+    result <- Internal.runUnchecked kind (Write.toStrictByteString encoded)
+    assertBool ("Schema-invalid leaf accepted: " <> label) (isLeft result)
