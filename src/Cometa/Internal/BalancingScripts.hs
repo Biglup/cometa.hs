@@ -54,7 +54,7 @@ import qualified Cometa.Transaction.Witnesses as Witnesses
 import Control.Monad (unless)
 import Control.Monad.Trans.Except (ExceptT (..), except, runExceptT)
 import Data.ByteString (ByteString)
-import Data.List (foldl')
+import qualified Data.List as List
 import qualified Data.Map.Strict as Map
 import Data.Maybe (catMaybes, fromMaybe, mapMaybe)
 import qualified Data.Set as Set
@@ -98,7 +98,7 @@ usedCostModels parameters resolved transaction = runExceptT $ do
         (Parameters.parameterCostModels parameters >>= Models.lookup language)
 
 snapshotTable :: [Utxo] -> Either Error (Map.Map Input.Input Utxo)
-snapshotTable = foldl' add (Right Map.empty)
+snapshotTable = List.foldl' add (Right Map.empty)
   where
     add result utxo = do
       table <- result
