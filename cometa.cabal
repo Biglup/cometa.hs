@@ -201,6 +201,8 @@ library
     Cometa.Error
     Cometa.Error.Code
     Cometa.Encoding.Cbor
+    Cometa.Encoding.Collections
+    Cometa.Encoding.Set
     Cometa.Provider
     Cometa.Evaluation
     Cometa.Evaluation.Native
@@ -229,6 +231,7 @@ library
     Cometa.Internal.TransactionBuilder
     Cometa.Internal.EvaluationNative
     Cometa.Internal.TransactionCbor
+    Cometa.Internal.SetEncoding
     Cometa.Internal.TransactionValue
     Cometa.Internal.TransactionFields
     Cometa.Internal.Error
@@ -368,8 +371,11 @@ test-suite cometa-test
     test/cbits/certificates_oracle.c
     test/cbits/governance_oracle.c
     test/cbits/slot_config_oracle.c
+    test/cbits/collections_oracle.c
   cc-options: -std=c11 -Wall -Wextra
   other-modules:
+    Collections
+    SetEncoding
     NativeWorkflows
     ConnectedGovernance
     Connected.Governance
@@ -620,6 +626,7 @@ test-suite cometa-runtime-test
     Cometa.Crypto.Emip3
     Cometa.Crypto.Pbkdf2
     Cometa.Encoding.Cbor
+    Cometa.Encoding.Set
     Cometa.Error
     Cometa.Error.Code
     Cometa.Evaluation
@@ -664,6 +671,7 @@ test-suite cometa-runtime-test
     Cometa.Internal.ProviderRuntime
     Cometa.Internal.Runtime
     Cometa.Internal.TransactionCbor
+    Cometa.Internal.SetEncoding
     Cometa.Internal.TransactionFields
     Cometa.Internal.TransactionValue
     Cometa.KeyHandler.Software

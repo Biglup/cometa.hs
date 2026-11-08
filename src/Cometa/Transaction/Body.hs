@@ -29,6 +29,10 @@ module Cometa.Transaction.Body
     setFee,
     setFeeEncoded,
     encodeCbor,
+    encodeCborWith,
+    SetField (..),
+    setEncoding,
+    withSetEncoding,
     EncodedBody,
     decodeCbor,
     fromBody,
@@ -44,7 +48,9 @@ import qualified Codec.CBOR.Decoding as D
 import qualified Codec.CBOR.Encoding as E
 import Cometa.Address.Reward (RewardAddress)
 import qualified Cometa.Crypto.Blake2b as Blake2b
+import Cometa.Encoding.Set (SetEncoding)
 import Cometa.Error (Error (..))
+import qualified Cometa.Internal.SetEncoding as SetEncoding
 import qualified Cometa.Internal.TransactionCbor as Cbor
 import Cometa.Internal.TransactionFields (BalanceInterval, Entries, Fields)
 import qualified Cometa.Internal.TransactionFields as Fields
@@ -96,6 +102,24 @@ data EncodedBody = EncodedBody !ByteString !Body !(Map.Map Word64 ByteString) de
 
 instance Eq EncodedBody where
   left == right = toCbor left == toCbor right
+
+-- | Set-valued fields in this body schema. Outputs and maps are not sets.
+data SetField
+  = -- | Spending inputs.
+    Inputs
+  | -- | Stake and governance certificates.
+    Certificates
+  | -- | Required signer or guard credentials.
+    Guards
+  | -- | Reference inputs.
+    ReferenceInputs
+  | -- | Governance proposals.
+    Proposals
+  | -- | Collateral inputs.
+    CollateralInputs
+  | -- | Included subtransactions; their internal encodings are unchanged.
+    SubTransactions
+  deriving (Eq, Ord, Show, Enum, Bounded)
 
 -- DEFINITIONS ----------------------------------------------------------------
 
@@ -194,3 +218,37 @@ hash :: EncodedBody -> IO (Either Error TransactionId)
 hash value = do
   result <- Blake2b.compute 32 (toCbor value)
   pure (result >>= Id.fromBytes . Blake2b.toBytes)
+
+-- | Encode fresh body fields with the requested set tags. Embedded values keep
+-- their own encoding choices. Protocol validity is the caller's responsibility.
+encodeCborWith :: SetEncoding -> Body -> Either Error ByteString
+encodeCborWith requested value = do
+  original <- fromBody value
+  pure (toCbor (foldr (`withSetEncoding` requested) original [minBound .. maxBound]))
+
+-- | Observe one field's set tag. An absent optional field returns 'Nothing'.
+setEncoding :: SetField -> EncodedBody -> Maybe SetEncoding
+setEncoding field (EncodedBody _ _ values) = SetEncoding.encoding <$> Map.lookup (setFieldKey field) values
+
+-- | Change one present field's set tag. Absence and an unchanged tag preserve
+-- the exact original body. A change rebuilds the outer map in numeric key order,
+-- retaining all other field bytes and the selected array's contents. It can
+-- change the body hash: signatures over the previous body must be renewed.
+withSetEncoding :: SetField -> SetEncoding -> EncodedBody -> EncodedBody
+withSetEncoding field requested original@(EncodedBody _ semantic values)
+  | updated == values = original
+  | otherwise = EncodedBody encoded semantic updated
+  where
+    updated = Map.adjust (SetEncoding.withEncoding requested) (setFieldKey field) values
+    encoded = Cbor.encode (E.encodeMapLen (fromIntegral (Map.size updated)) <> foldMap (\(key, payload) -> E.encodeWord64 key <> Cbor.raw payload) (Map.toAscList updated))
+
+-- | Ledger map key of a supported set-valued field.
+setFieldKey :: SetField -> Word64
+setFieldKey field = case field of
+  Inputs -> 0
+  Certificates -> 4
+  Guards -> 14
+  ReferenceInputs -> 18
+  Proposals -> 20
+  CollateralInputs -> 13
+  SubTransactions -> 23

@@ -29,6 +29,7 @@ module Cometa.SubTransaction
     auxiliaryData,
     transactionId,
     setBody,
+    setBodySetEncoding,
     setAuxiliaryData,
     setWitnesses,
     addWitnesses,
@@ -40,6 +41,7 @@ where
 import qualified Codec.CBOR.Decoding as D
 import qualified Codec.CBOR.Read as R
 import qualified Codec.CBOR.Term as T
+import Cometa.Encoding.Set (SetEncoding)
 import Cometa.Error (Error (..))
 import qualified Cometa.SubTransaction.Body as Body
 import qualified Cometa.Transaction.AuxiliaryData as Auxiliary
@@ -182,3 +184,13 @@ addWitnesses :: Witnesses.EncodedWitnesses -> SubTransaction -> Either Error Sub
 addWitnesses additions transaction = do
   combined <- Witnesses.mergeEncoded (witnesses transaction) additions
   pure (setWitnesses combined transaction)
+
+-- | Change one body's collection tag. Changed bytes remove this intent's key
+-- and bootstrap signatures; unchanged tags and absent fields are exact no-ops.
+-- Re-sign the intent and rebuild any enclosing transaction after a change.
+setBodySetEncoding :: Body.SetField -> SetEncoding -> SubTransaction -> SubTransaction
+setBodySetEncoding field requested transaction@(SubTransaction current encodedWitnesses auxiliary prefix suffix)
+  | replacement == current = transaction
+  | otherwise = SubTransaction replacement (Witnesses.removeKeyWitnesses encodedWitnesses) auxiliary prefix suffix
+  where
+    replacement = Body.withSetEncoding field requested current

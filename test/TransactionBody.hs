@@ -19,7 +19,7 @@
 -- lib/tests/transaction_body/*.cpp, Apache-2.0. Source filenames and constant
 -- names are retained below. Tests rebuild fresh public semantic values before
 -- separate native getter/constructor reconstruction, never a source body cache.
-module TransactionBody (tests) where
+module TransactionBody (tests, bodyVectors, subBodyVectors, bytes, agree, nativeResult) where
 
 import qualified Cometa.Address as Address
 import qualified Cometa.Address.Reward as Reward
@@ -83,9 +83,13 @@ bytes :: String -> IO ByteString
 bytes text = maybe (assertFailure "Invalid fixture hex" >> fail "Invalid fixture hex") pure (Hex.decodeHex (Text.pack text))
 
 agree :: CUInt -> ByteString -> IO ()
-agree kind payload = B.useAsCStringLen payload $ \(ptr, size) -> do
-  result <- cAgreement kind (castPtr ptr) (fromIntegral size)
-  result @?= 0
+agree kind payload = nativeResult kind payload >>= (@?= 0)
+
+-- | Native reconstruction status; 9001 means successful reconstruction with a
+-- different encoding, such as native input sets emitting tag 258.
+nativeResult :: CUInt -> ByteString -> IO CInt
+nativeResult kind payload = B.useAsCStringLen payload $ \(ptr, size) ->
+  cAgreement kind (castPtr ptr) (fromIntegral size)
 
 checkBodies :: IO ()
 checkBodies = forM_ bodyVectors $ \(name, hex) -> do

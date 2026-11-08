@@ -80,3 +80,34 @@ as described in [transactions](transactions.md).
 `Cometa.Transaction.Utxo` pairs a reference with its resolved semantic output.
 Its `[input, output]` CBOR is a snapshot interchange format. Constructing a snapshot
 does not query chain state or prove that the output is still unspent.
+
+## Collection tags
+
+`Cometa.Encoding.Set` provides `TaggedSet` (CBOR tag 258) and `UntaggedSet`.
+`Body.encodeCborWith` chooses tags for fresh body collections;
+`Body.setEncoding` observes a particular field in an encoded body.
+`Body.withSetEncoding` changes that field while retaining other field bytes and
+its array contents. Absent fields and unchanged tags preserve the original bytes.
+These operations also exist in `Cometa.SubTransaction.Body`, with its own supported
+`SetField` alternatives. Embedded subtransactions retain their own encodings.
+
+For an existing transaction, use the transaction-level edit so stale signatures
+are removed:
+
+```haskell
+import Cometa.Encoding.Set (SetEncoding (..))
+import qualified Cometa.Transaction as Tx
+import qualified Cometa.Transaction.Body as Body
+
+useTaggedInputs :: Tx.Transaction -> Tx.Transaction
+useTaggedInputs = Tx.setBodySetEncoding Body.Inputs TaggedSet
+```
+
+`SubTransaction.setBodySetEncoding` similarly removes the intent's key witnesses
+when its bytes change. Re-sign that intent and rebuild its enclosing transaction.
+The existing `setBody` keeps its semantic no-op contract; use the explicit tag edit
+when you intend to change only the representation.
+
+Choose the representation required by your target protocol. Decoding support for
+both forms does not establish ledger acceptance. Encoding changes can also change
+size and fees; they do not rebalance a transaction automatically.
