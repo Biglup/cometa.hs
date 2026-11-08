@@ -1238,22 +1238,56 @@ clarity. Compile real examples with explicit imports and logical spacing, and
 check failure, scope closure, and cancellation. Use the reference set above for
 specific contracts and factual comparisons, not claims of stylistic superiority.
 
-### 19.7 Test reuse follow-up
+### 19.7 Upstream properties through the Haskell binding
 
-Record reuse provenance (source commit, path and license/notices) for imported
-vectors, tests and generator code. Priority sources beyond the native corpus:
+Scope confirmed 2026-11-08: implement these tests primarily in cometa.hs. Haskell
+generators supply cases to public Cometa operations that invoke cardano-c; check
+the results against independent Haskell properties, reference implementations or
+upstream vectors. This exercises both marshaling and the underlying C library.
+Tests of pure Haskell operations remain useful but must be identified separately
+and must not count as native execution coverage.
 
-- [cardano-coin-selection tests](https://github.com/cardano-foundation/cardano-coin-selection/tree/main/test): balancing, collateral, token bundles and selection invariants.
-- [Atlas skeleton tests](https://github.com/geniusyield/atlas/blob/main/tests/GeniusYield/Test/GYTxSkeleton.hs): composition scenarios adapted to our own rules.
-- [sc-tools selection tests](https://github.com/input-output-hk/sc-tools/blob/main/src/coin-selection/test/Spec.hs): multi-address and script transaction scenarios.
-- [cardano-api generators](https://github.com/IntersectMBO/cardano-api/tree/master/cardano-api/gen/Test/Gen/Cardano): domain generators and optional independent comparison.
-- [Plutus conformance](https://github.com/IntersectMBO/plutus/tree/master/plutus-conformance): evaluator results and budgets with pinned compatible semantics/cost models.
+Prioritize the work in this order:
+
+| Priority | Source | Adaptation and acceptance |
+| --- | --- | --- |
+| 1. Coin selection | [cardano-coin-selection BalanceSpec](https://github.com/cardano-foundation/cardano-coin-selection/blob/main/test/spec/Cardano/CoinSelection/BalanceSpec.hs), its generators and collateral tests | Exercise the native selector. Check input membership/uniqueness, per-asset conservation, change minimum ADA, bundle/quantity limits, splitting conservation, known-solvable cases and insufficient funds. Account explicitly for applicable fees, mint/burn, deposits and refunds. |
+| 2. Ledger serialization and hashes | [Conway round trips](https://github.com/IntersectMBO/cardano-ledger/blob/master/eras/conway/impl/testlib/Test/Cardano/Ledger/Conway/Binary/RoundTrip.hs), era goldens and [Dijkstra witness tests](https://github.com/IntersectMBO/cardano-ledger/blob/master/eras/dijkstra/impl/testlib/Test/Cardano/Ledger/Dijkstra/Imp/SubUtxowSpec.hs) | Adapt generators and fixtures for native CBOR, hashes, witnesses, redeemer indices and script contexts. Compare semantic values or exact bytes according to each encoding contract. Cover malformed data and supported era boundaries. |
+| 3. Builder workflows | [cardano-api fee/witness tests](https://github.com/IntersectMBO/cardano-api/blob/master/cardano-api/test/cardano-api-test/Test/Cardano/Api/Experimental/Fee.hs), [sc-tools selection tests](https://github.com/input-output-hk/sc-tools/blob/main/src/coin-selection/test/Spec.hs), [Atlas selection tests](https://github.com/geniusyield/atlas/blob/main/tests/GeniusYield/Test/CoinSelection.hs) | Adapt multi-address payments, existing inputs, mint/burn, reference scripts, mixed-asset collateral and matching-index/deferred-redeemer scenarios. Test actual native building rather than only plan composition. |
+| 4. Addresses and cryptography | [cardano-addresses derivation tests](https://github.com/IntersectMBO/cardano-addresses/blob/master/test/Cardano/Address/DerivationSpec.hs), address tests and golden vectors | Exercise native derivation, encodings, signatures and bounds with independent vectors and properties. Preserve the application-owned entropy-generation boundary. |
+
+Use three complementary layers:
+
+- Fast property/unit tests in cometa.hs with reproducible seeds, meaningful case
+  classification and shrinking that preserves the relevant input constraints.
+- A separate test-only integration suite for heavier upstream comparisons and
+  ledger acceptance of C-built transactions against explicit ledger state. Pin
+  compatible era/protocol revisions. Do not add ledger infrastructure to the
+  public binding or make these tests depend on live network services.
+- Minimized permanent regressions: when a failure is in cardano-c, add its smallest
+  reproducer to cardano-c's unit tests as well as retaining the Haskell regression.
+  Binding-only defects get binding regressions. Native regression fixtures should
+  be reusable by other bindings where applicable.
 
 Retain imported QuickCheck properties where practical; prefer Hedgehog for new
-properties that benefit from integrated shrinking/state machines. Test selector
-invariants, not identical random choices. Save minimized failures as regression
-fixtures. Agreement with cardano-c detects binding errors but is not independent
-proof of native correctness; use external vectors/oracles where appropriate.
+properties that benefit from integrated shrinking/state machines. Equal seeds do
+not imply identical selections across different RNGs or iteration orders. Compare
+selector invariants; require exact selections only with a matched random-choice
+contract. Do not assume a heuristic must succeed for every mathematically feasible
+case without an upstream guarantee.
+
+Review the actual upstream contracts before copying tests. The reviewed repository
+licenses are Apache-2.0; verify the specific files and dependencies, retain required
+copyright/license/NOTICE material, and record the exact source commit, path and
+adaptations. Links above identify candidates, not completed imports. Import useful
+properties and generators without bringing whole application test frameworks into
+ordinary tests. Existing [Plutus conformance](https://github.com/IntersectMBO/plutus/tree/master/plutus-conformance)
+vectors remain a candidate for supported evaluator behavior with pinned cost models.
+
+Agreement between the binding and a direct call to the same C implementation
+checks binding correspondence, not independent native correctness. Every suite
+must state what executes in C and where its expected results come from. Track
+this work as planned until the adapted tests and validation evidence are committed.
 
 ### P04 fourth slice: password derivation and EMIP3 storage
 
