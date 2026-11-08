@@ -118,7 +118,7 @@ cometa_inspection_compute(unsigned int operation, const unsigned char* input, si
     return CARDANO_ERROR_POINTER_IS_NULL;
   }
   *output = NULL;
-  if (operation > 46U)
+  if (operation > 58U)
   {
     return CARDANO_ERROR_INVALID_ARGUMENT;
   }
@@ -175,6 +175,18 @@ cometa_inspection_compute(unsigned int operation, const unsigned char* input, si
   cardano_account_balance_intervals_map_t* inspection_balance_intervals      = NULL;
   cardano_direct_deposit_map_t*            inspection_direct_deposits        = NULL;
   cardano_required_guards_map_t*           inspection_required_guards        = NULL;
+  cardano_asset_name_t*                    inspection_asset_name             = NULL;
+  cardano_blake2b_hash_t*                  inspection_blake2b_hash           = NULL;
+  cardano_bls_key_t*                       inspection_bls_key                = NULL;
+  cardano_committee_members_map_t*         inspection_committee_members_map  = NULL;
+  cardano_withdrawal_map_t*                inspection_withdrawal_map         = NULL;
+  cardano_blake2b_hash_set_t*              inspection_blake2b_hash_set       = NULL;
+  cardano_guard_set_t*                     inspection_guard_set              = NULL;
+  cardano_sub_transaction_set_t*           inspection_sub_transaction_set    = NULL;
+  cardano_multi_asset_t*                   inspection_assets                 = NULL;
+  cardano_multi_asset_t*                   inspection_asset_entries          = NULL;
+  cardano_asset_name_map_t*                inspection_policy_assets          = NULL;
+  cardano_asset_name_map_t*                inspection_policy_asset_entries   = NULL;
   size_t                                   remaining                         = 0U;
   cardano_error_t                          result                            = reader == NULL || writer == NULL ? CARDANO_ERROR_MEMORY_ALLOCATION_FAILED : CARDANO_SUCCESS;
 
@@ -341,6 +353,42 @@ cometa_inspection_compute(unsigned int operation, const unsigned char* input, si
       case 46U:
         result = cardano_required_guards_map_from_cbor(reader, &inspection_required_guards);
         break;
+      case 47U:
+        result = cardano_asset_name_from_cbor(reader, &inspection_asset_name);
+        break;
+      case 48U:
+        result = cardano_blake2b_hash_from_cbor(reader, &inspection_blake2b_hash);
+        break;
+      case 49U:
+        result = cardano_bls_key_from_cbor(reader, &inspection_bls_key);
+        break;
+      case 50U:
+        result = cardano_committee_members_map_from_cbor(reader, &inspection_committee_members_map);
+        break;
+      case 51U:
+        result = cardano_withdrawal_map_from_cbor(reader, &inspection_withdrawal_map);
+        break;
+      case 52U:
+        result = cardano_blake2b_hash_set_from_cbor(reader, &inspection_blake2b_hash_set);
+        break;
+      case 53U:
+        result = cardano_guard_set_from_cbor(reader, &inspection_guard_set);
+        break;
+      case 54U:
+        result = cardano_sub_transaction_set_from_cbor(reader, &inspection_sub_transaction_set);
+        break;
+      case 55U:
+        result = cardano_multi_asset_from_cbor(reader, &inspection_assets);
+        break;
+      case 56U:
+        result = cardano_multi_asset_from_cbor(reader, &inspection_asset_entries);
+        break;
+      case 57U:
+        result = cardano_asset_name_map_from_cbor(reader, &inspection_policy_assets);
+        break;
+      case 58U:
+        result = cardano_asset_name_map_from_cbor(reader, &inspection_policy_asset_entries);
+        break;
       default:
         result = CARDANO_ERROR_INVALID_ARGUMENT;
         break;
@@ -498,6 +546,42 @@ cometa_inspection_compute(unsigned int operation, const unsigned char* input, si
       case 46U:
         result = cardano_required_guards_map_to_cip116_json(inspection_required_guards, writer);
         break;
+      case 47U:
+        result = cardano_asset_name_to_cip116_json(inspection_asset_name, writer);
+        break;
+      case 48U:
+        result = cardano_blake2b_hash_to_cip116_json(inspection_blake2b_hash, writer);
+        break;
+      case 49U:
+        result = cardano_bls_key_to_cip116_json(inspection_bls_key, writer);
+        break;
+      case 50U:
+        result = cardano_committee_members_map_to_cip116_json(inspection_committee_members_map, writer);
+        break;
+      case 51U:
+        result = cardano_withdrawal_map_to_cip116_json(inspection_withdrawal_map, writer);
+        break;
+      case 52U:
+        result = cardano_blake2b_hash_set_to_cip116_json(inspection_blake2b_hash_set, writer);
+        break;
+      case 53U:
+        result = cardano_guard_set_to_cip116_json(inspection_guard_set, writer);
+        break;
+      case 54U:
+        result = cardano_sub_transaction_set_to_cip116_json(inspection_sub_transaction_set, writer);
+        break;
+      case 55U:
+        result = cardano_multi_asset_to_cip116_json(inspection_assets, writer);
+        break;
+      case 56U:
+        result = cardano_multi_asset_to_cip116_json_ex(inspection_asset_entries, writer);
+        break;
+      case 57U:
+        result = cardano_asset_name_map_to_cip116_json(inspection_policy_assets, writer);
+        break;
+      case 58U:
+        result = cardano_asset_name_map_to_cip116_json_ex(inspection_policy_asset_entries, writer);
+        break;
       default:
         result = CARDANO_ERROR_INVALID_ARGUMENT;
         break;
@@ -534,6 +618,18 @@ cometa_inspection_compute(unsigned int operation, const unsigned char* input, si
   cardano_account_balance_intervals_map_unref(&inspection_balance_intervals);
   cardano_direct_deposit_map_unref(&inspection_direct_deposits);
   cardano_required_guards_map_unref(&inspection_required_guards);
+  cardano_asset_name_unref(&inspection_asset_name);
+  cardano_blake2b_hash_unref(&inspection_blake2b_hash);
+  cardano_bls_key_unref(&inspection_bls_key);
+  cardano_committee_members_map_unref(&inspection_committee_members_map);
+  cardano_withdrawal_map_unref(&inspection_withdrawal_map);
+  cardano_blake2b_hash_set_unref(&inspection_blake2b_hash_set);
+  cardano_guard_set_unref(&inspection_guard_set);
+  cardano_sub_transaction_set_unref(&inspection_sub_transaction_set);
+  cardano_multi_asset_unref(&inspection_assets);
+  cardano_multi_asset_unref(&inspection_asset_entries);
+  cardano_asset_name_map_unref(&inspection_policy_assets);
+  cardano_asset_name_map_unref(&inspection_policy_asset_entries);
   cardano_redeemer_unref(&redeemer);
   cardano_datum_unref(&datum);
   cardano_transaction_input_unref(&tx_input);

@@ -45,6 +45,8 @@ import qualified Governance
 import Hedgehog (Property, evalEither, evalIO, forAll, property, (===))
 import qualified Hedgehog.Gen as Gen
 import qualified Hedgehog.Range as Range
+import qualified HexEncoding
+import qualified InspectionCollections
 import qualified Metadata
 import qualified NativeWorkflows
 import qualified Ownership
@@ -84,6 +86,8 @@ main =
         TransactionBody.tests,
         TransactionDeferred.tests,
         TransactionAccountingProperties.tests,
+        InspectionCollections.tests,
+        HexEncoding.tests,
         PublicTransaction.tests,
         TransactionWitnesses.tests,
         Proposals.tests,

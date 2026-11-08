@@ -203,6 +203,7 @@ library
     Cometa.Error
     Cometa.Error.Code
     Cometa.Encoding.Cbor
+    Cometa.Encoding.Hex
     Cometa.Encoding.Collections
     Cometa.Encoding.Set
     Cometa.Provider
@@ -383,6 +384,8 @@ test-suite cometa-test
     StandaloneSetEncoding
     TransactionDeferred
     TransactionAccountingProperties
+    InspectionCollections
+    HexEncoding
     NativeWorkflows
     ConnectedGovernance
     Connected.Governance
@@ -636,6 +639,7 @@ test-suite cometa-runtime-test
     Cometa.Crypto.Pbkdf2
     Cometa.Encoding.Cbor
     Cometa.Encoding.Set
+    Cometa.Encoding.Collections
     Cometa.Error
     Cometa.Error.Code
     Cometa.Evaluation
