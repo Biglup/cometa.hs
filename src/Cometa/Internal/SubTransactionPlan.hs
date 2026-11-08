@@ -46,6 +46,8 @@ module Cometa.Internal.SubTransactionPlan
     accountBalance,
     donate,
     propose,
+    proposeWithRedeemer,
+    proposeWithDeferredRedeemer,
     vote,
     voteWithRedeemer,
     voteWithDeferredRedeemer,
@@ -125,6 +127,8 @@ referenceInput :: Utxo -> Plan
 referenceInput a = Plan (Top.referenceInput a)
 
 -- | Attach a native or compiled Plutus script. Executed sub-level scripts require V4.
+-- Repeated attachments with the same language and script bytes contribute one
+-- witness, ordered by the first attachment.
 attachScript :: Script -> Plan
 attachScript a = Plan (Top.attachScript a)
 
@@ -144,7 +148,9 @@ mintWithDeferredRedeemer a b c = Plan (Top.mintWithDeferredRedeemer a b c)
 metadata :: Word64 -> Metadatum -> Plan
 metadata a b = Plan (Top.metadata a b)
 
--- | Attach an exact datum witness.
+-- | Attach an exact datum witness. Repeated exact CBOR encodings contribute one
+-- witness, including data supplied to spending inputs, in first occurrence order.
+-- Different encodings remain distinct because their hashes differ.
 attachDatum :: EncodedPlutusData -> Plan
 attachDatum a = Plan (Top.attachDatum a)
 
@@ -216,11 +222,23 @@ donate :: Word64 -> Plan
 donate amount = Plan (Top.donate amount)
 
 -- | Append a governance proposal, using the configured governance deposit.
--- Parameter changes and treasury withdrawals require a Plutus V4 guardrails
--- policy hash and its supplied script. They execute with the built-in proposing
--- argument @Constr 0 []@.
+-- Parameter changes and treasury withdrawals naming a guardrails policy use
+-- the unit argument @Constr 0 []@ and require a supplied Plutus V4 script.
+-- Actions without a policy do not create a proposing redeemer.
 propose :: RewardAddress -> Action -> Anchor -> Plan
 propose account action anchor = Plan (Top.propose account action anchor)
+
+-- | Append a proposal with a guardrails argument. The action must name a policy;
+-- the configured protocol snapshot supplies its deposit. Attach the script or
+-- resolve its reference input separately. Duplicate proposals fail at build.
+proposeWithRedeemer :: RewardAddress -> Action -> Anchor -> EncodedPlutusData -> Plan
+proposeWithRedeemer account action anchor argument = Plan (Top.proposeWithRedeemer account action anchor argument)
+
+-- | Compute a proposal's guardrails argument from the local draft. Proposal
+-- indices and resolved inputs belong to this subtransaction. The action must
+-- name a policy; duplicate proposals fail at build.
+proposeWithDeferredRedeemer :: RewardAddress -> Action -> Anchor -> DeferredRedeemer -> Plan
+proposeWithDeferredRedeemer account action anchor callback = Plan (Top.proposeWithDeferredRedeemer account action anchor callback)
 
 -- | Cast a key-authorized governance vote.
 vote :: Voter -> ActionId -> VotingProcedure -> Plan

@@ -27,6 +27,7 @@ import qualified Cometa.PolicyId as PolicyId
 import qualified Cometa.Value as Value
 import Control.Monad (forM_, unless)
 import qualified Data.ByteString as ByteString
+import Data.Either (isLeft)
 import Data.Int (Int64)
 import Data.List (nub, sort)
 import qualified Data.Text as Text
@@ -37,7 +38,7 @@ import Hedgehog (Gen, Property, assert, evalEither, forAll, property, (===))
 import qualified Hedgehog.Gen as Gen
 import qualified Hedgehog.Range as Range
 import Test.Tasty (TestTree, testGroup)
-import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
+import Test.Tasty.HUnit (assertBool, assertFailure, testCase, (@?=))
 import Test.Tasty.Hedgehog (testProperty)
 
 -- DEFINITIONS ----------------------------------------------------------------
@@ -46,7 +47,10 @@ tests :: TestTree
 tests =
   testGroup
     "Assets and signed values"
-    [ testCase "name byte bounds, binary data and UTF-8" checkNames,
+    [ testCase "mint and asset-name CBOR preserve typed native correspondence" checkMintCbor,
+      testCase "signed inspection and partition conveniences obey laws" checkPartitions,
+      testCase "standalone CBOR validates bounds, normalizes and agrees with native" checkCbor,
+      testCase "name byte bounds, binary data and UTF-8" checkNames,
       testCase "policy length, hex and script-hash conversion" checkPolicies,
       testCase "duplicate summation, cancellation and absence" checkNormalization,
       testCase "asset ordering and Ada versus empty native name" checkOrdering,
@@ -221,8 +225,103 @@ propArithmetic = property $ do
   Value.scale 0 a === mempty
   Value.scale 1 a === a
   Value.negate (Value.negate a) === a
+  Value.positivePart a <> Value.negativePart a === a
+  Value.intersection a a === a
+  Value.intersection a mempty === mempty
+  Value.intersection (Value.intersection a b) a === Value.intersection a b
+  assert (Value.isNonNegative (Value.positivePart a))
+  assert (all ((< 0) . snd) (Value.toList (Value.negativePart a)))
+  Value.assetCount a === length (Value.toList a)
 
 -- FOREIGN IMPORTS ------------------------------------------------------------
 
 foreign import ccall safe "cometa_test_value_agreement"
   cAgreement :: Ptr Word8 -> Ptr Word8 -> CSize -> Int64 -> Int64 -> Int64 -> Int64 -> Int64 -> Int64 -> Int64 -> Int64 -> IO CInt
+
+-- Standalone CBOR must cross the bounded native representation explicitly,
+-- while ordinary signed algebra remains arbitrary precision.
+checkCbor :: IO ()
+checkCbor = do
+  policy <- expectRight (PolicyId.fromBytes (ByteString.replicate 28 0))
+  name <- expectRight (AssetName.fromBytes (ByteString.pack [0, 255]))
+  let asset = AssetId.Native policy name
+      upper = toInteger (maxBound :: Int64)
+      lower = toInteger (minBound :: Int64)
+  Value.encodeCbor mempty @?= Right (ByteString.singleton 0)
+  forM_ [0, 1, upper] $ \coin ->
+    forM_ [lower, -1, 0, 1, upper] $ \amount -> do
+      let value = Value.lovelace coin <> Value.singleton asset amount
+      encoded <- expectRight (Value.encodeCbor value)
+      Value.decodeCbor encoded @?= Right value
+      ByteString.useAsCString (PolicyId.toBytes policy) $ \policyPtr ->
+        ByteString.useAsCStringLen (AssetName.toBytes name) $ \(namePtr, nameSize) ->
+          ByteString.useAsCStringLen encoded $ \(encodedPtr, encodedSize) -> do
+            agrees <- cCbor (castPtr policyPtr) (castPtr namePtr) (fromIntegral nameSize) (fromInteger coin) (fromInteger amount) (castPtr encodedPtr) (fromIntegral encodedSize)
+            agrees @?= 1
+  forM_ [-1, upper + 1] $ \amount -> Value.encodeCbor (Value.lovelace amount) @?= Left (InvalidValueQuantity amount)
+  forM_ [lower - 1, upper + 1] $ \amount -> Value.encodeCbor (Value.singleton asset amount) @?= Left (InvalidValueQuantity amount)
+  -- Empty asset maps normalize to Ada; array/map indefinite forms are accepted.
+  Value.decodeCbor (ByteString.pack [0x9f, 0x18, 1, 0xbf, 0xff, 0xff]) @?= Right (Value.lovelace 1)
+  forM_ [ByteString.empty, ByteString.pack [0x20], ByteString.pack [0x82, 0], ByteString.pack [0, 0], ByteString.pack [0x1b, 0x80, 0, 0, 0, 0, 0, 0, 0]] $ \encoded ->
+    assertBool "invalid or overflowing standalone value" (isLeft (Value.decodeCbor encoded))
+  let key = ByteString.pack [0x58, 28] <> PolicyId.toBytes policy
+      nameKey = ByteString.pack [0x42, 0, 255]
+      duplicatePolicy = ByteString.pack [0x82, 0, 0xa2] <> key <> ByteString.singleton 0xa0 <> key <> ByteString.singleton 0xa0
+      duplicateName = ByteString.pack [0x82, 0, 0xa1] <> key <> ByteString.singleton 0xa2 <> nameKey <> ByteString.singleton 1 <> nameKey <> ByteString.singleton 2
+  assertBool "duplicate policies" (isLeft (Value.decodeCbor duplicatePolicy))
+  assertBool "duplicate names" (isLeft (Value.decodeCbor duplicateName))
+
+foreign import ccall safe "cometa_test_value_cbor"
+  cCbor :: Ptr Word8 -> Ptr Word8 -> CSize -> Int64 -> Int64 -> Ptr Word8 -> CSize -> IO CInt
+
+checkMintCbor :: IO ()
+checkMintCbor = do
+  policy <- expectRight (PolicyId.fromBytes (ByteString.replicate 28 3))
+  forM_ [ByteString.empty, ByteString.pack [0, 255, 1], ByteString.replicate 32 255] $ \nameBytes -> do
+    name <- expectRight (AssetName.fromBytes nameBytes)
+    AssetName.decodeCbor (AssetName.encodeCbor name) @?= Right name
+    ByteString.useAsCStringLen nameBytes $ \(namePtr, nameSize) -> do
+      ByteString.useAsCStringLen (AssetName.encodeCbor name) $ \(expected, size) -> do
+        agrees <- cNameCbor (castPtr namePtr) (fromIntegral nameSize) (castPtr expected) (fromIntegral size)
+        agrees @?= 1
+      forM_ [minBound, -1, 1, maxBound :: Int64] $ \amount -> do
+        let mint = Value.singleton (AssetId.Native policy name) (toInteger amount)
+        encoded <- expectRight (Value.encodeMintCbor mint)
+        Value.decodeMintCbor encoded @?= Right mint
+        ByteString.useAsCString (PolicyId.toBytes policy) $ \policyPtr ->
+          ByteString.useAsCStringLen encoded $ \(expected, size) -> do
+            agrees <- cMintCbor (castPtr policyPtr) (castPtr namePtr) (fromIntegral nameSize) amount (castPtr expected) (fromIntegral size)
+            agrees @?= 1
+  short <- expectRight (AssetName.fromBytes (ByteString.singleton 255))
+  long <- expectRight (AssetName.fromBytes (ByteString.pack [0, 0]))
+  let bundle = Value.fromList [(AssetId.Native policy long, 2), (AssetId.Native policy short, 1)]
+      expectedMap = ByteString.pack [0xa1, 0x58, 28] <> PolicyId.toBytes policy <> ByteString.pack [0xa2, 0x41, 255, 1, 0x42, 0, 0, 2]
+  Value.encodeMintCbor bundle @?= Right expectedMap
+  Value.decodeMintCbor expectedMap @?= Right bundle
+  Value.encodeMintCbor mempty @?= Right (ByteString.singleton 0xa0)
+  assertBool "mint cannot contain Ada" (isLeft (Value.encodeMintCbor (Value.lovelace 1)))
+  forM_ [ByteString.singleton 0, ByteString.pack [0xa0, 0], ByteString.pack [0xa1, 0x40, 0xa0]] $ \encoded ->
+    assertBool "invalid mint encoding" (isLeft (Value.decodeMintCbor encoded))
+  forM_ [ByteString.empty, ByteString.singleton 0, ByteString.pack [0x40, 0], ByteString.pack [0x58, 33] <> ByteString.replicate 33 0] $ \encoded ->
+    assertBool "invalid asset-name CBOR" (isLeft (AssetName.decodeCbor encoded))
+
+checkPartitions :: IO ()
+checkPartitions = do
+  policy <- expectRight (PolicyId.fromBytes (ByteString.replicate 28 0))
+  let asset = AssetId.Native policy AssetName.empty
+      value = Value.lovelace (-3) <> Value.singleton asset 5
+      other = Value.lovelace 10 <> Value.singleton asset (-7)
+  Value.positivePart value @?= Value.singleton asset 5
+  Value.negativePart value @?= Value.lovelace (-3)
+  Value.positivePart value <> Value.negativePart value @?= value
+  Value.assetCount value @?= 2
+  Value.assetCount mempty @?= 0
+  Value.intersection value other @?= value
+  Value.intersection value (Value.lovelace 1) @?= Value.lovelace (-3)
+  Value.intersection value mempty @?= mempty
+
+foreign import ccall safe "cometa_test_mint_cbor"
+  cMintCbor :: Ptr Word8 -> Ptr Word8 -> CSize -> Int64 -> Ptr Word8 -> CSize -> IO CInt
+
+foreign import ccall safe "cometa_test_name_cbor"
+  cNameCbor :: Ptr Word8 -> CSize -> Ptr Word8 -> CSize -> IO CInt

@@ -328,3 +328,70 @@ cleanup:
   cardano_cbor_reader_unref(&reader);
   return agrees;
 }
+
+/**
+ * \brief Checks a typed CIP-129 identity against native encoding and decoding.
+ * Hash and expected text are borrowed; all acquired identity references are
+ * operation-scoped and released on all exits. Index is intentionally one byte.
+ */
+int
+cometa_test_action_text(const unsigned char* hash, uint8_t index, const char* expected, size_t size)
+{
+  cardano_governance_action_id_t* action  = NULL;
+  cardano_governance_action_id_t* decoded = NULL;
+  cardano_error_t                 result  = cardano_governance_action_id_from_hash_bytes(hash, 32, index, &action);
+  if (result == CARDANO_SUCCESS)
+    result = cardano_governance_action_id_from_bech32(expected, size, &decoded);
+  uint64_t decoded_index = 0;
+  if (result == CARDANO_SUCCESS)
+    result = cardano_governance_action_id_get_index(decoded, &decoded_index);
+  int agrees = 0;
+  if (result == CARDANO_SUCCESS)
+  {
+    const char* encoded = cardano_governance_action_id_get_string(action);
+    agrees              = (strlen(encoded) == size) && (memcmp(encoded, expected, size) == 0) &&
+      (decoded_index == index) && (memcmp(cardano_governance_action_id_get_hash_bytes(decoded), hash, 32) == 0);
+  }
+  cardano_governance_action_id_unref(&decoded);
+  cardano_governance_action_id_unref(&action);
+  return agrees;
+}
+
+/**
+ * \brief Rebuilds a credential DRep and compares native CIP-129 text output.
+ * All bytes are borrowed; native credential and DRep owners are released on
+ * all paths. CIP-105/CIP-129 decoding is checked through the retained getter.
+ */
+int
+cometa_test_drep_text(const unsigned char* hash, int script, const char* text, size_t size, int canonical)
+{
+  cardano_credential_t* credential         = NULL;
+  cardano_credential_t* decoded_credential = NULL;
+  cardano_drep_t*       drep               = NULL;
+  cardano_drep_t*       decoded            = NULL;
+  cardano_error_t       result             = cardano_credential_from_hash_bytes(hash, 28, script ? CARDANO_CREDENTIAL_TYPE_SCRIPT_HASH : CARDANO_CREDENTIAL_TYPE_KEY_HASH, &credential);
+  if (result == CARDANO_SUCCESS)
+    result = cardano_drep_new(script ? CARDANO_DREP_TYPE_SCRIPT_HASH : CARDANO_DREP_TYPE_KEY_HASH, credential, &drep);
+  char encoded[128] = { 0 };
+  if (result == CARDANO_SUCCESS)
+    result = cardano_drep_to_string(drep, encoded, sizeof(encoded));
+  if (result == CARDANO_SUCCESS)
+    result = cardano_drep_from_string(text, size, &decoded);
+  if (result == CARDANO_SUCCESS)
+    result = cardano_drep_get_credential(decoded, &decoded_credential);
+  cardano_drep_type_t type = CARDANO_DREP_TYPE_KEY_HASH;
+  if (result == CARDANO_SUCCESS)
+    result = cardano_drep_get_type(decoded, &type);
+  int agrees = 0;
+  if (result == CARDANO_SUCCESS)
+  {
+    agrees = (!canonical || ((strlen(encoded) == size) && (memcmp(encoded, text, size) == 0))) &&
+      (type == (script ? CARDANO_DREP_TYPE_SCRIPT_HASH : CARDANO_DREP_TYPE_KEY_HASH)) &&
+      (memcmp(cardano_credential_get_hash_bytes(decoded_credential), hash, 28) == 0);
+  }
+  cardano_credential_unref(&decoded_credential);
+  cardano_drep_unref(&decoded);
+  cardano_drep_unref(&drep);
+  cardano_credential_unref(&credential);
+  return agrees;
+}

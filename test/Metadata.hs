@@ -22,18 +22,20 @@ module Metadata (tests) where
 import qualified Cometa.Crypto.Blake2b as Blake2b
 import Cometa.Error (Error (..))
 import qualified Cometa.Metadata as Metadata
+import Control.Monad (forM_)
 import qualified Data.Aeson as Json
 import qualified Data.ByteString as BS
+import Data.Either (isLeft)
 import Data.Scientific (scientific)
 import qualified Data.Text as Text
 import Data.Word (Word8)
-import Foreign.C.Types (CInt (..), CSize (..))
+import Foreign.C.Types (CChar, CInt (..), CSize (..))
 import Foreign.Ptr (Ptr, castPtr)
 import Hedgehog (Gen, Property, evalEither, evalIO, forAll, property, (===))
 import qualified Hedgehog.Gen as Gen
 import qualified Hedgehog.Range as Range
 import Test.Tasty (TestTree, testGroup)
-import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
+import Test.Tasty.HUnit (assertBool, assertFailure, testCase, (@?=))
 import Test.Tasty.Hedgehog (testProperty)
 
 -- DEFINITIONS ----------------------------------------------------------------
@@ -42,7 +44,8 @@ tests :: TestTree
 tests =
   testGroup
     "Metadata"
-    [ testCase "integer and UTF-8 byte boundaries" checkBounds,
+    [ testCase "plain native JSON conversion checks bounds and prevents lost map data" checkPlainJson,
+      testCase "integer and UTF-8 byte boundaries" checkBounds,
       testCase "ordered duplicate nested maps and unique labels" checkCollections,
       testCase "exact encodings retain identity until explicit normalization" checkExact,
       testCase "schema, UTF-8 and trailing input rejection" checkInvalid,
@@ -213,3 +216,29 @@ nativeAgreement transaction bytes = BS.useAsCStringLen bytes $ \(ptr, size) ->
 
 foreign import ccall safe "cometa_test_metadata_agreement"
   cAgreement :: Ptr Word8 -> CSize -> CInt -> IO CInt
+
+checkPlainJson :: IO ()
+checkPlainJson = do
+  forM_ ["-9223372036854775808", "0", "18446744073709551615", "\"0xdead\"", "[1,\"text\",[]]", "{\"1\":1,\"a\":[2,\"0xff\"]}"] $ \encoded -> do
+    json <- expectRight (Json.eitherDecodeStrict encoded)
+    datum <- expectRight (Metadata.metadatumFromJson json)
+    Metadata.metadatumToJson datum @?= Right json
+    BS.useAsCStringLen encoded $ \(jsonPtr, jsonSize) ->
+      BS.useAsCStringLen (Metadata.encodeMetadatumCbor datum) $ \(expected, size) -> do
+        agrees <- cPlainJson jsonPtr (fromIntegral jsonSize) (castPtr expected) (fromIntegral size)
+        agrees @?= 1
+  forM_ ["null", "true", "1.5", "-9223372036854775809", "18446744073709551616"] $ \encoded -> do
+    json <- expectRight (Json.eitherDecodeStrict encoded)
+    assertBool "invalid plain JSON metadata" (isLeft (Metadata.metadatumFromJson json))
+  key <- expectRight (Metadata.mkText "key")
+  integer <- expectRight (Metadata.mkInteger 1)
+  bytesValue <- expectRight (Metadata.mkBytes (BS.singleton 0))
+  forM_ [bytesValue, Metadata.map [(integer, key)], Metadata.map [(key, integer), (key, integer)]] $ \datum ->
+    assertBool "reject information loss" (isLeft (Metadata.metadatumToJson datum))
+  -- Full CBOR negative output remains exact, although native plain input is narrower.
+  low <- expectRight (Metadata.mkInteger (negate (2 ^ (64 :: Int))))
+  Metadata.metadatumToJson low @?= Right (Json.Number (fromInteger (negate (2 ^ (64 :: Int)))))
+  Metadata.metadatumFromJson (Json.String (Text.replicate 65 "a")) @?= Left (InvalidMetadataTextLength 65)
+
+foreign import ccall safe "cometa_test_metadata_plain_json"
+  cPlainJson :: Ptr CChar -> CSize -> Ptr Word8 -> CSize -> IO CInt

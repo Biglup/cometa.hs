@@ -12,6 +12,7 @@
 -- WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 
 -- | Complete native-example flows with actual native building/VM/signing and
@@ -51,9 +52,11 @@ import qualified Cometa.Transaction.Witnesses as Witnesses
 import qualified Cometa.TransactionId as Id
 import qualified Cometa.Value as Value
 import Control.Monad (unless)
+import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Trans.Except (ExceptT (..), except, runExceptT)
 import qualified Data.ByteString as B
 import Data.Either (isLeft)
+import Data.IORef (atomicModifyIORef', modifyIORef', newIORef, readIORef)
 import Data.List (find)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
@@ -85,6 +88,8 @@ tests =
       testCase "buyer/seller token exchange preserves both independent signatures" swap,
       testCase "actual V4 validator and guard compose in a signed batch" guardedBatch,
       testCase "confirmation timeout prevents dependent stages" confirmation,
+      testCase "confirmed wallet indexing waits for created and consumed outputs" indexLag,
+      testCase "wallet indexing timeout stops without resubmitting" indexTimeout,
       testCase "invalid signatures refuse fixture submission without changing state" invalidSignature
     ]
 
@@ -130,8 +135,29 @@ plutusSpend = execute 2 $ \context _ -> do
 
 deferredSpends :: IO ()
 deferredSpends = do
-  execute 2 $ \context _ -> Scripts.selfIndex >>= must >>= Workflow.runDeferredSelf context . Script.Plutus
-  execute 3 $ \context _ -> Scripts.orderPairing >>= must >>= Workflow.runDeferredBatch context . Script.Plutus
+  execute 2 $ \context _ -> runExceptT $ do
+    script <- Script.Plutus <$> ExceptT Scripts.selfIndex
+    transactions <- ExceptT (Workflow.runDeferredSelf context script)
+    except (checkDeferredTransactions script [1000000] transactions)
+  execute 3 $ \context _ -> runExceptT $ do
+    script <- Script.Plutus <$> ExceptT Scripts.orderPairing
+    transactions <- ExceptT (Workflow.runDeferredBatch context script)
+    except (checkDeferredTransactions script [1200000, 1500000] transactions)
+
+checkDeferredTransactions :: Script.Script -> [Integer] -> [Tx.Transaction] -> Either Error ()
+checkDeferredTransactions script payouts transactions = case reverse transactions of
+  settled : funding -> do
+    let fields = Body.bodyFields . Body.toBody . Tx.body
+        outputs = Fields.fieldOutputs . fields
+        fundedAmounts = map (map Output.value . take 1 . outputs) funding
+        paidAmounts = map Output.value (take (length payouts) (outputs settled))
+        noReferences = all (maybe True null . Fields.fieldReferenceInputs . fields) transactions
+        noDeployments = all (all ((== Nothing) . Output.referenceScript) . outputs) transactions
+        inlineWitness = script `elem` Witnesses.scripts (Witnesses.toWitnesses (Tx.witnesses settled))
+    unless (length funding == length payouts && all (== [Value.lovelace 2000000]) fundedAmounts) (Left (InvalidBuildingRequest "Deferred funding must match the source's two-ADA orders"))
+    unless (paidAmounts == map Value.lovelace payouts) (Left (InvalidBuildingRequest "Deferred explicit payouts differ from the source"))
+    unless (noReferences && noDeployments && inlineWitness) (Left (InvalidBuildingRequest "Deferred settlement must attach its script inline without reference deployments"))
+  [] -> Left (InvalidBuildingRequest "Missing deferred workflow transactions")
 
 invalidIndex :: IO ()
 invalidIndex = execute 1 $ \context fixture -> runExceptT $ do
@@ -265,5 +291,54 @@ invalidSignature = do
     after <- ExceptT (Right <$> Fixture.currentUtxos fixture)
     history <- ExceptT (Right <$> Fixture.submitted fixture)
     except (unless (before == after && null history) (Left (InvalidBuildingRequest "Rejected signature changed fixture state")))
+  _ <- must result
+  pure ()
+
+-- The address index may temporarily expose both newly created and already spent
+-- outputs, or no outputs. Neither observation is a usable next-stage snapshot.
+indexLag :: IO ()
+indexLag = do
+  result <- Fixture.withFixture $ \context fixture -> runExceptT $ do
+    before <- liftIO (Fixture.currentUtxos fixture)
+    queries <- liftIO (newIORef (0 :: Int))
+    pauses <- liftIO (newIORef (0 :: Int))
+    let original = Workflow.provider context
+        backend =
+          original
+            { Provider.utxosAt = \address -> do
+                number <- atomicModifyIORef' queries (\count -> (count + 1, count))
+                current <- Provider.utxosAt original address
+                pure $ case number of
+                  1 -> fmap (before <>) current
+                  2 -> Right []
+                  _ -> current
+            }
+        changed = context {Workflow.provider = backend}
+    output <- except (Output.mkOutput (Workflow.wallet context) (Value.lovelace 2000000) Datum.NoDatum Nothing)
+    _ <- ExceptT (Workflow.runStageWithIndexPolling (pure 0) (modifyIORef' pauses (+ 1)) changed (Plan.payTo output))
+    pauseCount <- liftIO (readIORef pauses)
+    queryCount <- liftIO (readIORef queries)
+    transactions <- liftIO (Fixture.submitted fixture)
+    except (unless (pauseCount == 2 && queryCount == 4 && length transactions == 1) (Left (InvalidBuildingRequest "Index lag did not wait for both created and consumed output visibility")))
+  _ <- must result
+  pure ()
+
+indexTimeout :: IO ()
+indexTimeout = do
+  result <- Fixture.withFixture $ \context fixture -> runExceptT $ do
+    before <- liftIO (Fixture.currentUtxos fixture)
+    ticks <- liftIO (newIORef [0, 1000000])
+    pauses <- liftIO (newIORef (0 :: Int))
+    let original = Workflow.provider context
+        backend = original {Provider.utxosAt = \_ -> pure (Right before)}
+        changed = context {Workflow.provider = backend, Workflow.confirmationTimeoutMillis = 1}
+        clock = atomicModifyIORef' ticks $ \case
+          value : rest -> (rest, value)
+          [] -> ([], 1000000)
+    output <- except (Output.mkOutput (Workflow.wallet context) (Value.lovelace 2000000) Datum.NoDatum Nothing)
+    attempt <- liftIO (Workflow.runStageWithIndexPolling clock (modifyIORef' pauses (+ 1)) changed (Plan.payTo output))
+    transactions <- liftIO (Fixture.submitted fixture)
+    pauseCount <- liftIO (readIORef pauses)
+    except (unless (attempt == Left (InvalidBuildingRequest "Confirmed transaction is not yet reflected in the wallet index; dependent stages stopped") && length transactions == 1 && pauseCount == 0) (Left (InvalidBuildingRequest "Index timeout did not stop exactly once at its monotonic deadline")))
   _ <- must result
   pure ()

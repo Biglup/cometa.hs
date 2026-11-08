@@ -62,6 +62,10 @@ module Cometa.Metadata
     fromDetailedJson,
     metadatumToDetailedJson,
     metadatumFromDetailedJson,
+
+    -- * Plain JSON
+    metadatumToJson,
+    metadatumFromJson,
   )
 where
 
@@ -74,13 +78,14 @@ import Codec.CBOR.Write (toStrictByteString)
 import Cometa.Error (Error (..))
 import qualified Cometa.Internal.Hex as Hex
 import Control.Monad (replicateM)
-import Data.Aeson (Value (..), object, (.=))
+import Data.Aeson (Value (..), object, toJSON, (.=))
 import qualified Data.Aeson.Key as Key
 import qualified Data.Aeson.KeyMap as KeyMap
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as ByteString
 import qualified Data.ByteString.Lazy as LazyByteString
 import qualified Data.Foldable
+import Data.Int (Int64)
 import qualified Data.Map.Strict as Map
 import Data.Scientific (Scientific, base10Exponent, coefficient)
 import Data.Text (Text)
@@ -365,3 +370,49 @@ scientificInteger number
     divide remaining value = case quotRem value 10 of
       (next, 0) -> divide (remaining - 1) next
       _ -> invalid
+
+-- | Convert a metadatum to ordinary JSON, matching cardano-c's plain JSON
+-- schema: integers, text, arrays and objects with text keys. Bytes, nontext map
+-- keys and duplicate object keys return 'InvalidMetadataJson' instead of losing
+-- information. Object member ordering is not preserved by JSON. Integer output
+-- retains the full metadata range, including negatives below -2^63 which the
+-- native plain JSON importer does not accept. Use detailed JSON for all metadata
+-- alternatives and exact ordered map pairs.
+metadatumToJson :: Metadatum -> Either Error Value
+metadatumToJson value = case view value of
+  IntegerValue number -> Right (Number (fromInteger number))
+  TextValue text -> Right (String text)
+  BytesValue _ -> Left (InvalidMetadataJson "Plain JSON cannot represent metadata bytes")
+  ListValue values -> toJSON <$> traverse metadatumToJson values
+  MapValue pairs -> do
+    entries <- traverse pair pairs
+    let fields = KeyMap.fromList entries
+    if KeyMap.size fields == length entries
+      then Right (Object fields)
+      else Left (InvalidMetadataJson "Plain JSON cannot preserve duplicate metadata map keys")
+  where
+    pair (key, item) = case view key of
+      TextValue text -> (,) (Key.fromText text) <$> metadatumToJson item
+      _ -> Left (InvalidMetadataJson "Plain JSON metadata map keys must be text")
+
+-- | Import ordinary JSON as metadata, matching native plain JSON conversion.
+-- Strings stay text, including @0x@ prefixes; object keys stay text, including
+-- decimal names. Objects assemble pairs in lexicographic key order. Integers
+-- must be in -2^63 through 2^64-1; fractions, booleans and null return
+-- 'InvalidMetadataJson'. Text and object keys retain the 64 UTF-8 byte bound.
+-- Invalid integer/text lengths return their existing metadata validation errors.
+-- This is not cardano-api's no-schema conversion, which infers bytes and numeric
+-- keys. Use 'metadatumFromDetailedJson' when those distinctions are needed.
+metadatumFromJson :: Value -> Either Error Metadatum
+metadatumFromJson json = case json of
+  Number number -> do
+    integer <- scientificInteger number
+    if integer < toInteger (minBound :: Int64)
+      then Left (InvalidMetadataJson "Plain JSON integer is below native signed 64-bit range")
+      else mkInteger integer
+  String text -> mkText text
+  Array values -> list <$> traverse metadatumFromJson (Data.Foldable.toList values)
+  Object fields -> Cometa.Metadata.map <$> traverse pair (KeyMap.toAscList fields)
+  _ -> Left (InvalidMetadataJson "Plain JSON metadata accepts integers, text, arrays and objects")
+  where
+    pair (key, item) = (,) <$> mkText (Key.toText key) <*> metadatumFromJson item

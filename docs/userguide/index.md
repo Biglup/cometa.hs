@@ -20,6 +20,8 @@ Start with [installation](installation.md), then read the
 [stake pools](stake-pools.md), [certificates](certificates.md), and
 [governance proposals](governance-proposals.md). For transaction workflows, see
 [transaction bodies](transaction-bodies.md), [transactions](transactions.md), and [witnesses](transaction-witnesses.md).
+The [connected examples](connected-examples.md) run complete test-network flows,
+including [staking and governance](connected-governance.md).
 The [API reference](api-reference.md) explains how to browse the declarations for the revision you build.
 
 ```{toctree}
@@ -54,6 +56,8 @@ transaction-witnesses
 providers
 blockfrost
 blockfrost-examples
+connected-examples
+connected-governance
 native-workflows
 coin-selection
 building-utilities

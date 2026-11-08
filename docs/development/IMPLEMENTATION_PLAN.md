@@ -18,6 +18,21 @@ Provide a complete, idiomatic Haskell interface to cardano-c. Applications shoul
 work with Haskell domain values and functions and should never need to allocate,
 retain, release, or dispose of C objects during ordinary use.
 
+Scope decision (2026-11-07): larger infrastructure is excluded. Do not plan
+local-node/Ouroboros clients, chain synchronization/rollback services, full ledger
+validation/emulation, devnet orchestration, additional built-in provider backends,
+or associated CLI/RPC/WASM applications. Existing provider injection, Blockfrost
+with custom endpoints, application-level query improvements and the native
+transaction evaluator remain in scope. Measure completeness against binding and
+application APIs; excluded infrastructure is not a release blocker.
+
+Seed/entropy generation is intentionally application-owned. Preserve this security
+boundary in cardano-c and its bindings: accept supplied entropy/key material for
+validation, conversion and derivation. Automatic seed-generation helpers are not
+a missing feature or a release requirement. Existing operational randomness for
+salts/nonces is unaffected. CIP-8 verification is a separate nice-to-have proposal;
+existing CIP-8 support provides signing.
+
 Agreed requirements:
 
 - Cover every applicable public cardano-c domain type, enum, and operation.
@@ -1223,22 +1238,56 @@ clarity. Compile real examples with explicit imports and logical spacing, and
 check failure, scope closure, and cancellation. Use the reference set above for
 specific contracts and factual comparisons, not claims of stylistic superiority.
 
-### 19.7 Test reuse follow-up
+### 19.7 Upstream properties through the Haskell binding
 
-Record reuse provenance (source commit, path and license/notices) for imported
-vectors, tests and generator code. Priority sources beyond the native corpus:
+Scope confirmed 2026-11-08: implement these tests primarily in cometa.hs. Haskell
+generators supply cases to public Cometa operations that invoke cardano-c; check
+the results against independent Haskell properties, reference implementations or
+upstream vectors. This exercises both marshaling and the underlying C library.
+Tests of pure Haskell operations remain useful but must be identified separately
+and must not count as native execution coverage.
 
-- [cardano-coin-selection tests](https://github.com/cardano-foundation/cardano-coin-selection/tree/main/test): balancing, collateral, token bundles and selection invariants.
-- [Atlas skeleton tests](https://github.com/geniusyield/atlas/blob/main/tests/GeniusYield/Test/GYTxSkeleton.hs): composition scenarios adapted to our own rules.
-- [sc-tools selection tests](https://github.com/input-output-hk/sc-tools/blob/main/src/coin-selection/test/Spec.hs): multi-address and script transaction scenarios.
-- [cardano-api generators](https://github.com/IntersectMBO/cardano-api/tree/master/cardano-api/gen/Test/Gen/Cardano): domain generators and optional independent comparison.
-- [Plutus conformance](https://github.com/IntersectMBO/plutus/tree/master/plutus-conformance): evaluator results and budgets with pinned compatible semantics/cost models.
+Prioritize the work in this order:
+
+| Priority | Source | Adaptation and acceptance |
+| --- | --- | --- |
+| 1. Coin selection | [cardano-coin-selection BalanceSpec](https://github.com/cardano-foundation/cardano-coin-selection/blob/main/test/spec/Cardano/CoinSelection/BalanceSpec.hs), its generators and collateral tests | Exercise the native selector. Check input membership/uniqueness, per-asset conservation, change minimum ADA, bundle/quantity limits, splitting conservation, known-solvable cases and insufficient funds. Account explicitly for applicable fees, mint/burn, deposits and refunds. |
+| 2. Ledger serialization and hashes | [Conway round trips](https://github.com/IntersectMBO/cardano-ledger/blob/master/eras/conway/impl/testlib/Test/Cardano/Ledger/Conway/Binary/RoundTrip.hs), era goldens and [Dijkstra witness tests](https://github.com/IntersectMBO/cardano-ledger/blob/master/eras/dijkstra/impl/testlib/Test/Cardano/Ledger/Dijkstra/Imp/SubUtxowSpec.hs) | Adapt generators and fixtures for native CBOR, hashes, witnesses, redeemer indices and script contexts. Compare semantic values or exact bytes according to each encoding contract. Cover malformed data and supported era boundaries. |
+| 3. Builder workflows | [cardano-api fee/witness tests](https://github.com/IntersectMBO/cardano-api/blob/master/cardano-api/test/cardano-api-test/Test/Cardano/Api/Experimental/Fee.hs), [sc-tools selection tests](https://github.com/input-output-hk/sc-tools/blob/main/src/coin-selection/test/Spec.hs), [Atlas selection tests](https://github.com/geniusyield/atlas/blob/main/tests/GeniusYield/Test/CoinSelection.hs) | Adapt multi-address payments, existing inputs, mint/burn, reference scripts, mixed-asset collateral and matching-index/deferred-redeemer scenarios. Test actual native building rather than only plan composition. |
+| 4. Addresses and cryptography | [cardano-addresses derivation tests](https://github.com/IntersectMBO/cardano-addresses/blob/master/test/Cardano/Address/DerivationSpec.hs), address tests and golden vectors | Exercise native derivation, encodings, signatures and bounds with independent vectors and properties. Preserve the application-owned entropy-generation boundary. |
+
+Use three complementary layers:
+
+- Fast property/unit tests in cometa.hs with reproducible seeds, meaningful case
+  classification and shrinking that preserves the relevant input constraints.
+- A separate test-only integration suite for heavier upstream comparisons and
+  ledger acceptance of C-built transactions against explicit ledger state. Pin
+  compatible era/protocol revisions. Do not add ledger infrastructure to the
+  public binding or make these tests depend on live network services.
+- Minimized permanent regressions: when a failure is in cardano-c, add its smallest
+  reproducer to cardano-c's unit tests as well as retaining the Haskell regression.
+  Binding-only defects get binding regressions. Native regression fixtures should
+  be reusable by other bindings where applicable.
 
 Retain imported QuickCheck properties where practical; prefer Hedgehog for new
-properties that benefit from integrated shrinking/state machines. Test selector
-invariants, not identical random choices. Save minimized failures as regression
-fixtures. Agreement with cardano-c detects binding errors but is not independent
-proof of native correctness; use external vectors/oracles where appropriate.
+properties that benefit from integrated shrinking/state machines. Equal seeds do
+not imply identical selections across different RNGs or iteration orders. Compare
+selector invariants; require exact selections only with a matched random-choice
+contract. Do not assume a heuristic must succeed for every mathematically feasible
+case without an upstream guarantee.
+
+Review the actual upstream contracts before copying tests. The reviewed repository
+licenses are Apache-2.0; verify the specific files and dependencies, retain required
+copyright/license/NOTICE material, and record the exact source commit, path and
+adaptations. Links above identify candidates, not completed imports. Import useful
+properties and generators without bringing whole application test frameworks into
+ordinary tests. Existing [Plutus conformance](https://github.com/IntersectMBO/plutus/tree/master/plutus-conformance)
+vectors remain a candidate for supported evaluator behavior with pinned cost models.
+
+Agreement between the binding and a direct call to the same C implementation
+checks binding correspondence, not independent native correctness. Every suite
+must state what executes in C and where its expected results come from. Track
+this work as planned until the adapted tests and validation evidence are committed.
 
 ### P04 fourth slice: password derivation and EMIP3 storage
 
@@ -2920,14 +2969,28 @@ JSON inspection retain explicit pending ledger entries; this is not a claim
 of complete Dijkstra building or live-network conformance.
 
 
-### Deferred ergonomics review
+### Deferred-redeemer ergonomics pass
 
-A future API ergonomics pass may introduce explicit `ToPlutusData` conversion
-for domain redeemers, keeping `Either Error` in deferred callbacks and preserving
-exact bytes for existing encoded values. This is intentionally deferred: current
-building work retains `EncodedPlutusData` and does not add generic derivation or
-implicit constructor-tag choices. Review schema compatibility and complete caller
-workflows before adopting the class.
+Scope updated 2026-11-08: include this work in the improved Haskell ergonomics
+pass. It is no longer postponed. Existing deferred callbacks and native index
+lookups already provide the underlying functionality; this pass adds Haskell
+conveniences without requiring new cardano-c APIs.
+
+- Review sc-tools and other relevant Haskell caller workflows before choosing
+  public names or abstractions. Demonstrate the improvement with complete examples.
+- Explore typed input/output references and composable helpers that resolve their
+  final indices from the balanced draft, avoiding repeated manual lookup code.
+- Review explicit domain-redeemer conversion, such as a justified `ToPlutusData`
+  abstraction. Do not introduce implicit constructor tags or generic derivation
+  without an explicit schema contract.
+- Preserve the existing callback API, exact bytes of encoded redeemers, total
+  lookup/error handling, and top-level versus subtransaction index semantics.
+- Test equivalence with explicit callbacks, reordered inputs, missing/ambiguous
+  references, all applicable script purposes, callback failures and cleanup.
+  Update runnable examples and Haddock with the accepted conveniences.
+
+These are planned improvements, not implemented API guarantees. Keep the existing
+single build-error boundary; do not require a new effects framework.
 
 
 ### P12: Dijkstra building and contextual accounting
@@ -3215,7 +3278,8 @@ check. Injected evaluators must implement subtransaction targets for such batche
 Next is the Blockfrost provider and applicable native example workflows (P13),
 followed by the remaining symbol/inspection audit and release hardening. This
 batch does not establish live-network Dijkstra acceptance. The ToPlutusData
-ergonomics proposal remains deferred to a separate API review.
+ergonomics proposal was deferred in this batch and is now included in the
+improved ergonomics pass above (2026-11-08).
 
 
 ### P13: Blockfrost provider and connected workflows
@@ -3388,7 +3452,8 @@ component with tests enabled and passes the same 493 tests.
 Live preprod validation is recorded below. Staking, governance and Dijkstra
 workflow cases above remain offline validation. P14 still covers the remaining native-symbol
 mapping audit, performance review and final cross-platform/release hardening.
-The deferred-redeemer ergonomics pass remains explicitly deferred. Newer remote
+Deferred-redeemer ergonomics were deferred here; the 2026-11-08 scope update
+above includes them in the improved ergonomics pass. Newer remote
 Blockfrost evaluation dialects are also not claimed by this implementation.
 
 
@@ -3575,3 +3640,172 @@ Haddock references pass; public declarations retain 100% documentation coverage.
 The source-package manifest contains the new sources, fixtures, notices, guides
 and examples. Hosted CI results are reviewed on the PR before another slice;
 these local checks do not by themselves establish the platform matrix.
+
+### P14 example parity and upstream capability audit
+
+The next review slice ports all 21 examples from Cometa.cpp revision
+`824ae8e8ac9adf113d957265532ae7ea37a628a3`. The exact source-to-entrypoint mapping,
+intentional configuration differences and execution evidence live in
+[the example parity record](EXAMPLE_PARITY.md). Connected runners require an
+explicit `--submit`; ordinary CI compiles them and exercises their credential-free
+usage paths. Staking/governance recipes have offline tests, but ledger state and
+on-chain acceptance must be validated independently on the selected network.
+
+The [Haskell capability audit](HASKELL_API_PARITY.md) compares pinned current
+sc-tools, Atlas, cardano-api and cardano-addresses sources. It extends the native
+symbol ledger: that ledger cannot establish parity with a node client, emulator,
+query service or code generator. Forty-two comparison groups distinguish
+implemented, partial and missing application workflows from excluded
+infrastructure. These are review groups, not a percentage denominator. Current cardano-api already includes experimental
+Dijkstra support; the comparison does not claim otherwise.
+
+The [delivery scope](HASKELL_API_PARITY.md#delivery-scope-native-coverage-and-idiomatic-transaction-construction)
+now determines completion: existing cardano-c domain coverage, all native-supported
+transaction constructions and small idiomatic Haskell conveniences. Complete the
+shared current-treasury-value and explicit/deferred proposal redeemer builders;
+reconcile the remaining symbol ledger using tested public equivalents rather than
+C-shaped wrappers. Expand the README with compiled examples across supported eras.
+
+Broader provider queries, standards absent from C, blueprints, upstream interop,
+CIP-8 verification and advanced VM tooling are future work. Seed generation and
+larger infrastructure remain excluded. Do not describe this narrower scope as
+full upstream-library parity. Record named acceptance tests and specific omissions.
+
+For each slice, review upstream source before API design, use idiomatic public
+values, preserve cancellation/resource safety, and add cross-library or independent
+vectors where possible. Native-oracle tests establish binding correspondence;
+independent ledger acceptance and upstream behavior need their own evidence.
+
+Local validation for this slice: GHC 9.6.7 builds every component. The 352 public,
+131 runtime and 48 Blockfrost tests pass; the HTTP tests require loopback sockets.
+The public suite passes Valgrind with zero errors and zero definitely, indirectly
+or possibly lost bytes. After the deferred recipe alignment, all 31 matching
+native tests pass again and the changed end-to-end workflows pass Valgrind again.
+All 17 connected entrypoints print usage without credentials, and the five
+recovery/swap/evaluation/deferred/Dijkstra offline programs run successfully.
+Ormolu, HLint, package checks, source manifest, native inventory, strict Sphinx
+HTML/link checks and both public Haddock references pass. Live execution results
+are maintained separately in the example parity record.
+
+Live V2 staking exposed duplicate script witnesses when independently composed
+certificate plans each attached the same script. Native evaluation succeeded,
+but the ledger rejected the duplicate CBOR set elements before execution. Shared
+plan normalization now coalesces attachments by language and script-hash preimage,
+retaining the first encoding and order. Both top-level and subtransaction builders
+use that normalization. Regressions cover native and V1–V4 scripts, distinct
+versions/programs, nonminimal outer Plutus framing, a used V2 witness and an
+actually evaluated V4 subtransaction. No cardano-c change is required by this fix.
+
+After the script-attachment fix, all components rebuild and all 533 tests pass
+(352 public, 133 runtime, 48 Blockfrost). The full runtime suite and all 11
+connected governance recipe tests pass Valgrind with zero errors and zero lost
+allocations. The public full-suite result above remains the broader lifecycle
+baseline; these targeted reruns exercise the changed normalization and live recipe.
+
+The related datum path also appended repeated witness data. Normalization now
+coalesces exact datum CBOR across explicit attachments and input arguments, after
+checking the original per-input declarations. Distinct hash-bearing encodings,
+input order and deferred callback indices remain unchanged. All components build
+and all 535 tests pass (352 public, 135 runtime, 48 Blockfrost). The 135-test
+runtime suite passes Valgrind with zero errors and zero lost allocations. The
+[PR validation record](https://github.com/Biglup/cometa.hs/pull/22) holds per-run
+preprod transaction and cleanup evidence separately from these deterministic checks.
+
+### Native construction completion and Haskell conveniences
+
+The [construction coverage record](TRANSACTION_CONSTRUCTION.md) maps the narrowed
+scope to public APIs and named test modules. Proposal and treasury API design
+reviewed cardano-api's ordered proposal witnesses and current-treasury setter
+before choosing matching operations in the existing plan monoid. Top/sub proposal
+callbacks retain local insertion indices and protocol deposits; policy-less actions
+require no evaluator. Shared functionality belongs in cardano-c, with a pinned
+native revision for reproducible builds.
+
+Standalone credential and digest CBOR uses pure checked semantic values. Invalid
+kind, shape, length and trailing input remain explicit failures. Existing encoding
+identity contracts for imported transactions are unchanged. New API-specific
+upstream reviews and final validation evidence are recorded below as integration
+completes; this section does not claim unrun checks.
+
+#### Existing-domain API review
+
+Value/codecs reviewed cardano-api `c2212851b06b9c2acc5bb0bfe1b8a8e8cf2be03a`
+(`Value/Internal.hs`) and Atlas `c3adfb416242ea25a244bfaa1614213eecdc55d9`
+(`Types/Value.hs`, `Types/Governance.hs`, `Types/DRep.hs`) before API design.
+Their callers assemble normalized signed maps and convert at checked ledger
+boundaries. Cometa similarly keeps arbitrary-precision algebra pure, while
+standalone native Value/mint CBOR checks signed native storage bounds. DRep text
+imports CIP-105 and CIP-129 with explicit prefix/header validation; action text
+rejects the native display format's index narrowing. `intersection` is an ordinary
+left-biased signed-map operation, not a disguised minimum or coin clamp.
+
+Native-script JSON follows the actual cardano-c construction schema, including
+its guard keyHash/scriptHash forms. Metadata plain JSON is a separate checked
+conversion from detailed metadata JSON and CIP-116 inspection: bytes, nontext keys
+and duplicate object keys fail rather than lose information. These helpers add
+no production native resources; test oracles rebuild typed public values.
+
+Building utilities reviewed cardano-api's `Tx/Internal/Fee.hs` and
+`Tx/Internal/Body.hs` at the same revision: actual witness sizes, reference script
+bytes and execution-unit prices are separate inputs. Pure size queries and exact
+`executionFee` retain that distinction; existing `minimumFee` remains the combined
+checked protocol-aware operation. Language-view encoding follows the historical
+V1 encoding and known V1–V4 ordering, with caller-selected cost models. Tests
+compare every language subset and integer boundary against native oracles.
+
+
+#### Windows HTTP fixture shutdown
+
+The previous PR22 Windows job timed out in the local HTTP fixture after the public
+suite had passed. Reviewed haskell/network
+[`v3.2.12.0`, Socket/Syscall.hs](https://github.com/haskell/network/blob/v3.2.12.0/Network/Socket/Syscall.hs):
+threaded Windows performs `accept` through a safe blocking FFI call. Cancelling
+that worker before closing its listener can wait indefinitely. The test fixture
+now closes sockets before cancellation and joins all workers with bounded waits.
+Accepted sockets are acquired while masked and registered before handlers are
+unmasked. No production provider transport behavior changes.
+
+All 49 Blockfrost tests pass locally. The final masked-acquisition form passes 20
+concurrent stress runs, including 400 idle-listener cleanup cycles. Windows CI
+must confirm the platform-specific result; Linux execution alone is not evidence
+that Windows has passed.
+
+
+#### Integrated validation of construction/domain completion
+
+All components build on GHC 9.6.7; all 554 tests pass (362 public, 143 runtime,
+49 Blockfrost). Each complete suite passes Valgrind with zero errors and zero
+bytes definitely, indirectly or possibly lost. All 54 credential-free example
+entrypoints run successfully, including offline scripts, governance and batches;
+connected runners print usage and do not submit. README Haskell blocks compile
+with `-Wall -Werror`. Ormolu, HLint, ClangFormat 18, package checks, native inventory,
+source manifest, strict Sphinx HTML/link checks and both portable Haddock references
+pass. Native prerequisite PR222 has 1,044 relevant local tests and seven focused
+allocation/ownership tests clean under Valgrind. Hosted matrix status remains a
+separate gate; Windows must confirm the fixture shutdown correction.
+
+Cometa.Inspection adds named domain operations instead of global JSON instances.
+Its 24 new operations cover values, scripts, credentials, certificates, governance,
+pool/protocol values, data, witnesses and metadata. Typed corpus projections check
+exact schema correspondence; malformed, truncated and trailing input, cleanup,
+GC survival and concurrency cover every dispatch operation. Inspection is not
+an inverse serialization or a ledger validity check.
+
+The ledger reconciles source-confirmed existing equivalents rather than reporting
+raw pending row count as missing user features. Lifecycle delegations were checked
+against native function bodies; no clone, cache or tag operation was blanket
+classified as plumbing. Remaining collection encodings and representation choices
+are recorded in TRANSACTION_CONSTRUCTION.md for the next completeness slice.
+The existing preprod record predates the new native pin; no additional on-chain
+execution is claimed by this validation.
+
+
+#### Merged native proposal support
+
+On 2026-11-08, cardano-c PR222 merged as
+`b98afee9de25c09f29d1c5fe4af3e538d1830d44`. The native dependency pin now
+references this merged revision. Its tree matches the validated PR head
+`a19dbc91`; the follow-up fixed MISRA, extended native regression coverage and
+documented the existing unit-redeemer defaults without changing the public ABI.
+The public API inventory is unchanged. Haskell Windows CI remains an independent
+open validation issue.

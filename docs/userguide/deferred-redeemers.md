@@ -51,7 +51,11 @@ build validation. Spending inputs and reward accounts likewise require one
 registration when their argument is deferred. Certificate arguments use
 `Plan.certificateWithDeferredRedeemer`; reward arguments use
 `Plan.withdrawWithDeferredRedeemer`, including zero withdrawals used only for
-script authorization.
+script authorization. Voting arguments use `Plan.voteWithDeferredRedeemer`;
+proposal arguments use `Plan.proposeWithDeferredRedeemer`. The latter requires a
+guardrails policy and can use `Indices.findProposal` to obtain its insertion
+position, counting proposals without scripts too. Subtransaction variants use
+the same rules with a local draft and local indices.
 
 `examples/DeferredRedeemers.hs` demonstrates an offline native mint, a callback
 that reads input count, output count and fee, and one error boundary. The small

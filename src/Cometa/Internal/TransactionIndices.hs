@@ -22,6 +22,7 @@ module Cometa.Internal.TransactionIndices
     findMintPolicy,
     findWithdrawal,
     findVote,
+    findProposal,
     findRedeemer,
     certificateBytes,
   )
@@ -37,6 +38,7 @@ import qualified Cometa.Address.Reward as Reward
 import Cometa.AssetId (AssetId (Ada))
 import qualified Cometa.Credential as Credential
 import Cometa.Evaluation (RedeemerId (..))
+import qualified Cometa.Governance.Proposal as Proposal
 import qualified Cometa.Governance.Voting as Voting
 import qualified Cometa.Internal.TransactionCbor as Cbor
 import qualified Cometa.NetworkId as Network
@@ -90,6 +92,9 @@ credentialKey authority = case authority of
 
 findVote :: Voting.Voter -> Fields.Fields -> Maybe Word64
 findVote voter = rank (voterKey voter) . map voterKey . Set.toList . Set.fromList . map (\(authority, _, _) -> authority) . maybe [] Voting.toList . Fields.fieldVotingProcedures
+
+findProposal :: Proposal.Proposal -> Fields.Fields -> Maybe Word64
+findProposal proposal = position ((== Proposal.encodeCbor proposal) . Proposal.encodeCbor) . maybe [] Proposal.toList . Fields.fieldProposalProcedures
 
 voterKey :: Voting.Voter -> ByteString
 voterKey voter = case voter of

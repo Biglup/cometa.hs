@@ -37,6 +37,20 @@ witness estimation, input selection, change and fee balancing together.
 specified unique outputs. Unlike `minimumFee`, this independent function has no
 transaction against which to check the reference list.
 
+## Sizes and execution budgets
+
+`coinSize`, `outputSize`, `scriptSize` and `transactionSize` inspect existing
+owned values without native effects. Sizes are bytes. `transactionSize` includes
+the validity flag when present; `baseFee` uses the ledger fee size, which excludes
+that flag. `scriptSize` measures exact native-script CBOR or compiled Plutus bytes,
+excluding the reference-script language envelope and the outer Plutus bytestring.
+
+`totalExecutionUnits redeemers` sums declared memory and CPU budgets with checked
+unsigned 64-bit totals. Include nested redeemers explicitly when inspecting a
+batch. `executionFee prices total` calculates the ceiling of the exact combined
+memory and CPU charge once. It excludes reference-script fees and does not run
+scripts. Totals and fees report overflow instead of wrapping.
+
 ## Script-data commitments
 
 `scriptDataHash costModels witnesses` returns the script-data hash, or `Nothing`
@@ -44,6 +58,11 @@ when there are no redeemers or datums. Supply cost models only for the languages
 used by the transaction. Every supplied language view contributes when redeemers
 are present. Datum-only witnesses use an empty redeemer collection and no
 language views. Exact datum and redeemer encodings matter to the commitment.
+
+`CostModels.encodeLanguageViews` exposes the language-view CBOR used for this
+commitment. V1 retains its historical bytestring-wrapped indefinite cost array;
+V2 through V4 use ordinary cost arrays. Unknown language identifiers do not
+contribute. Supply only the languages actually used by the transaction.
 
 The result does not update the body's script-data-hash field. Recompute it when
 redeemer arguments, execution budgets, datums or relevant cost models change.

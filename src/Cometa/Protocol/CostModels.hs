@@ -32,6 +32,7 @@ module Cometa.Protocol.CostModels
     encodeCostModelCbor,
     decodeCostModelCbor,
     encodeCbor,
+    encodeLanguageViews,
     decodeCbor,
   )
 where
@@ -89,3 +90,13 @@ encodeCbor = Internal.encodeBytes Model.encodeCostModels
 -- 'Cometa.Error.InvalidProtocolCbor'.
 decodeCbor :: ByteString -> Either Error CostModels
 decodeCbor = Internal.decodeBytes Model.decodeCostModels
+
+-- | Encode the script-integrity language-view map for known Plutus languages
+-- V1 through V4 (identifiers 0 through 3). Unknown language identifiers are
+-- omitted from the script-data commitment. Supply only languages
+-- actually used by the transaction; this operation does not select them or
+-- validate parameter counts for execution. V1 uses the historical bytestring
+-- key and bytestring-wrapped indefinite cost array, after the other languages.
+-- This encoding differs from the protocol parameter map returned by 'encodeCbor'.
+encodeLanguageViews :: CostModels -> ByteString
+encodeLanguageViews = Internal.encodeBytes Model.encodeLanguageViews

@@ -28,6 +28,7 @@ import qualified Cometa.Protocol.PoolVotingThresholds as Pool
 import qualified Cometa.Protocol.Rational as Rational
 import qualified Cometa.Protocol.Version as Version
 import qualified Cometa.UnitInterval as Unit
+import Data.Bits (testBit)
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as BS
 import Data.Either (isLeft)
@@ -55,6 +56,7 @@ tests =
       testCase "tuple bounds and malformed CBOR" checkBounds,
       testCase "pinned native corpus values and invalid rational regression" checkCorpus,
       testCase "future cost language, signed costs and replacement" checkCosts,
+      testCase "language views preserve V1 encoding and match native subsets" checkLanguageViews,
       testCase "typed native construction agrees with all foundational codecs" checkNative,
       testProperty "exact fractions preserve pairs and numeric order" propFractions,
       testProperty "full-width budgets agree with typed native construction" propBudgets
@@ -189,3 +191,21 @@ oracle kind first second = allocaBytes 1024 $ \output -> alloca $ \size -> do
 
 foreign import ccall unsafe "cometa_test_protocol_values_oracle"
   cOracle :: Word8 -> Word64 -> Word64 -> Ptr Word8 -> CSize -> Ptr CSize -> IO CInt
+
+-- Native oracle: pinned costmdls.c, known language views; exact V1 bytes are
+-- independently stated below, including the historical indefinite-array defect.
+checkLanguageViews :: IO ()
+checkLanguageViews = do
+  Costs.encodeLanguageViews Costs.empty @?= BS.singleton 0xa0
+  one <- expectRight (Costs.mkCostModel 0 [1, -2])
+  Costs.encodeLanguageViews (Costs.fromList [one])
+    @?= BS.pack [0xa1, 0x41, 0, 0x44, 0x9f, 1, 0x21, 0xff]
+  forEachMask [0 .. 31]
+  where
+    forEachMask = traverse_ $ \mask -> do
+      models <-
+        traverse
+          (\language -> expectRight (Costs.mkCostModel language [minBound, -1, 0, maxBound]))
+          [if bit == 4 then 255 else fromIntegral bit | bit <- [0 .. 4], testBit mask bit]
+      native <- oracle 7 mask 0
+      Costs.encodeLanguageViews (Costs.fromList models) @?= native

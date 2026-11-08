@@ -30,12 +30,14 @@ import qualified Cometa.Script.Plutus as Plutus
 import Control.Concurrent (forkFinally, newEmptyMVar, putMVar, takeMVar, throwTo)
 import Control.Exception (AsyncException (ThreadKilled), fromException)
 import Control.Monad (forM_, forever, replicateM_)
+import qualified Data.Aeson as Aeson
 import qualified Data.ByteString as ByteString
+import qualified Data.ByteString.Lazy as Lazy
 import Data.Either (isLeft)
 import qualified Data.Text as Text
 import Data.Word (Word64, Word8)
 import qualified Fixtures.Scripts as Fixtures
-import Foreign.C.Types (CInt (..), CSize (..))
+import Foreign.C.Types (CChar, CInt (..), CSize (..))
 import Foreign.Ptr (Ptr, castPtr)
 import Hedgehog (Property, evalEither, evalIO, forAll, property, (===))
 import qualified Hedgehog.Gen as Gen
@@ -52,7 +54,8 @@ tests :: TestTree
 tests =
   testGroup
     "Scripts"
-    [ testCase "all native alternatives assemble to pinned bytes and agree with native hash" checkNative,
+    [ testCase "native script construction JSON validates every alternative" checkJson,
+      testCase "all native alternatives assemble to pinned bytes and agree with native hash" checkNative,
       testCase "threshold and slot extrema retain full unsigned range" checkBounds,
       testCase "native imported encodings and child identity remain exact" checkIdentity,
       testCase "native parser rejects malformed alternatives, credentials and trailing input" checkInvalidNative,
@@ -292,3 +295,24 @@ expectRight result = case result of
 
 foreign import ccall safe "cometa_test_script_agreement"
   cAgreement :: Ptr Word8 -> CSize -> Ptr Word8 -> Ptr Word8 -> CSize -> IO CInt
+
+checkJson :: IO ()
+checkJson = do
+  key <- expectRight (Credential.keyHashFromBytes (ByteString.replicate 28 7))
+  guardKey <- expectRight (Credential.keyHashFromBytes (ByteString.replicate 28 8))
+  guardScript <- expectRight (Credential.scriptHashFromBytes (ByteString.replicate 28 9))
+  let sig = Native.signature key
+      scripts = [sig, Native.allOf [], Native.anyOf [sig, sig], Native.atLeast maxBound [sig], Native.invalidBefore maxBound, Native.invalidAfter 0, Native.requireGuard (Credential.KeyCredential guardKey), Native.requireGuard (Credential.ScriptCredential guardScript)]
+  forM_ (Native.allOf scripts : scripts) $ \script -> do
+    let json = Native.toJson script
+    Native.fromJson json @?= Right script
+    ByteString.useAsCStringLen (Lazy.toStrict (Aeson.encode json)) $ \(jsonPtr, jsonSize) ->
+      ByteString.useAsCStringLen (Native.encodeCbor script) $ \(expected, expectedSize) -> do
+        agrees <- cScriptJson jsonPtr (fromIntegral jsonSize) (castPtr expected) (fromIntegral expectedSize)
+        agrees @?= 1
+  forM_ ["{}", "[]", "{\"type\":\"unknown\"}", "{\"type\":\"before\",\"slot\":-1}", "{\"type\":\"after\",\"slot\":18446744073709551616}", "{\"type\":\"atLeast\",\"required\":1.5,\"scripts\":[]}", "{\"type\":\"guard\",\"keyHash\":\"00\",\"scriptHash\":\"00\"}", "{\"type\":\"sig\",\"keyHash\":\"zz\"}", "{\"type\":\"all\",\"scripts\":[{}]}"] $ \encoded -> do
+    json <- expectRight (Aeson.eitherDecodeStrict encoded)
+    assertBool "invalid script construction JSON" (isLeft (Native.fromJson json))
+
+foreign import ccall safe "cometa_test_native_script_json"
+  cScriptJson :: Ptr CChar -> CSize -> Ptr Word8 -> CSize -> IO CInt

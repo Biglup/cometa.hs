@@ -22,6 +22,7 @@ module Cometa.Internal.CostModels
     encodeCostArray,
     decodeCostArray,
     encodeCostModels,
+    encodeLanguageViews,
     decodeCostModels,
   )
 where
@@ -30,8 +31,10 @@ where
 
 import qualified Codec.CBOR.Decoding as Decode
 import qualified Codec.CBOR.Encoding as Encode
+import qualified Codec.CBOR.Write as Write
 import Cometa.Error (Error (InvalidCostModelLength))
 import Control.Monad (replicateM)
+import qualified Data.ByteString as ByteString
 import Data.Int (Int64)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
@@ -111,3 +114,20 @@ decodeCostModels = do
         else do
           entry <- decodeEntry
           indefiniteEntries (entry : entries)
+
+-- | Ledger language views preserve the historical Plutus V1 encoding defect.
+-- Only known native language ids contribute to the commitment.
+encodeLanguageViews :: CostModels -> Encode.Encoding
+encodeLanguageViews (CostModels models) =
+  Encode.encodeMapLen (fromIntegral (Map.size known))
+    <> foldMap encodeEntry (Map.toAscList (Map.delete 0 known))
+    <> maybe mempty encodeV1 (Map.lookup 0 known)
+  where
+    known = Map.filterWithKey (\language _ -> language <= 3) models
+    encodeEntry (language, model) = Encode.encodeWord8 language <> encodeCostArray model
+    encodeV1 model =
+      Encode.encodeBytes (ByteString.singleton 0)
+        <> Encode.encodeBytes
+          ( Write.toStrictByteString
+              (Encode.encodeListLenIndef <> foldMap Encode.encodeInt64 (costs model) <> Encode.encodeBreak)
+          )

@@ -26,7 +26,7 @@ import qualified Cometa.Provider.Blockfrost.Internal.Config as Config
 import qualified Cometa.Provider.Blockfrost.Internal.Http as Http
 import Control.Concurrent (forkFinally, killThread, threadDelay, yield)
 import Control.Concurrent.MVar (modifyMVar_, newEmptyMVar, newMVar, putMVar, readMVar, takeMVar, tryPutMVar, tryTakeMVar)
-import Control.Exception (AsyncException (ThreadKilled), bracket, finally, fromException)
+import Control.Exception (AsyncException (ThreadKilled), bracket, finally, fromException, mask)
 import Control.Monad (forM_, forever, void)
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as B
@@ -61,6 +61,7 @@ tests =
   testGroup
     "Blockfrost HTTP transport"
     [ testCase "opaque credentials and bounded schedules reject unsafe input" configuration,
+      testCase "fixture cleanup joins an idle listener without a client" fixtureCleanup,
       testCase "public provider uses custom base paths with optional credentials" customEndpoints,
       testCase "custom endpoint queries survive pagination and selected network magic" endpointQueries,
       testCase "invalid URLs fail before callback without echoing secrets" invalidEndpoints,
@@ -292,17 +293,25 @@ waitClosed transport = do
     Left failure -> assertFailure (show failure)
     Right () -> yield >> waitClosed transport
 
+-- A listener with no incoming connection must still terminate within the fixture
+-- deadline. On threaded Windows, accept is a safe blocking FFI call: sending an
+-- asynchronous exception before closing its socket would wait indefinitely.
+fixtureCleanup :: IO ()
+fixtureCleanup = within $ forM_ [1 .. 20 :: Int] $ \_ ->
+  withServer (\_ -> pure (response 200 "unused" [])) (\_ -> threadDelay 1000)
+
 -- A local HTTP fixture owns its listener, accept worker and every connection
 -- worker. No public endpoint is contacted, and only a fixed fake project ID is used.
 withServer :: (WireRequest -> IO ByteString) -> (String -> IO a) -> IO a
-withServer handler action = Socket.withSocketsDo $ bracket open Socket.close $ \listener -> do
+withServer handler action = Socket.withSocketsDo $ bracket open Socket.close $ \listener -> mask $ \restore -> do
   address <- Socket.getSocketName listener
   port <- case address of
     Socket.SockAddrInet value _ -> pure value
     _ -> assertFailure "unexpected fixture socket family" >> fail "fixture"
   workers <- newMVar []
-  bracket (forkFinally (acceptLoop listener workers) (const (pure ()))) (stop workers) $ \_ ->
-    action ("http://127.0.0.1:" <> show port <> "/api/v0")
+  accepted <- newEmptyMVar
+  bracket (forkFinally (restore (acceptLoop listener workers)) (const (putMVar accepted ()))) (stop listener workers accepted) $ \_ ->
+    restore (action ("http://127.0.0.1:" <> show port <> "/api/v0"))
   where
     open = do
       listener <- Socket.socket Socket.AF_INET Socket.Stream Socket.defaultProtocol
@@ -310,13 +319,19 @@ withServer handler action = Socket.withSocketsDo $ bracket open Socket.close $ \
       Socket.bind listener (Socket.SockAddrInet 0 (Socket.tupleToHostAddress (127, 0, 0, 1)))
       Socket.listen listener 8
       pure listener
-    acceptLoop listener workers = forever $ do
+    acceptLoop listener workers = forever $ mask $ \restore -> do
       (connection, _) <- Socket.accept listener
-      worker <- forkFinally (receive connection >>= handler >>= Socket.sendAll connection) (const (Socket.close connection))
-      modifyMVar_ workers (pure . (worker :))
-    stop workers acceptWorker = do
-      killThread acceptWorker
-      readMVar workers >>= mapM_ killThread
+      finished <- newEmptyMVar
+      worker <- forkFinally (restore (receive connection >>= handler >>= Socket.sendAll connection)) (const (Socket.close connection `finally` putMVar finished ()))
+      modifyMVar_ workers (pure . ((connection, worker, finished) :))
+    stop listener workers accepted acceptWorker = do
+      -- Close sockets before throwing: Windows blocking accept/recv calls are
+      -- safe FFI calls and cannot deliver asynchronous exceptions until return.
+      (Socket.close listener >> void (within (killThread acceptWorker >> takeMVar accepted)))
+        `finally` do
+          connections <- readMVar workers
+          mapM_ (\(connection, _, _) -> Socket.close connection) connections
+          within (mapM_ (\(_, worker, finished) -> killThread worker >> takeMVar finished) connections)
 
 receive :: Socket.Socket -> IO WireRequest
 receive connection = do

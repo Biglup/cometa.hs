@@ -1,3 +1,4 @@
+{-# LANGUAGE ForeignFunctionInterface #-}
 -- Copyright 2026 Biglup Labs
 -- SPDX-License-Identifier: Apache-2.0
 --
@@ -30,7 +31,7 @@ import qualified Cometa.AssetName as AssetName
 import qualified Cometa.Certificate as Certificate
 import qualified Cometa.Certificate.Collection as Certificates
 import qualified Cometa.Credential as Credential
-import Cometa.Error (Error (NativeError))
+import Cometa.Error (Error (InvalidExUnits, NativeError))
 import qualified Cometa.Error.Code as Code
 import qualified Cometa.Internal.Building as Internal
 import qualified Cometa.Internal.ParameterSnapshot as Snapshot
@@ -39,10 +40,12 @@ import qualified Cometa.PlutusData as Data
 import qualified Cometa.PolicyId as Policy
 import qualified Cometa.Pool.Parameters as Pool
 import qualified Cometa.Protocol.CostModels as Models
+import qualified Cometa.Protocol.ExUnitPrices as Prices
 import qualified Cometa.Protocol.ExUnits as Ex
 import qualified Cometa.Protocol.Parameters as Parameters
 import qualified Cometa.Protocol.Rational as Rational
 import qualified Cometa.Script as Script
+import qualified Cometa.Script.Native as Native
 import qualified Cometa.Script.Plutus as Plutus
 import qualified Cometa.SubTransaction as Sub
 import qualified Cometa.SubTransaction.Body as SubBody
@@ -64,7 +67,12 @@ import qualified Data.ByteString as B
 import Data.Either (isLeft)
 import qualified Data.Set as Set
 import qualified Data.Text
+import Data.Word (Word64, Word8)
 import qualified Fixtures.ProtocolParameters as Fixture
+import Foreign.C.Types (CInt (..), CSize (..))
+import Foreign.Marshal.Alloc (alloca)
+import Foreign.Ptr (Ptr, castPtr)
+import Foreign.Storable (peek)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertBool, assertFailure, testCase, (@?=))
 
@@ -74,7 +82,9 @@ tests :: TestTree
 tests =
   testGroup
     "Transaction building utilities"
-    [ testCase "outer, local intent and complete batch accounting agree" checkBalance,
+    [ testCase "serialization sizes agree with native and retain exact encodings" checkSizes,
+      testCase "execution totals and exact pricing reject overflow" checkExecution,
+      testCase "outer, local intent and complete batch accounting agree" checkBalance,
       testCase "balance includes mint, withdrawals and direct account deposits" checkAccountBalance,
       testCase "pool deposits are charged once across a batch" checkPoolBatch,
       testCase "balance rejects unresolved, duplicate and overflowing inputs" checkBalanceErrors,
@@ -319,3 +329,81 @@ checkBalanceErrors = do
       second = Utxo.utxo (Input.input otherId 0) large
   overflow <- transaction (Body.body [Utxo.input first, Utxo.input second] [] 0)
   Building.batchImbalance parameters [first, second] overflow >>= assertBool "overflow accepted" . isLeft
+
+-- Independent calculations from the pinned native fee.c, exercised through
+-- standalone native owners in test/cbits/runtime_oracle.c. Apache-2.0.
+checkSizes :: IO ()
+checkSizes = do
+  forM_ [(0, 1), (23, 1), (24, 2), (255, 2), (256, 3), (65535, 3), (65536, 5), (4294967295, 5), (4294967296, 9), (maxBound, 9)] $ \(coin, expected) -> do
+    Building.coinSize coin @?= expected
+    alloca $ \size -> do
+      cCoinSize coin size >>= (@?= 0)
+      peek size >>= (@?= fromIntegral expected)
+  (_, resolved) <- fixture
+  let output = Utxo.output resolved
+  nativeSize 1 (Output.encodeCbor output) >>= (@?= fromIntegral (Building.outputSize output))
+  minimal <- must (Native.decodeCbor (B.pack [0x82, 5, 1]))
+  retained <- must (Native.decodeCbor (B.pack [0x82, 5, 0x1b, 0, 0, 0, 0, 0, 0, 0, 1]))
+  Building.scriptSize (Script.Native minimal) @?= 3
+  Building.scriptSize (Script.Native retained) @?= 11
+  plutus <- must (Plutus.decodeCbor Plutus.V4 (B.pack [0x58, 2, 1, 2]))
+  Building.scriptSize (Script.Plutus plutus) @?= 2
+  forM_ [Script.Native minimal, Script.Native retained, Script.Plutus plutus] $ \script ->
+    nativeSize 2 (Script.encodeCbor script) >>= (@?= fromIntegral (Building.scriptSize script))
+  tx <- transaction (Body.body [] [output] 0)
+  nativeSize 0 (Tx.encodeCbor tx) >>= (@?= fromIntegral (Building.transactionSize tx))
+  -- The retained three-element frame has no validity flag to count.
+  legacy <- must (Tx.decodeCbor (B.pack [0x83, 0xa3, 0, 0x80, 1, 0x80, 2, 0, 0xa0, 0xf6]))
+  nativeSize 0 (Tx.encodeCbor legacy) >>= (@?= fromIntegral (Building.transactionSize legacy))
+
+checkExecution :: IO ()
+checkExecution = do
+  Building.totalExecutionUnits [] @?= Right (Ex.ExUnits 0 0)
+  let argument = Data.fromData (Data.Integer 0)
+      redeemer memory steps = Redeemer.Redeemer Redeemer.Spending 0 argument (Ex.ExUnits memory steps)
+  Building.totalExecutionUnits [redeemer 1 2, redeemer 3 4] @?= Right (Ex.ExUnits 4 6)
+  Building.totalExecutionUnits [redeemer maxBound 0] @?= Right (Ex.ExUnits maxBound 0)
+  Building.totalExecutionUnits [redeemer maxBound 0, redeemer 1 0] @?= Left (InvalidExUnits (2 ^ (64 :: Int)) 0)
+  Building.totalExecutionUnits [redeemer 0 maxBound, redeemer 0 1] @?= Left (InvalidExUnits 0 (2 ^ (64 :: Int)))
+  memoryPrice <- must (Rational.mkNonNegativeRational 7 3)
+  stepPrice <- must (Rational.mkNonNegativeRational 11 7)
+  let prices = Prices.ExUnitPrices memoryPrice stepPrice
+  encoded <- must (Body.fromBody (Body.body [] [] 0))
+  forM_ [(0, 0), (1, 0), (0, 1), (1, 1), (3, 7), (100000, 100000)] $ \(memory, steps) -> do
+    let budget = Ex.ExUnits memory steps
+    witnesses <- Witnesses.fromWitnesses <$> must (Witnesses.mkWitnesses [] [] [] [] [redeemer memory steps])
+    let tx = Tx.assemble encoded witnesses Nothing
+    expected <- nativeSize 3 (Tx.encodeCbor tx)
+    Building.executionFee prices budget @?= Right expected
+  localBody <- must (SubBody.fromBody (SubBody.body [] []))
+  localWitnesses <- Witnesses.fromWitnesses <$> must (Witnesses.mkWitnesses [] [] [] [] [redeemer 2 6])
+  outerWitnesses <- Witnesses.fromWitnesses <$> must (Witnesses.mkWitnesses [] [] [] [] [redeemer 1 1])
+  let local = Sub.setWitnesses localWitnesses (Sub.fromBody localBody)
+  enclosingBody <- must (Body.fromBody ((Body.body [] [] 0) {Body.bodySubTransactions = Just [local]}))
+  let enclosing = Tx.assemble enclosingBody outerWitnesses Nothing
+  total <- must (Building.totalExecutionUnits [redeemer 1 1, redeemer 2 6])
+  nativeSize 3 (Tx.encodeCbor enclosing) >>= (@?= 18)
+  Building.executionFee prices total @?= Right 18
+  Building.executionFee prices (Ex.ExUnits 3 7) @?= Right 18
+  half <- must (Rational.mkNonNegativeRational 1 2)
+  Building.executionFee (Prices.ExUnitPrices half half) (Ex.ExUnits 1 1) @?= Right 1
+  tiny <- must (Rational.mkNonNegativeRational 1 (toInteger (maxBound :: Word64)))
+  almostOne <- must (Rational.mkNonNegativeRational (toInteger (maxBound :: Word64) - 1) (toInteger (maxBound :: Word64)))
+  Building.executionFee (Prices.ExUnitPrices tiny almostOne) (Ex.ExUnits 1 1) @?= Right 1
+  largest <- must (Rational.mkNonNegativeRational (toInteger (maxBound :: Word64)) 1)
+  zero <- must (Rational.mkNonNegativeRational 0 1)
+  let expensive = Prices.ExUnitPrices largest zero
+  Building.executionFee expensive (Ex.ExUnits 0 0) @?= Right 0
+  Building.executionFee expensive (Ex.ExUnits 1 0) @?= Right maxBound
+  assertBool "fee overflow" (isLeft (Building.executionFee expensive (Ex.ExUnits 2 0)))
+
+nativeSize :: Word8 -> B.ByteString -> IO Word64
+nativeSize kind bytes = B.useAsCStringLen bytes $ \(input, size) -> alloca $ \output -> do
+  cBuildingSize kind (castPtr input) (fromIntegral size) output >>= (@?= 0)
+  peek output
+
+foreign import ccall unsafe "cometa_test_building_sizes_oracle"
+  cBuildingSize :: Word8 -> Ptr Word8 -> CSize -> Ptr Word64 -> IO CInt
+
+foreign import ccall unsafe "cardano_get_serialized_coin_size"
+  cCoinSize :: Word64 -> Ptr CSize -> IO CInt

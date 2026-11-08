@@ -1,7 +1,8 @@
-# Inspect transactions as JSON
+# Inspect Cardano values as JSON
 
-Use `Cometa.Transaction.Inspection` to obtain a JSON domain view of a transaction
-or one of its bodies. Each operation returns `IO (Either Error Value)` and reports
+Use `Cometa.Inspection` to obtain JSON domain views of transactions and standalone
+Cardano values. The existing `Cometa.Transaction.Inspection` module continues to
+provide the transaction and body operations. Each operation returns `IO (Either Error Value)` and reports
 native conversion failures explicitly.
 
 ```haskell
@@ -37,3 +38,43 @@ constructs a small transaction and inspects its integer and byte-string datum:
 The native extensions are inspected consistently with the pinned native library;
 they do not imply that a published CIP-116 schema covers every newer ledger field.
 JSON object key order is insignificant, while array order remains observable.
+
+## Standalone values
+
+The same inspection module provides named operations for values, scripts,
+credentials, certificates, governance actions and proposals, pool parameters,
+protocol updates, Plutus data, outputs, witnesses, resolved UTxOs, DReps, action
+identifiers, anchors, voting procedures, metadata, auxiliary data, input references
+and redeemers. Each accepts its corresponding typed
+public value, performs no network queries and returns an owned `Aeson.Value`.
+`Inspection.datum` additionally represents absence: `NoDatum` returns `Nothing`
+without a native allocation; datum hashes and inline data return `Just` the
+corresponding tagged JSON object.
+
+`Inspection.script` includes a tagged wrapper. `Inspection.nativeScript` and
+`Inspection.plutusScript` return its payload directly: native script conditions,
+or the Plutus language and compiled bytes. Native-script inspection uses CIP-116
+JSON; it differs from `Native.toJson`/`Native.fromJson` construction JSON.
+
+`Inspection.value` allows signed native-asset quantities within signed 64-bit
+bounds, while Ada must be nonnegative. A transaction output uses the stricter
+validated `Output` type. Invalid or overflowing native quantities fail before
+inspection. `Inspection.plutusData` retains arbitrary integer meaning, map order
+and duplicate map keys in the JSON representation.
+
+Standalone results use the same field schemas as those nested inside transaction
+inspection. This does not make a standalone subtype interchangeable with a tagged
+parent wrapper or make JSON an exact replacement for the original CBOR.
+
+`Inspection.metadatum` and `Inspection.metadata` use CIP-116 tags and ordered
+label/value arrays. They are separate from the plain and detailed JSON codecs in
+`Cometa.Metadata`. Nested metadata maps retain duplicate keys and pair order.
+`Inspection.auxiliaryData` includes metadata and auxiliary scripts while keeping
+the exact source bytes and auxiliary-data hash unchanged.
+
+For an ordinary list whose native schema is a plain JSON array, traverse the
+corresponding element inspector and render the resulting list with Aeson. Native
+script lists, certificate sets and redeemer lists use those array schemas; no
+additional collection-specific interface is needed. Metadata lists and maps have
+tagged schemas: inspect `Metadata.list values` or `Metadata.map pairs` as a
+metadatum instead.

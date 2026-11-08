@@ -19,25 +19,67 @@ module TransactionInspection (tests) where
 
 -- IMPORTS --------------------------------------------------------------------
 
+import qualified Codec.CBOR.Encoding as Encoding
+import qualified Codec.CBOR.Write as Write
+import qualified Cometa.Address as Address
+import qualified Cometa.Address.Reward as Reward
+import qualified Cometa.Address.Shelley as Shelley
+import qualified Cometa.AssetId as Asset
+import qualified Cometa.AssetName as AssetName
+import qualified Cometa.Certificate as Certificate
+import qualified Cometa.Certificate.Collection as Certificates
+import qualified Cometa.Credential as Credential
+import qualified Cometa.Governance.Action as Action
+import qualified Cometa.Governance.ActionId as ActionId
+import qualified Cometa.Governance.Anchor as Anchor
+import qualified Cometa.Governance.Committee as Committee
+import qualified Cometa.Governance.Constitution as Constitution
+import qualified Cometa.Governance.DRep as DRep
+import qualified Cometa.Governance.Proposal as Proposal
+import qualified Cometa.Governance.Voting as Voting
+import qualified Cometa.Inspection as Standalone
 import qualified Cometa.Internal.Hex as Hex
 import qualified Cometa.Internal.Inspection as Internal
+import qualified Cometa.Metadata as Metadata
+import qualified Cometa.NetworkId as Network
 import qualified Cometa.PlutusData as Data
+import qualified Cometa.PolicyId as PolicyId
+import qualified Cometa.Pool.Parameters as Pool
+import qualified Cometa.Protocol.ExUnits as ExUnits
+import qualified Cometa.Protocol.Parameters.Update as Update
+import qualified Cometa.Protocol.Version as Version
+import qualified Cometa.Script as Script
+import qualified Cometa.Script.Native as Native
+import qualified Cometa.Script.Plutus as Plutus
 import qualified Cometa.SubTransaction as Sub
 import qualified Cometa.SubTransaction.Body as SubBody
 import qualified Cometa.Transaction as Tx
+import qualified Cometa.Transaction.AuxiliaryData as Auxiliary
 import qualified Cometa.Transaction.Body as Body
+import qualified Cometa.Transaction.Datum as Datum
+import qualified Cometa.Transaction.Fields as Fields
+import qualified Cometa.Transaction.Input as Input
 import qualified Cometa.Transaction.Inspection as Inspection
+import qualified Cometa.Transaction.Output as Output
+import qualified Cometa.Transaction.Redeemer as Redeemer
+import qualified Cometa.Transaction.Utxo as Utxo
 import qualified Cometa.Transaction.Witnesses as Witnesses
+import qualified Cometa.TransactionId as TxId
+import qualified Cometa.UnitInterval as Unit
+import qualified Cometa.Value as Coin
 import Control.Concurrent (forkFinally, newEmptyMVar, putMVar, takeMVar)
-import Control.Exception (SomeException, throwIO)
+import Control.Exception (SomeException, evaluate, throwIO)
 import Control.Monad (forM, forM_, replicateM, replicateM_, (>=>))
-import Data.Aeson (Value (..), eitherDecodeStrict', encode, object, (.=))
+import Data.Aeson (Value (..), eitherDecodeStrict', encode, object, toJSON, (.=))
 import Data.Aeson.Key (Key)
 import qualified Data.Aeson.KeyMap as KeyMap
 import qualified Data.ByteString as B
+import qualified Data.ByteString.Lazy as Lazy
 import Data.Either (isLeft)
 import Data.Foldable (toList)
+import qualified Data.Map.Strict as Map
 import Data.Maybe (fromMaybe)
+import qualified Data.Set as Set
 import qualified Data.Text as Text
 import qualified Fixtures.Inspection as Fixture
 import System.Mem (performGC)
@@ -50,7 +92,9 @@ tests :: TestTree
 tests =
   testGroup
     "Transaction JSON inspection"
-    [ testCase "complete pinned Conway/Dijkstra and native rich JSON matches" corpus,
+    [ testCase "standalone values match typed fields of pinned transaction JSON" standaloneCorpus,
+      testCase "standalone governance, certificates, pools and protocol fields" standaloneDomains,
+      testCase "complete pinned Conway/Dijkstra and native rich JSON matches" corpus,
       testCase "inspection leaves exact bytes, transaction IDs and signatures unchanged" identities,
       testCase "arbitrary integers and binary data retain their JSON meaning" largeValues,
       testCase "malformed, truncated and trailing CBOR fail on every native entrypoint" failures,
@@ -131,11 +175,12 @@ largeValues = do
   let transaction = Tx.assemble body (Witnesses.fromWitnesses witnesses) Nothing
       expected = object ["body" .= object ["inputs" .= ([] :: [Value]), "outputs" .= ([] :: [Value]), "fee" .= ("18446744073709551615" :: Text.Text)], "is_valid" .= True, "witness_set" .= object ["plutus_data" .= [expectedDatum]]]
   Inspection.transaction transaction >>= (@?= Right expected)
+  Standalone.plutusData datum >>= (@?= Right expectedDatum)
 
 failures :: IO ()
 failures = do
   let invalid = [B.empty, B.singleton 0xff, B.singleton 0xa1, B.singleton 0xf6]
-  replicateM_ 25 $ forM_ [0 .. 3] $ \kind -> forM_ invalid (Internal.runUnchecked kind >=> (assertBool "Malformed CBOR inspection succeeded" . isLeft))
+  replicateM_ 25 $ forM_ [0 .. 25] $ \kind -> forM_ invalid (Internal.runUnchecked kind >=> (assertBool "Malformed CBOR inspection succeeded" . isLeft))
   forM_ Fixture.fixtures $ \fixture -> do
     (transaction, _) <- load fixture
     Internal.runUnchecked 0 (Tx.encodeCbor transaction <> B.singleton 0) >>= assertBool "Trailing transaction bytes accepted" . isLeft
@@ -143,7 +188,7 @@ failures = do
     forM_ (fromMaybe [] (Body.bodySubTransactions (Body.toBody (Tx.body transaction)))) $ \sub -> do
       Internal.runUnchecked 1 (Sub.encodeCbor sub <> B.singleton 0) >>= assertBool "Trailing subtransaction bytes accepted" . isLeft
       Internal.runUnchecked 3 (SubBody.toCbor (Sub.body sub) <> B.singleton 0) >>= assertBool "Trailing sub-body bytes accepted" . isLeft
-  Internal.runUnchecked 4 B.empty >>= assertBool "Unknown native inspection operation succeeded" . isLeft
+  Internal.runUnchecked 99 B.empty >>= assertBool "Unknown native inspection operation succeeded" . isLeft
   assertBool "Invalid CBOR constructed a public transaction" (isLeft (Tx.decodeCbor (B.singleton 0xff)))
 
 repeated :: IO ()
@@ -158,8 +203,286 @@ concurrent = do
   fixtures <- traverse load Fixture.fixtures
   completions <- forM fixtures $ \(transaction, expected) -> do
     finished <- newEmptyMVar
-    _ <- forkFinally (Inspection.transaction transaction >>= (@?= Right expected)) (putMVar finished)
+    _ <-
+      forkFinally
+        ( do
+            Inspection.transaction transaction >>= (@?= Right expected)
+            expectedWitnesses <- field "witness_set" expected
+            Standalone.witnesses (Tx.witnesses transaction) >>= (@?= Right expectedWitnesses)
+        )
+        (putMVar finished)
     pure finished
   forM_ completions $ \finished -> do
     outcome <- takeMVar finished
     either (throwIO :: SomeException -> IO ()) pure outcome
+
+optionalArray :: Key -> Value -> IO [Value]
+optionalArray key (Object fields) = case KeyMap.lookup key fields of
+  Nothing -> pure []
+  Just (Array values) -> pure (toList values)
+  _ -> assertFailure "Expected JSON array" >> fail "fixture"
+optionalArray _ _ = assertFailure "Expected JSON object" >> fail "fixture"
+
+standaloneCorpus :: IO ()
+standaloneCorpus = forM_ Fixture.fixtures $ \fixture -> do
+  (transaction, expected) <- load fixture
+  expectedBody <- field "body" expected
+  expectedWitnesses <- field "witness_set" expected
+  inspectFields (Body.bodyFields (Body.toBody (Tx.body transaction))) (Tx.witnesses transaction) expectedBody expectedWitnesses
+  forM_ (Tx.auxiliaryData transaction) $ \aux -> do
+    json <- field "auxiliary_data" expected
+    inspectAuxiliary aux json
+  let subs = fromMaybe [] (Body.bodySubTransactions (Body.toBody (Tx.body transaction)))
+  expectedSubs <- optionalArray "sub_transactions" expectedBody
+  forM_ (zip subs expectedSubs) $ \(sub, json) -> do
+    subBody <- field "body" json
+    subWitnesses <- field "witness_set" json
+    inspectFields (SubBody.fields (SubBody.toBody (Sub.body sub))) (Sub.witnesses sub) subBody subWitnesses
+    forM_ (Sub.auxiliaryData sub) $ \aux -> field "auxiliary_data" json >>= inspectAuxiliary aux
+  where
+    inspectAuxiliary auxiliary json = do
+      Standalone.auxiliaryData auxiliary >>= (@?= Right json)
+      forM_ (Auxiliary.metadata (Auxiliary.toAuxiliaryData auxiliary)) $ \encoded -> do
+        expectedMetadata <- field "metadata" json
+        let metadata = Metadata.toMetadata encoded
+        Standalone.metadata metadata >>= (@?= Right expectedMetadata)
+        entries <- case expectedMetadata of
+          Array items -> pure (toList items)
+          _ -> assertFailure "Expected metadata entries" >> fail "fixture"
+        forM_ (zip (Metadata.toList metadata) entries) $ \((_, metadatum), entry) ->
+          field "value" entry >>= \expectedValue -> Standalone.metadatum metadatum >>= (@?= Right expectedValue)
+    inspectFields fields witnesses bodyJson witnessJson = do
+      Standalone.witnesses witnesses >>= (@?= Right witnessJson)
+      inputs <- optionalArray "inputs" bodyJson
+      forM_ (zip (Fields.fieldInputs fields) inputs) $ \(reference, json) -> Standalone.input reference >>= (@?= Right json)
+      outputs <- optionalArray "outputs" bodyJson
+      length outputs @?= length (Fields.fieldOutputs fields)
+      forM_ (zip (Fields.fieldOutputs fields) outputs) $ \(output, json) -> do
+        Standalone.output output >>= (@?= Right json)
+        amount <- field "amount" json
+        Standalone.value (Output.value output) >>= (@?= Right amount)
+        let expectedDatum = case json of
+              Object entries -> KeyMap.lookup "datum" entries
+              _ -> Nothing
+        Standalone.datum (Output.datum output) >>= (@?= Right expectedDatum)
+        reference <- Input.input <$> must (TxId.fromBytes (B.replicate 32 0)) <*> pure 0
+        let inputJson = object ["transaction_id" .= Text.replicate 64 "0", "index" .= (0 :: Int)]
+        Standalone.utxo (Utxo.utxo reference output) >>= (@?= Right (object ["input" .= inputJson, "output" .= json]))
+      certs <- optionalArray "certs" bodyJson
+      forM_ (zip (maybe [] Certificates.toList (Fields.fieldCertificates fields)) certs) $ \(cert, json) ->
+        Standalone.certificate cert >>= (@?= Right json)
+      let typed = Witnesses.toWitnesses witnesses
+      redeemers <- optionalArray "redeemers" witnessJson
+      forM_ (zip (Witnesses.redeemers typed) redeemers) $ \(redeemer, json) -> Standalone.redeemer redeemer >>= (@?= Right json)
+      datums <- optionalArray "plutus_data" witnessJson
+      forM_ (zip (Witnesses.datums typed) datums) $ \(datum, json) -> Standalone.plutusData datum >>= (@?= Right json)
+      nativeJson <- optionalArray "native_scripts" witnessJson
+      plutusJson <- optionalArray "plutus_scripts" witnessJson
+      let scripts = Witnesses.scripts typed
+          natives = [native | Script.Native native <- scripts]
+          plutuses = [plutus | Script.Plutus plutus <- scripts]
+      length natives @?= length nativeJson
+      length plutuses @?= length plutusJson
+      forM_ (zip natives nativeJson) $ \(native, json) -> do
+        Standalone.nativeScript native >>= (@?= Right json)
+        Standalone.script (Script.Native native) >>= (@?= Right (object ["tag" .= ("native_script" :: Text.Text), "value" .= json]))
+      forM_ (zip plutuses plutusJson) $ \(plutus, json) -> do
+        Standalone.plutusScript plutus >>= (@?= Right json)
+        Standalone.script (Script.Plutus plutus) >>= (@?= Right (object ["tag" .= ("plutus_script" :: Text.Text), "value" .= json]))
+
+keyFixture :: IO (Credential.KeyHash purpose)
+keyFixture = must (Credential.keyHashFromBytes (B.replicate 28 1))
+
+standaloneDomains :: IO ()
+standaloneDomains = do
+  stakeKey <- keyFixture
+  poolKey <- keyFixture
+  drepKey <- keyFixture
+  coldKey <- keyFixture
+  hotKey <- keyFixture
+  genesis <- keyFixture
+  delegate <- keyFixture
+  scriptHash <- must (Credential.scriptHashFromBytes (B.replicate 28 2))
+  vrf <- must (Pool.vrfKeyHashFromBytes (B.replicate 32 3))
+  margin <- must (Unit.mkUnitInterval 1 5)
+  url <- must (Anchor.mkUrl "https://example.com/proposal")
+  digest <- must (Anchor.dataHashFromBytes (B.replicate 32 4))
+  txid <- must (TxId.fromBytes (B.replicate 32 5))
+  let stake = Credential.KeyCredential stakeKey
+      drep = Credential.KeyCredential drepKey
+      account = Reward.fromCredential Network.testnet stake
+      anchor = Anchor.Anchor url digest
+      keyJson = object ["tag" .= ("pubkey_hash" :: Text.Text), "value" .= Text.replicate 28 "01"]
+      scriptJson = object ["tag" .= ("script_hash" :: Text.Text), "value" .= Text.replicate 28 "02"]
+      anchorJson = object ["url" .= ("https://example.com/proposal" :: Text.Text), "data_hash" .= Text.replicate 32 "04"]
+      identifier = ActionId.ActionId txid 65535
+      identifierJson = object ["transaction_id" .= Text.replicate 32 "05", "gov_action_index" .= ("65535" :: Text.Text)]
+      pool = Pool.PoolParameters poolKey vrf Nothing 10000 1000 margin account (Set.singleton stakeKey) [] Nothing
+      changes = Update.empty {Update.updateMinFeeA = Just maxBound}
+      changeJson = object ["min_fee_a" .= ("18446744073709551615" :: Text.Text)]
+  paymentKey <- keyFixture
+  let native = Native.allOf [Native.signature paymentKey]
+      pubkeyJson = object ["tag" .= ("pubkey" :: Text.Text), "pubkey" .= Text.replicate 28 "01"]
+      nativeJson = object ["tag" .= ("all" :: Text.Text), "scripts" .= [pubkeyJson]]
+  Standalone.nativeScript native >>= (@?= Right nativeJson)
+  guardKey <- keyFixture
+  let nativeCases =
+        [ (Native.signature paymentKey, pubkeyJson),
+          (Native.anyOf [Native.signature paymentKey], object ["tag" .= ("any" :: Text.Text), "scripts" .= [pubkeyJson]]),
+          (Native.atLeast 1 [Native.signature paymentKey], object ["tag" .= ("n_of_k" :: Text.Text), "scripts" .= [pubkeyJson], "n" .= (1 :: Int)]),
+          (Native.invalidBefore 0, object ["tag" .= ("timelock_start" :: Text.Text), "slot" .= ("0" :: Text.Text)]),
+          (Native.invalidAfter maxBound, object ["tag" .= ("timelock_expiry" :: Text.Text), "slot" .= ("18446744073709551615" :: Text.Text)]),
+          (Native.requireGuard (Credential.KeyCredential guardKey), object ["tag" .= ("require_guard" :: Text.Text), "credential" .= keyJson]),
+          (Native.requireGuard (Credential.ScriptCredential scriptHash), object ["tag" .= ("require_guard" :: Text.Text), "credential" .= scriptJson])
+        ]
+  forM_ nativeCases $ \(condition, expected) -> do
+    Standalone.nativeScript condition >>= (@?= Right expected)
+    Standalone.script (Script.Native condition) >>= (@?= Right (object ["tag" .= ("native_script" :: Text.Text), "value" .= expected]))
+  forM_ [(Plutus.V1, "plutus_v1"), (Plutus.V2, "plutus_v2"), (Plutus.V3, "plutus_v3"), (Plutus.V4, "plutus_v4")] $ \(version, language) -> do
+    plutus <- must (Plutus.fromBytes version (B.pack [1, 2]))
+    Standalone.plutusScript plutus >>= (@?= Right (object ["language" .= (language :: Text.Text), "bytes" .= ("0102" :: Text.Text)]))
+  Standalone.credential stake >>= (@?= Right keyJson)
+  Standalone.credential (Credential.ScriptCredential scriptHash :: Credential.Credential Credential.Stake) >>= (@?= Right scriptJson)
+  Standalone.drep (DRep.DRepCredential drep) >>= (@?= Right keyJson)
+  Standalone.drep DRep.AlwaysAbstain >>= (@?= Right (object ["tag" .= ("always_abstain" :: Text.Text)]))
+  Standalone.drep DRep.AlwaysNoConfidence >>= (@?= Right (object ["tag" .= ("always_no_confidence" :: Text.Text)]))
+  Standalone.anchor anchor >>= (@?= Right anchorJson)
+  Standalone.actionId identifier >>= (@?= Right identifierJson)
+  Standalone.protocolUpdate changes >>= (@?= Right changeJson)
+  Standalone.value (Coin.lovelace (-1)) >>= assertBool "negative output coin accepted" . isLeft
+  Standalone.value (Coin.lovelace (2 ^ (64 :: Int))) >>= assertBool "overflowing output coin accepted" . isLeft
+  policy <- must (PolicyId.fromBytes (B.replicate 28 6))
+  name <- must (AssetName.fromBytes (B.pack [0, 255, 128]))
+  let signedAssets = Coin.fromList [(Asset.Native policy name, -1)]
+      expectedAssets = object ["coin" .= ("0" :: Text.Text), "assets" .= object ["06060606060606060606060606060606060606060606060606060606" .= object ["00ff80" .= ("-1" :: Text.Text)]]]
+  Standalone.value signedAssets >>= (@?= Right expectedAssets)
+  withdrawals <- must (Action.withdrawalsFromList [(account, maxBound)])
+  let actions =
+        [ (Action.ParameterChange Nothing changes (Just scriptHash), "parameter_change_action"),
+          (Action.HardForkInitiation (Just identifier) (Version.ProtocolVersion 12 0), "hard_fork_initiation_action"),
+          (Action.TreasuryWithdrawals withdrawals Nothing, "treasury_withdrawals_action"),
+          (Action.NoConfidence Nothing, "no_confidence"),
+          (Action.UpdateCommittee Nothing (Action.removalsFromList []) Committee.emptyMembers margin, "update_committee"),
+          (Action.NewConstitution Nothing (Constitution.Constitution anchor Nothing), "new_constitution"),
+          (Action.InfoAction, "info_action")
+        ]
+  forM_ actions $ \(action, tag) -> do
+    result <- Standalone.governanceAction action >>= must
+    field "tag" result >>= (@?= String tag)
+    let proposal = Proposal.Proposal maxBound account action anchor
+        expected = object ["deposit" .= ("18446744073709551615" :: Text.Text), "reward_account" .= Reward.toText account, "gov_action" .= result, "anchor" .= anchorJson]
+    Standalone.proposal proposal >>= (@?= Right expected)
+    Internal.runUnchecked 19 (Action.encodeCbor action <> B.singleton 0) >>= assertBool "Trailing action accepted" . isLeft
+  let target = DRep.DRepCredential drep
+      certificates =
+        [ Certificate.StakeRegistration stake,
+          Certificate.StakeDeregistration stake,
+          Certificate.StakeDelegation stake poolKey,
+          Certificate.PoolRegistration pool,
+          Certificate.PoolRetirement poolKey maxBound,
+          Certificate.GenesisKeyDelegation genesis delegate vrf,
+          Certificate.MoveInstantaneousRewards (Certificate.ToOtherPot Certificate.Reserves 1),
+          Certificate.MoveInstantaneousRewards (Certificate.ToStakeCredentials Certificate.Treasury (Map.singleton stake 1)),
+          Certificate.Registration stake 1,
+          Certificate.Unregistration stake 1,
+          Certificate.VoteDelegation stake target,
+          Certificate.StakeVoteDelegation stake poolKey target,
+          Certificate.StakeRegistrationDelegation stake poolKey 1,
+          Certificate.VoteRegistrationDelegation stake target 1,
+          Certificate.StakeVoteRegistrationDelegation stake poolKey target 1,
+          Certificate.AuthorizeCommitteeHot (Credential.KeyCredential coldKey) (Credential.KeyCredential hotKey),
+          Certificate.ResignCommitteeCold (Credential.KeyCredential coldKey) (Just anchor),
+          Certificate.RegisterDRep drep 1 (Just anchor),
+          Certificate.UnregisterDRep drep 1,
+          Certificate.UpdateDRep drep (Just anchor)
+        ]
+  forM_ certificates $ \cert -> do
+    standalone <- Standalone.certificate cert >>= must
+    encoded <- must (Body.fromBody ((Body.body [] [] 0) {Body.bodyFields = (Fields.fields [] []) {Fields.fieldCertificates = Just (Certificates.fromList [cert])}}))
+    parent <- Inspection.body encoded >>= must
+    optionalArray "certs" parent >>= (@?= [standalone])
+    Internal.runUnchecked 7 (Certificate.encodeCbor cert <> B.singleton 0) >>= assertBool "Trailing certificate accepted" . isLeft
+  poolCert <- Standalone.certificate (Certificate.PoolRegistration pool) >>= must
+  poolJson <- field "pool_params" poolCert
+  Standalone.poolParameters pool >>= (@?= Right poolJson)
+  let voter = Voting.DRepVoter drep
+      votes = Voting.singleton voter identifier (Voting.VotingProcedure Voting.Yes (Just anchor))
+  votesBody <- must (Body.fromBody ((Body.body [] [] 0) {Body.bodyFields = (Fields.fields [] []) {Fields.fieldVotingProcedures = Just votes}}))
+  votesJson <- Inspection.body votesBody >>= must >>= field "voting_procedures"
+  Standalone.votingProcedures votes >>= (@?= Right votesJson)
+  retained <- replicateM 20 (Standalone.anchor anchor >>= must)
+  performGC
+  retained @?= replicate 20 anchorJson
+
+  let address = Address.ShelleyAddress (Shelley.enterprise Network.testnet (Credential.KeyCredential paymentKey))
+      datum = Data.fromData (Data.Integer (2 ^ (160 :: Int)))
+  output <- must (Output.mkOutput address (Coin.lovelace 2000000) (Datum.InlineDatum datum) (Just (Script.Native native)))
+  let reference = Input.input txid 0
+      resolved = Utxo.utxo reference output
+      proposal = Proposal.Proposal 1 account Action.InfoAction anchor
+  amountBytes <- must (Coin.encodeCbor signedAssets)
+  bytesMetadata <- must (Metadata.mkBytes (B.pack [0, 255, 128]))
+  textMetadata <- must (Metadata.mkText "世界")
+  lowMetadata <- must (Metadata.mkInteger (negate (2 ^ (64 :: Int))))
+  highMetadata <- must (Metadata.mkInteger (2 ^ (64 :: Int) - 1))
+  let tagged tag payload = object ["tag" .= (tag :: Text.Text), "value" .= payload]
+      bytesJson = tagged "bytes" ("00ff80" :: Text.Text)
+      textJson = tagged "string" ("世界" :: Text.Text)
+      lowJson = tagged "int" ("-18446744073709551616" :: Text.Text)
+      highJson = tagged "int" ("18446744073709551615" :: Text.Text)
+      composite = Metadata.map [(bytesMetadata, Metadata.list [lowMetadata, highMetadata, textMetadata]), (bytesMetadata, textMetadata)]
+      listJson = object ["tag" .= ("list" :: Text.Text), "contents" .= [lowJson, highJson, textJson]]
+      compositeJson = object ["tag" .= ("map" :: Text.Text), "contents" .= [object ["key" .= bytesJson, "value" .= listJson], object ["key" .= bytesJson, "value" .= textJson]]]
+      metadata = Metadata.singleton maxBound composite
+      metadataJson = [object ["key" .= ("18446744073709551615" :: Text.Text), "value" .= compositeJson]]
+  Standalone.metadatum composite >>= (@?= Right compositeJson)
+  Standalone.metadata metadata >>= (@?= Right (toJSON metadataJson))
+  encodedMetadata <- must (Metadata.decodeCbor (Metadata.encodeCbor metadata))
+  plutus <- must (Plutus.fromBytes Plutus.V4 (B.pack [1, 2]))
+  let auxiliary = Auxiliary.fromAuxiliaryData (Auxiliary.auxiliaryData (Just encodedMetadata) (Just [native]) [plutus])
+      auxiliaryJson = object ["metadata" .= metadataJson, "native_scripts" .= [nativeJson], "plutus_scripts" .= [object ["language" .= ("plutus_v4" :: Text.Text), "bytes" .= ("0102" :: Text.Text)]]]
+  Standalone.auxiliaryData auxiliary >>= (@?= Right auxiliaryJson)
+  datumHash <- must (Datum.hashFromBytes (B.replicate 32 7))
+  Standalone.datum Datum.NoDatum >>= (@?= Right Nothing)
+  Standalone.datum (Datum.DatumHash datumHash) >>= (@?= Right (Just (tagged "datum_hash" (Text.replicate 32 "07"))))
+  expectedData <- Standalone.plutusData datum >>= must
+  Standalone.datum (Datum.InlineDatum datum) >>= (@?= Right (Just (tagged "datum" expectedData)))
+  let redeemer = Redeemer.Redeemer Redeemer.Guarding 0 datum (ExUnits.ExUnits 1 2)
+      datumEncoding = Write.toStrictByteString (Encoding.encodeListLen 2 <> Encoding.encodeWord 1 <> Encoding.encodeTag 24 <> Encoding.encodeBytes (Data.toCbor datum))
+  let encodings =
+        [ (4, amountBytes),
+          (5, Script.encodeCbor (Script.Native native)),
+          (6, Credential.encodeCbor stake),
+          (7, Certificate.encodeCbor (Certificate.Registration stake 1)),
+          (8, Proposal.encodeCbor proposal),
+          (9, Pool.encodeCbor pool),
+          (10, Update.encodeCbor changes),
+          (11, Data.toCbor datum),
+          (12, Output.encodeCbor output),
+          (13, Witnesses.toCbor (Witnesses.fromWitnesses Witnesses.empty)),
+          (14, Utxo.encodeCbor resolved),
+          (15, DRep.encodeCbor DRep.AlwaysAbstain),
+          (16, ActionId.encodeCbor identifier),
+          (17, Anchor.encodeCbor anchor),
+          (18, Voting.encodeCbor votes),
+          (19, Action.encodeCbor Action.InfoAction),
+          (20, Metadata.encodeMetadatumCbor composite),
+          (21, Metadata.encodeCbor metadata),
+          (22, Auxiliary.toCbor auxiliary),
+          (23, Input.encodeCbor reference),
+          (24, datumEncoding),
+          (25, Redeemer.encodeCbor redeemer)
+        ]
+  snapshots <- forM encodings $ \(kind, bytes) -> do
+    let original = B.copy bytes
+    result <- Internal.inspect "inspection.lifecycle" kind bytes >>= must
+    replicateM_ 10 $ do
+      Internal.runUnchecked kind (bytes <> B.singleton 0) >>= assertBool "Trailing standalone CBOR accepted" . isLeft
+      Internal.runUnchecked kind (B.take (B.length bytes - 1) bytes) >>= assertBool "Truncated standalone CBOR accepted" . isLeft
+    after <- Internal.inspect "inspection.lifecycle" kind bytes >>= must
+    after @?= result
+    bytes @?= original
+    pure result
+  rendered <- traverse (evaluate . Lazy.toStrict . encode) snapshots
+  performGC
+  map (Lazy.toStrict . encode) snapshots @?= rendered

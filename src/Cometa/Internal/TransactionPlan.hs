@@ -47,7 +47,10 @@ module Cometa.Internal.TransactionPlan
     accountBalance,
     startingAccountBalance,
     donate,
+    currentTreasuryValue,
     propose,
+    proposeWithRedeemer,
+    proposeWithDeferredRedeemer,
     vote,
     voteWithRedeemer,
     voteWithDeferredRedeemer,
@@ -102,6 +105,8 @@ import qualified Cometa.PolicyId as Policy
 import qualified Cometa.Protocol.Parameters as Parameters
 import Cometa.Script (Script)
 import qualified Cometa.Script as Script
+import qualified Cometa.Script.Native as NativeScript
+import qualified Cometa.Script.Plutus as Plutus
 import Cometa.SubTransaction (SubTransaction)
 import qualified Cometa.SubTransaction as Sub
 import qualified Cometa.SubTransaction.Body as SubBody
@@ -120,7 +125,7 @@ import Data.ByteString (ByteString)
 import qualified Data.ByteString as B
 import Data.Foldable (toList)
 import Data.Int (Int64)
-import Data.Maybe (catMaybes, fromMaybe)
+import Data.Maybe (catMaybes, fromMaybe, isJust)
 import qualified Data.Sequence as Seq
 import qualified Data.Set as Set
 import Data.Word (Word64)
@@ -153,7 +158,8 @@ data Operation
   | AccountBalance RewardAddress BalanceInterval
   | StartingBalance RewardAddress BalanceInterval
   | Donation Word64
-  | Propose RewardAddress Action Anchor
+  | TreasuryValue Word64
+  | Propose RewardAddress Action Anchor (Maybe Argument)
   | Vote Voter ActionId VotingProcedure (Maybe Argument)
   | Sub SubTransaction [Utxo]
   | TopLevelGuard (Credential Guard) (Maybe EncodedPlutusData)
@@ -194,7 +200,9 @@ spendWith u r = one . Spend u (Immediate <$> r)
 referenceInput :: Utxo -> Plan
 referenceInput = one . Reference
 
--- | Attach a native or Plutus script witness.
+-- | Attach a native or Plutus script witness. Repeated attachments of the same
+-- language and script bytes contribute one witness, ordered by the first
+-- attachment. Different Plutus versions remain distinct.
 attachScript :: Script -> Plan
 attachScript = one . Script
 
@@ -211,7 +219,9 @@ mintWithRedeemer a n = one . Mint a n . Just . Immediate
 metadata :: Word64 -> Metadatum -> Plan
 metadata label = one . Metadata label
 
--- | Attach a datum witness.
+-- | Attach a datum witness. Repeated exact CBOR encodings contribute one
+-- witness, including data supplied to spending inputs. First occurrence order
+-- is retained; different encodings remain distinct because their hashes differ.
 attachDatum :: EncodedPlutusData -> Plan
 attachDatum = one . Datum
 
@@ -268,6 +278,10 @@ validatePlan (Plan instructions callbacks) = do
   consistent "Conflicting starting account balance intervals" [(a, i) | StartingBalance a i <- ops]
   consistent "Conflicting votes for one action" [((v, a), p) | Vote v a p _ <- ops]
   consistent "Conflicting voter redeemers" [(v, r) | Vote v _ _ r <- ops]
+  consistent "Conflicting current treasury values" [((), amount) | TreasuryValue amount <- ops]
+  let proposals = [Proposal.encodeCbor (Proposal.Proposal 0 account action anchor) | Propose account action anchor _ <- ops]
+  unless (distinct proposals) (Left (InvalidTransactionPlan "Duplicate governance proposal"))
+  mapM_ validateProposal ops
   let donation = sum [toInteger n | Donation n <- ops]
       deposits = [(a, sum [toInteger n | DirectDeposit a' n <- ops, a == a']) | DirectDeposit a _ <- ops]
       subSpent = concatMap (Fields.fieldInputs . subFields . fst) (subTransactions (Plan instructions callbacks))
@@ -288,14 +302,19 @@ validatePlan (Plan instructions callbacks) = do
   when (any excessiveWithdrawal ops) (Left (InvalidTransactionPlan "Withdrawal exceeds signed native amount"))
   unless (null lows || null highs || maximum lows < minimum highs) (Left (InvalidTransactionPlan "Empty validity interval"))
   where
+    distinct [] = True
+    distinct (value : rest) = value `notElem` rest && distinct rest
+    validateProposal (Propose _ action _ (Just _)) =
+      unless (hasPolicy action) (Left (InvalidTransactionPlan "A proposing redeemer requires a guardrails policy"))
+    validateProposal _ = pure ()
     consistent message pairs = unless (all (\(k, v) -> all (\(k', v') -> k /= k' || v == v') pairs) pairs) (Left (InvalidTransactionPlan message))
     isAdaMint (Mint Ada _ _) = True
     isAdaMint _ = False
     excessiveWithdrawal (Withdraw _ n _) = toInteger n > toInteger (maxBound :: Int64)
     excessiveWithdrawal _ = False
 
-encodePlan :: Plan -> ByteString
-encodePlan plan = C.encode (E.encodeListLen (fromIntegral (length ops)) <> foldMap encodeOperation ops)
+encodePlan :: Word64 -> Plan -> ByteString
+encodePlan deposit plan = C.encode (E.encodeListLen (fromIntegral (length ops)) <> foldMap (encodeOperation deposit) ops)
   where
     ops = normalizedOperations plan
 
@@ -303,15 +322,36 @@ normalizedOperations :: Plan -> [Operation]
 normalizedOperations (Plan instructions _) = ops
   where
     original = toList instructions
-    ops =
+    ops = uniqueDatums Set.empty requirements
+    requirements =
       normalizeMints (deduplicate [op | op <- original, case op of From _ -> False; Until _ -> False; Donation _ -> False; _ -> True])
         <> [Donation (fromInteger (sum ns)) | let ns = [toInteger n | Donation n <- original], not (null ns)]
         <> [From (maximum ns) | let ns = [n | From n <- original], not (null ns)]
         <> [Until (minimum ns) | let ns = [n | Until n <- original], not (null ns)]
 
+    -- Both native add_datum and add_input append to the same witness set.
+    -- Keep datum hash preimages exactly; stripping a repeated input argument
+    -- only avoids its second global insertion, not any input or callback.
+    uniqueDatums _ [] = []
+    uniqueDatums seen (Datum datum : rest)
+      | datum `Set.member` seen = uniqueDatums seen rest
+      | otherwise = Datum datum : uniqueDatums (Set.insert datum seen) rest
+    uniqueDatums seen (Spend input argument (Just datum) : rest)
+      | datum `Set.member` seen = Spend input argument Nothing : uniqueDatums seen rest
+      | otherwise = Spend input argument (Just datum) : uniqueDatums (Set.insert datum seen) rest
+    uniqueDatums seen (operation : rest) = operation : uniqueDatums seen rest
+
     deduplicate [] = []
-    deduplicate (op : rest) = op : deduplicate (if idempotent op then filter (/= op) rest else rest)
+    deduplicate (op : rest) = op : deduplicate (if idempotent op then filter (not . sameAttachment op) rest else rest)
+    -- Native builder_witnesses.c (eadb95cd3ca7f711c203d7f2f4ee21c150d4d7f1)
+    -- appends scripts without enforcing witness-set uniqueness. Match the exact
+    -- hash preimage here; Plutus outer bytestring framing is not script identity.
+    sameAttachment (Script left) (Script right) = scriptIdentity left == scriptIdentity right
+    sameAttachment left right = left == right
+    scriptIdentity (Script.Native script) = (0, NativeScript.encodeCbor script)
+    scriptIdentity (Script.Plutus script) = (fromEnum (Plutus.version script) + 1, Plutus.toBytes script)
     idempotent op = case op of
+      Script {} -> True
       Spend {} -> True
       Reference {} -> True
       Metadata {} -> True
@@ -321,6 +361,7 @@ normalizedOperations (Plan instructions _) = ops
       TopLevelGuard {} -> True
       AccountBalance {} -> True
       StartingBalance {} -> True
+      TreasuryValue {} -> True
       Vote {} -> True
       _ -> False
 
@@ -337,8 +378,7 @@ requiresEvaluation = any needs . normalizedOperations
     needs (Spend _ (Just _) _) = True
     needs (Guard _ (Just _)) = True
     needs (Vote _ _ _ (Just _)) = True
-    needs (Propose _ Action.ParameterChange {} _) = True
-    needs (Propose _ Action.TreasuryWithdrawals {} _) = True
+    needs (Propose _ action _ _) = hasPolicy action
     needs (Sub transaction _) = not (null (Witnesses.redeemers (Witnesses.toWitnesses (Sub.witnesses transaction))))
     needs (Mint _ _ (Just _)) = True
     needs (Certificate _ (Just _)) = True
@@ -426,8 +466,8 @@ resolvedInputs (Plan instructions _) = concatMap resolved (toList instructions)
     resolved (Sub _ values) = values
     resolved _ = []
 
-encodeOperation :: Operation -> E.Encoding
-encodeOperation operation = case operation of
+encodeOperation :: Word64 -> Operation -> E.Encoding
+encodeOperation deposit operation = case operation of
   Pay o -> fields 0 [bytes (Output.encodeCbor o)]
   Spend u (Just (Deferred index)) d -> fields 12 [bytes (Utxo.encodeCbor u), E.encodeInt index, optional d]
   Spend u r d -> fields 1 [bytes (Utxo.encodeCbor u), argument r, optional d]
@@ -450,7 +490,9 @@ encodeOperation operation = case operation of
   AccountBalance address interval -> fields 19 [bytes (Reward.toBytes address), bytes (intervalBytes interval)]
   StartingBalance address interval -> fields 20 [bytes (Reward.toBytes address), bytes (intervalBytes interval)]
   Donation amount -> fields 21 [E.encodeWord64 amount]
-  Propose address action anchor -> fields 22 [bytes (Proposal.encodeCbor (Proposal.Proposal 0 address action anchor))]
+  TreasuryValue amount -> fields 27 [E.encodeWord64 amount]
+  Propose address action anchor (Just (Deferred index)) -> fields 28 [bytes (Proposal.encodeCbor (Proposal.Proposal deposit address action anchor)), E.encodeInt index]
+  Propose address action anchor redeemer -> fields 22 [bytes (Proposal.encodeCbor (Proposal.Proposal deposit address action anchor)), argument redeemer]
   Vote voter action procedure (Just (Deferred index)) -> fields 24 [bytes (Voting.encodeVoter voter), bytes (ActionId.encodeCbor action), bytes (Voting.encodeProcedure procedure), E.encodeInt index]
   Vote voter action procedure redeemer -> fields 23 [bytes (Voting.encodeVoter voter), bytes (ActionId.encodeCbor action), bytes (Voting.encodeProcedure procedure), argument redeemer]
   TopLevelGuard credential datum -> fields 26 [bytes (credentialBytes credential), optional datum]
@@ -500,6 +542,7 @@ shiftCallbacks offset operation = case operation of
   Certificate cert argument -> Certificate cert (shift <$> argument)
   Withdraw address amount argument -> Withdraw address amount (shift <$> argument)
   Vote voter action procedure argument -> Vote voter action procedure (shift <$> argument)
+  Propose address action anchor argument -> Propose address action anchor (shift <$> argument)
   _ -> operation
   where
     shift (Deferred index) = Deferred (index + offset)
@@ -535,13 +578,38 @@ startingAccountBalance account = one . StartingBalance account
 donate :: Word64 -> Plan
 donate = one . Donation
 
--- | Append a governance proposal. The configured protocol snapshot supplies its
--- deposit; the return account, action and anchor are supplied here. The native
--- parameter-change and treasury-withdrawal workflows require a guardrails
--- policy hash for an executable Plutus script. Those guardrails receive the
--- native unit argument @Constr 0 []@; no custom proposing argument is supplied.
+-- | Declare the current treasury balance in lovelace. This is a ledger-state
+-- assertion, not a donation or a source of transaction funds. Repeating the same
+-- value is idempotent; conflicting values fail when building. Zero is explicit.
+currentTreasuryValue :: Word64 -> Plan
+currentTreasuryValue = one . TreasuryValue
+
+-- | Append a governance proposal using the configured protocol deposit. A
+-- parameter-change or treasury-withdrawal action with a guardrails policy uses
+-- the unit redeemer @Constr 0 []@. An action without a policy needs no redeemer.
+-- Attach the policy script or resolve its reference input separately.
 propose :: RewardAddress -> Action -> Anchor -> Plan
-propose address action = one . Propose address action
+propose address action anchor = one (Propose address action anchor argument)
+  where
+    argument = if hasPolicy action then Just (Immediate (Data.fromData (Data.Constr 0 []))) else Nothing
+
+-- | Append a proposal with an explicit guardrails argument. The action must
+-- name a policy; other actions fail when building. Proposal order determines
+-- the proposing redeemer index. Duplicate proposals fail rather than gaining
+-- a second index. The configured protocol snapshot supplies the deposit.
+proposeWithRedeemer :: RewardAddress -> Action -> Anchor -> EncodedPlutusData -> Plan
+proposeWithRedeemer address action anchor = one . Propose address action anchor . Just . Immediate
+
+-- | Append a proposal whose guardrails argument is computed from the balanced
+-- draft. The action must name a policy. The callback sees the proposal with its
+-- configured deposit and may run repeatedly as balancing converges.
+proposeWithDeferredRedeemer :: RewardAddress -> Action -> Anchor -> DeferredRedeemer -> Plan
+proposeWithDeferredRedeemer address action anchor = deferred (Propose address action anchor (Just (Deferred 0)))
+
+hasPolicy :: Action -> Bool
+hasPolicy (Action.ParameterChange _ _ policy) = isJust policy
+hasPolicy (Action.TreasuryWithdrawals _ policy) = isJust policy
+hasPolicy _ = False
 
 -- | Cast a key-authorized vote. Identical voter/action instructions are
 -- idempotent; conflicting choices fail when building.

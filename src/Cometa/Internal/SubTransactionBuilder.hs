@@ -103,7 +103,7 @@ build :: Config -> Plan -> IO (Either Error SubTransaction)
 build config plan = case validate config plan of
   Left failure -> pure (Left failure)
   Right () -> do
-    result <- runUnchecked config plan (Common.encodePlan (Plan.toPlan plan))
+    result <- runUnchecked config plan (Common.encodePlan (fromMaybe 0 (Parameters.parameterGovernanceActionDeposit (parameters config))) (Plan.toPlan plan))
     pure $ do
       bytes <- result
       transaction <- Sub.decodeCbor bytes
