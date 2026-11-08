@@ -75,15 +75,15 @@ that every native collection exposes a mutable tag setter.
 
 Remaining work:
 
-- Audit tag controls for standalone certificate/proposal collections, pool-owner
-  sets and committee credential sets separately; the body controls do not claim
-  recursive coverage of nested collections.
+- Standalone certificate/proposal tags, pool-owner encoding and committee
+  credential envelopes are covered by the merged standalone-set slice.
 - Remaining standalone CIP-116 leaf values and collection shapes. Ordinary
   traversal suffices for native array schemas only after their exact shape and
   ordering are verified; the ledger keeps other outputs pending.
-- A deliberate contract for cache normalization and standalone contextual
-  rebalancing. Existing plan building and exact-byte imports alone do not establish
-  those workflows.
+- Standalone contextual rebalancing now has explicit funding, redeemer identity,
+  commitment and encoding contracts in `Transaction.Balancing`. General recursive
+  cache normalization is not implied by this operation; exact imports remain
+  separate from freshly serialized unsigned results.
 
 Generic mutable buffers, reader/writer cursors, native reference counts and raw
 JSON machinery do not need public Haskell object wrappers. Reconciliation uses

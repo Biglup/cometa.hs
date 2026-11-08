@@ -66,6 +66,7 @@ import Test.Tasty (TestTree, defaultMain, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 import Test.Tasty.Hedgehog (testProperty)
 import qualified Transaction
+import qualified TransactionAccountingProperties
 import qualified TransactionBody
 import qualified TransactionDeferred
 import qualified TransactionWitnesses
@@ -82,6 +83,7 @@ main =
         CompleteAddress.tests,
         TransactionBody.tests,
         TransactionDeferred.tests,
+        TransactionAccountingProperties.tests,
         PublicTransaction.tests,
         TransactionWitnesses.tests,
         Proposals.tests,

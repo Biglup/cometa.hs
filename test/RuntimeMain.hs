@@ -17,6 +17,7 @@ module Main (main) where
 
 -- IMPORTS --------------------------------------------------------------------
 
+import qualified BalancingScriptLanguages
 import qualified CoinSelection
 import qualified ContextualTransaction
 import qualified DeferredRedeemer
@@ -30,6 +31,7 @@ import qualified Runtime
 import qualified SubTransactionBuilder
 import Test.Tasty (defaultMain, localOption, testGroup)
 import Test.Tasty.Runners (NumThreads (..))
+import qualified TransactionBalancing
 import qualified TransactionBuilder
 import qualified TransactionBuilding
 import qualified TransactionIndices
@@ -53,6 +55,8 @@ main =
           TransactionBuilder.tests,
           NativeEvaluation.tests,
           DeferredRedeemer.tests,
+          TransactionBalancing.tests,
+          BalancingScriptLanguages.tests,
           TransactionIndices.tests,
           ContextualTransaction.tests,
           SubTransactionBuilder.tests,

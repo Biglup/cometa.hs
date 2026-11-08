@@ -143,6 +143,7 @@ library
     Cometa.Transaction.Fields
     Cometa.Transaction.Body
     Cometa.Transaction.Building
+    Cometa.Transaction.Balancing
     Cometa.Transaction.Builder
     Cometa.Transaction.Plan
     Cometa.SubTransaction.Body
@@ -230,6 +231,8 @@ library
     Cometa.Internal.ContextualTransaction
     Cometa.Internal.TransactionPlan
     Cometa.Internal.TransactionBuilder
+    Cometa.Internal.TransactionBalancing
+    Cometa.Internal.BalancingScripts
     Cometa.Internal.EvaluationNative
     Cometa.Internal.TransactionCbor
     Cometa.Internal.SetEncoding
@@ -379,6 +382,7 @@ test-suite cometa-test
     SetEncoding
     StandaloneSetEncoding
     TransactionDeferred
+    TransactionAccountingProperties
     NativeWorkflows
     ConnectedGovernance
     Connected.Governance
@@ -601,6 +605,8 @@ test-suite cometa-runtime-test
     NativeCoinSelection
     NativeEvaluation
     DeferredRedeemer
+    TransactionBalancing
+    BalancingScriptLanguages
     TransactionIndices
     ContextualTransaction
     SubTransactionBuilder
@@ -664,6 +670,8 @@ test-suite cometa-runtime-test
     Cometa.Internal.ContextualTransaction
     Cometa.Internal.TransactionPlan
     Cometa.Internal.TransactionBuilder
+    Cometa.Internal.TransactionBalancing
+    Cometa.Internal.BalancingScripts
     Cometa.Internal.EvaluationNative
     Cometa.Internal.Governance
     Cometa.Internal.ParameterSnapshot
@@ -708,6 +716,7 @@ test-suite cometa-runtime-test
     Cometa.Transaction.AuxiliaryData
     Cometa.Transaction.Body
     Cometa.Transaction.Building
+    Cometa.Transaction.Balancing
     Cometa.Transaction.Builder
     Cometa.Transaction.Plan
     Cometa.Transaction.Datum
@@ -854,6 +863,7 @@ library blockfrost
   other-modules:
     Cometa.Provider.Blockfrost.Internal.Config
     Cometa.Provider.Blockfrost.Internal.Http
+    Cometa.Provider.Blockfrost.Internal.Connection
     Cometa.Provider.Blockfrost.Internal.Protocol
     Cometa.Provider.Blockfrost.Internal.Json
     Cometa.Provider.Blockfrost.Internal.Provider
@@ -870,7 +880,13 @@ library blockfrost
     network-uri >=2.6.4 && <2.7,
     http-client >=0.7.19 && <0.8,
     http-client-tls >=0.3.6 && <0.4,
-    http-types >=0.12.3 && <0.13
+    http-types >=0.12.3 && <0.13,
+    async >=2.2 && <2.3,
+    tls >=2.2 && <2.3,
+    crypton-x509-store >=1.8 && <1.9,
+    crypton-x509-system >=1.8 && <1.9,
+    network >=3.2.12 && <3.3,
+    stm >=2.5 && <2.6
 
 test-suite cometa-blockfrost-test
   import: language
@@ -885,6 +901,7 @@ test-suite cometa-blockfrost-test
     BlockfrostHttp
     Cometa.Provider.Blockfrost.Internal.Config
     Cometa.Provider.Blockfrost.Internal.Http
+    Cometa.Provider.Blockfrost.Internal.Connection
     Cometa.Provider.Blockfrost.Internal.Protocol
     Cometa.Provider.Blockfrost.Internal.Json
     Cometa.Provider.Blockfrost.Internal.Provider
@@ -903,8 +920,13 @@ test-suite cometa-blockfrost-test
     http-client >=0.7.19 && <0.8,
     http-client-tls >=0.3.6 && <0.4,
     http-types >=0.12.3 && <0.13,
+    async >=2.2 && <2.3,
+    tls >=2.2 && <2.3,
+    crypton-x509-store >=1.8 && <1.9,
+    crypton-x509-system >=1.8 && <1.9,
     network >=3.2.12 && <3.3,
     stm >=2.5 && <2.6,
+    crypton-x509 >=1.8 && <1.9,
     tasty >=1.5 && <1.6,
     tasty-hunit >=0.10 && <0.11
 

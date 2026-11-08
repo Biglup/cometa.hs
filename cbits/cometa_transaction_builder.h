@@ -39,4 +39,6 @@
  * before return. Context gates must stay active for this entire operation.
  */
 unsigned int cometa_transaction_builder_build(cometa_runtime_t* selector, cometa_runtime_t* evaluator, cometa_runtime_t* deferred, const unsigned char* config, size_t config_size, const unsigned char* plan, size_t plan_size, cardano_buffer_t** output, cardano_buffer_t** diagnostic, uint64_t* key_count);
+/** \brief Balance an independent decoded transaction using the same scoped result and runtime ownership contract as build. */
+unsigned int cometa_transaction_balance(cometa_runtime_t* selector, cometa_runtime_t* evaluator, cometa_runtime_t* deferred, const unsigned char* config, size_t config_size, const unsigned char* request, size_t request_size, cardano_buffer_t** output, cardano_buffer_t** diagnostic, uint64_t* key_count);
 #endif

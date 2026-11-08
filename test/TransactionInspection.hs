@@ -49,8 +49,14 @@ import qualified Cometa.PolicyId as PolicyId
 import qualified Cometa.Pool.Metadata as PoolMetadata
 import qualified Cometa.Pool.Parameters as Pool
 import qualified Cometa.Pool.Relay as Relay
+import qualified Cometa.Protocol.CostModels as Models
+import qualified Cometa.Protocol.DRepVotingThresholds as DRepThresholds
+import qualified Cometa.Protocol.ExUnitPrices as Prices
 import qualified Cometa.Protocol.ExUnits as ExUnits
 import qualified Cometa.Protocol.Parameters.Update as Update
+import qualified Cometa.Protocol.PoolVotingThresholds as PoolThresholds
+import qualified Cometa.Protocol.ProposedUpdates as Proposed
+import qualified Cometa.Protocol.Rational as Rational
 import qualified Cometa.Protocol.Version as Version
 import qualified Cometa.Script as Script
 import qualified Cometa.Script.Native as Native
@@ -97,7 +103,8 @@ tests :: TestTree
 tests =
   testGroup
     "Transaction JSON inspection"
-    [ testCase "standalone leaf schemas, optional fields and native lifetime boundaries" standaloneLeaves,
+    [ testCase "protocol collections and Dijkstra standalone schemas match parent fields" standaloneCollections,
+      testCase "standalone leaf schemas, optional fields and native lifetime boundaries" standaloneLeaves,
       testCase "standalone leaf inspectors reject complete schema-invalid CBOR" standaloneLeafFailures,
       testCase "standalone values match typed fields of pinned transaction JSON" standaloneCorpus,
       testCase "standalone governance, certificates, pools and protocol fields" standaloneDomains,
@@ -596,3 +603,126 @@ standaloneLeafFailures = do
   forM_ invalidCases $ \(kind, label, encoded) -> do
     result <- Internal.runUnchecked kind (Write.toStrictByteString encoded)
     assertBool ("Schema-invalid leaf accepted: " <> label) (isLeft result)
+
+-- Protocol and Dijkstra collection schemas differ from ordinary JSON arrays:
+-- language-keyed objects, genesis-keyed objects and ordered key/value entries.
+standaloneCollections :: IO ()
+standaloneCollections = do
+  model <- must (Models.mkCostModel 0 [negate (2 ^ (63 :: Int)), 0, 2 ^ (63 :: Int) - 1])
+  future <- must (Models.mkCostModel 255 [7])
+  laterModels <- traverse (\language -> must (Models.mkCostModel language [fromIntegral language])) [1, 2, 3]
+  let models = Models.fromList (future : model : laterModels)
+      modelJson = toJSON (["-9223372036854775808", "0", "9223372036854775807"] :: [Text.Text])
+      modelsJson = object ["plutus_v1" .= modelJson, "plutus_v2" .= (["1"] :: [Text.Text]), "plutus_v3" .= (["2"] :: [Text.Text]), "plutus_v4" .= (["3"] :: [Text.Text])]
+      modelBytes supplied = Write.toStrictByteString (Encoding.encodeListLen 2 <> Encoding.encodeWord8 (Models.languageId supplied)) <> Models.encodeCostModelCbor supplied
+      check kind bytes action expected = do
+        let original = B.copy bytes
+        action >>= (@?= Right expected)
+        forM_ [B.empty, B.take (B.length bytes - 1) bytes, bytes <> B.singleton 0] (Internal.runUnchecked kind >=> (assertBool "Invalid collection CBOR accepted" . isLeft))
+        snapshots <- replicateM 5 (action >>= must)
+        performGC
+        snapshots @?= replicate 5 expected
+        bytes @?= original
+      fraction numerator denominator = object ["numerator" .= (numerator :: Text.Text), "denominator" .= (denominator :: Text.Text)]
+  check 36 (modelBytes model) (Standalone.costModel model) modelJson
+  check 36 (modelBytes future) (Standalone.costModel future) (toJSON (["7"] :: [Text.Text]))
+  check 37 (Models.encodeCbor models) (Standalone.costModels models) modelsJson
+  Standalone.costModels Models.empty >>= (@?= Right (object []))
+  map Models.languageId (Models.toList models) @?= [0, 1, 2, 3, 255]
+  let originalModelBytes = Models.encodeCbor models
+  Standalone.costModels (Models.fromList [future]) >>= (@?= Right (object []))
+  Models.encodeCbor models @?= originalModelBytes
+  -- Prices may exceed one and fractions remain unreduced in native JSON.
+  memoryPrice <- must (Rational.mkNonNegativeRational 6 4)
+  stepPrice <- must (Rational.mkNonNegativeRational 2 6)
+  let prices = Prices.ExUnitPrices memoryPrice stepPrice
+      pricesJson = object ["mem_price" .= fraction "6" "4", "step_price" .= fraction "2" "6"]
+  check 38 (Prices.encodeCbor prices) (Standalone.exUnitPrices prices) pricesJson
+  thresholds <- traverse (\numerator -> must (Unit.mkUnitInterval numerator 10)) [0 .. 9]
+  case thresholds of
+    [a, b, c, d, e, f, g, h, i, j] -> do
+      let pool = PoolThresholds.PoolVotingThresholds a b c d e
+          drep = DRepThresholds.DRepVotingThresholds a b c d e f g h i j
+          poolNames = ["motion_no_confidence", "committee_normal", "committee_no_confidence", "hard_fork_initiation", "security_relevant_param"]
+          drepNames = ["motion_no_confidence", "committee_normal", "committee_no_confidence", "update_constitution", "hard_fork_initiation", "pp_network_group", "pp_economic_group", "pp_technical_group", "pp_gov_group", "treasury_withdrawal"]
+          thresholdJson names = object [name .= fraction (Text.pack (show numerator)) "10" | (name, numerator) <- zip names ([0 ..] :: [Int])]
+          poolJson = thresholdJson poolNames
+          drepJson = thresholdJson drepNames
+          update = Update.empty {Update.updateCostModels = Just models, Update.updateExecutionCosts = Just prices, Update.updatePoolVotingThresholds = Just pool, Update.updateDrepVotingThresholds = Just drep}
+          updateJson = object ["cost_models" .= modelsJson, "execution_costs" .= pricesJson, "pool_voting_thresholds" .= poolJson, "drep_voting_thresholds" .= drepJson]
+      check 39 (PoolThresholds.encodeCbor pool) (Standalone.poolVotingThresholds pool) poolJson
+      check 40 (DRepThresholds.encodeCbor drep) (Standalone.drepVotingThresholds drep) drepJson
+      Standalone.protocolUpdate update >>= (@?= Right updateJson)
+      genesis <- keyFixture
+      proposed <- must (Proposed.fromList [(genesis, update)])
+      let proposedJson = object ["01010101010101010101010101010101010101010101010101010101" .= updateJson]
+          proposal = Proposed.UpdateProposal maxBound proposed
+          proposalJson = object ["epoch" .= (18446744073709551615 :: Integer), "proposed_protocol_parameter_updates" .= proposedJson]
+      check 41 (Proposed.encodeCbor proposed) (Standalone.proposedUpdates proposed) proposedJson
+      check 42 (Proposed.encodeProposal proposal) (Standalone.updateProposal proposal) proposalJson
+      Standalone.proposedUpdates Proposed.empty >>= (@?= Right (object []))
+    _ -> assertFailure "Threshold fixture arity"
+  stake <- keyFixture
+  guard <- keyFixture
+  scriptHash <- must (Credential.scriptHashFromBytes (B.replicate 28 2))
+  let account = Reward.fromCredential Network.testnet (Credential.KeyCredential stake)
+      keyGuard = Credential.KeyCredential guard
+      scriptGuard = Credential.ScriptCredential scriptHash
+      datum = Data.fromData (Data.Map [(Data.Integer 1, Data.Integer 2), (Data.Integer 1, Data.Integer 3)])
+      keyJson = object ["tag" .= ("pubkey_hash" :: Text.Text), "value" .= Text.replicate 28 "01"]
+      scriptJson = object ["tag" .= ("script_hash" :: Text.Text), "value" .= Text.replicate 28 "02"]
+      exactJson = object ["tag" .= ("exact" :: Text.Text), "value" .= ("18446744073709551615" :: Text.Text)]
+      encodeInterval interval = Write.toStrictByteString $ case interval of
+        Fields.ExactBalance amount -> Encoding.encodeWord64 amount
+        Fields.BalanceRange lower upper -> Encoding.encodeListLen 2 <> maybe Encoding.encodeNull Encoding.encodeWord64 lower <> maybe Encoding.encodeNull Encoding.encodeWord64 upper
+      rangeJson lower upper = object ["tag" .= ("range" :: Text.Text), "inclusive_lower_bound" .= lower, "exclusive_upper_bound" .= upper]
+      intervalCases =
+        [ (Fields.ExactBalance maxBound, exactJson),
+          (Fields.BalanceRange Nothing (Just 0), rangeJson Null (String "0")),
+          (Fields.BalanceRange (Just maxBound) Nothing, rangeJson (String "18446744073709551615") Null),
+          (Fields.BalanceRange (Just 10) (Just 1), rangeJson (String "10") (String "1"))
+        ]
+  forM_ intervalCases $ \(interval, json) -> check 43 (encodeInterval interval) (Standalone.balanceInterval interval) json
+  Standalone.balanceInterval (Fields.BalanceRange Nothing Nothing) >>= assertBool "Unbounded native interval accepted" . isLeft
+  intervals <- must (Fields.mkEntries [(account, Fields.ExactBalance maxBound)])
+  deposits <- must (Fields.mkEntries [(account, 0)])
+  guards <- must (Fields.mkEntries [(scriptGuard, Just datum), (keyGuard, Nothing)])
+  datumJson <- Standalone.plutusData datum >>= must
+  let entry key payload = object ["key" .= key, "value" .= payload]
+      intervalsJson = toJSON [entry (String (Reward.toText account)) exactJson]
+      depositsJson = toJSON [entry (String (Reward.toText account)) (String "0")]
+      guardsJson = toJSON [entry keyJson Null, entry scriptJson datumJson]
+      fields = (Fields.fields [] []) {Fields.fieldAccountBalanceIntervals = Just intervals, Fields.fieldDirectDeposits = Just deposits, Fields.fieldRequiredTopLevelGuards = Just guards}
+      association pairs = Write.toStrictByteString (Encoding.encodeMapLen (fromIntegral (length pairs))) <> foldMap (uncurry (<>)) pairs
+      intervalBytes = association [(Write.toStrictByteString (Encoding.encodeBytes (Reward.toBytes account)), encodeInterval (Fields.ExactBalance maxBound))]
+      depositsBytes = association [(Write.toStrictByteString (Encoding.encodeBytes (Reward.toBytes account)), Write.toStrictByteString (Encoding.encodeWord64 0))]
+      guardsBytes = association [(Credential.encodeCbor keyGuard, Write.toStrictByteString Encoding.encodeNull), (Credential.encodeCbor scriptGuard, Data.toCbor datum)]
+  check 44 intervalBytes (Standalone.balanceIntervals intervals) intervalsJson
+  check 45 depositsBytes (Standalone.directDeposits deposits) depositsJson
+  check 46 guardsBytes (Standalone.requiredGuards guards) guardsJson
+  body <- must (Body.fromBody ((Body.body [] [] 0) {Body.bodyFields = fields}))
+  bodyJson <- Inspection.body body >>= must
+  field "account_balance_intervals" bodyJson >>= (@?= intervalsJson)
+  field "direct_deposits" bodyJson >>= (@?= depositsJson)
+  field "required_top_level_guards" bodyJson >>= (@?= guardsJson)
+  subBody <- must (SubBody.fromBody (SubBody.fromFields fields))
+  subJson <- Inspection.subBody subBody >>= must
+  field "account_balance_intervals" subJson >>= (@?= intervalsJson)
+  field "direct_deposits" subJson >>= (@?= depositsJson)
+  field "required_top_level_guards" subJson >>= (@?= guardsJson)
+  -- Well-framed invalid schemas exercise native validation independently of framing.
+  let array entries = Encoding.encodeListLen (fromIntegral (length entries)) <> mconcat entries
+      invalid =
+        [ (36, array [Encoding.encodeWord 256, array []]),
+          (37, Encoding.encodeMapLen 1 <> Encoding.encodeWord 0 <> Encoding.encodeString "costs"),
+          (38, array [Encoding.encodeNull, Encoding.encodeNull]),
+          (39, array []),
+          (40, array []),
+          (41, Encoding.encodeMapLen 1 <> Encoding.encodeWord 0 <> Encoding.encodeMapLen 0),
+          (42, array [Encoding.encodeMapLen 0, Encoding.encodeString "epoch"]),
+          (43, array [Encoding.encodeNull, Encoding.encodeNull]),
+          (44, Encoding.encodeMapLen 1 <> Encoding.encodeWord 0 <> Encoding.encodeWord 0),
+          (45, Encoding.encodeMapLen 1 <> Encoding.encodeWord 0 <> Encoding.encodeWord 0),
+          (46, Encoding.encodeMapLen 1 <> array [Encoding.encodeWord 0, Encoding.encodeBytes B.empty] <> Encoding.encodeNull)
+        ]
+  forM_ invalid $ \(kind, bytes) -> Internal.runUnchecked kind (Write.toStrictByteString bytes) >>= assertBool "Invalid standalone collection schema accepted" . isLeft

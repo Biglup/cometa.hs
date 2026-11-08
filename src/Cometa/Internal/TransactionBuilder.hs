@@ -26,7 +26,7 @@
 --   build (defaultConfig params slots change) {availableUtxos = funds}
 --     (Plan.payTo output)
 -- @
-module Cometa.Internal.TransactionBuilder (Config (..), defaultConfig, build) where
+module Cometa.Internal.TransactionBuilder (Config (..), defaultConfig, build, encodeConfig, withResult, withResultNamed, checkedEvaluator, validateBudget, pricedReferenceFee) where
 
 -- IMPORTS --------------------------------------------------------------------
 
@@ -86,6 +86,7 @@ import qualified Data.Map.Strict as Map
 import Data.Maybe (fromMaybe, isJust)
 import qualified Data.Sequence as Seq
 import qualified Data.Set as Set
+import Data.Text (Text)
 import qualified Data.Text.Encoding as Text
 import Data.Word (Word64)
 import Foreign.Marshal.Alloc (alloca)
@@ -362,7 +363,11 @@ encodeConfig plan config =
 -- | Initialize both owner slots before C; diagnostics are copied before release,
 -- including failures. Runtime preserves original typed callback errors on unwind.
 withResult :: (Ptr (Ptr Raw.Buffer) -> Ptr (Ptr Raw.Buffer) -> Ptr Word64 -> IO Native.NativeCode) -> IO (Either Error (ByteString, Word64))
-withResult call = alloca $ \output -> alloca $ \diagnostic -> alloca $ \keyCount ->
+withResult = withResultNamed "builder.build"
+
+-- | Preserve operation-specific diagnostic names while sharing buffer ownership.
+withResultNamed :: Text -> (Ptr (Ptr Raw.Buffer) -> Ptr (Ptr Raw.Buffer) -> Ptr Word64 -> IO Native.NativeCode) -> IO (Either Error (ByteString, Word64))
+withResultNamed operation call = alloca $ \output -> alloca $ \diagnostic -> alloca $ \keyCount ->
   bracket
     (poke output nullPtr >> poke diagnostic nullPtr >> poke keyCount 0)
     (\() -> Raw.cBufferRelease output >> Raw.cBufferRelease diagnostic)
@@ -370,20 +375,20 @@ withResult call = alloca $ \output -> alloca $ \diagnostic -> alloca $ \keyCount
       status <- call output diagnostic keyCount
       if status == Native.success
         then do
-          bytes <- peek output >>= Runtime.copyBuffer "builder.build"
+          bytes <- peek output >>= Runtime.copyBuffer operation
           count <- peek keyCount
           pure ((,count) <$> bytes)
         else do
           pointer <- peek diagnostic
           if pointer == nullPtr
             then do
-              checked <- Runtime.checkStatus "builder.build" status
+              checked <- Runtime.checkStatus operation status
               pure (checked >> Left (NativeContractViolation "builder.status"))
             else do
               copied <- Runtime.copyBuffer "builder.diagnostic" pointer
               pure $ case copied of
                 Left failure -> Left failure
-                Right bytes -> Left (NativeError "builder.build" (Code.fromNumber (toInteger status)) (Text.decodeUtf8With (\_ _ -> Just '\xfffd') bytes))
+                Right bytes -> Left (NativeError operation (Code.fromNumber (toInteger status)) (Text.decodeUtf8With (\_ _ -> Just '\xfffd') bytes))
 
 -- The runtime protects decoding, pure callback evaluation, complete reply
 -- encoding and native copying together. Lazy failures therefore unwind through

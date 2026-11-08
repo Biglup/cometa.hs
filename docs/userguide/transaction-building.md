@@ -143,3 +143,58 @@ Balancing may invoke a callback several times with changing drafts. Queries
 recompute positions each time; do not treat a previous position or the current
 redeemer bytes as a stable final transaction property. Queries have no network
 or native effects and do not change the draft.
+
+## Balance an existing transaction
+
+Use `Cometa.Transaction.Balancing` when you already have a transaction assembled
+from fields or received as CBOR. Supply the same `Builder.Config` used for plan
+building, together with resolved input snapshots:
+
+```haskell
+import qualified Cometa.Transaction.Balancing as Balancing
+
+result <- Balancing.balance config resolvedInputs draft
+```
+
+`resolvedInputs` supplies context. Only `config.availableUtxos` authorizes
+additional wallet spending; collateral-only and unrelated resolved outputs do not
+become funding candidates. Existing spending inputs remain mandatory. Resolve
+spending, reference and collateral inputs, including those used by nested intents.
+Conflicting snapshots for one input fail before selection runs.
+
+Every existing output remains a payment. An old change output is not identified
+or removed automatically. The existing fee and `config.minimumFee` are lower
+bounds. The change address controls new change; it does not replace the imported
+body's network identifier. Selectors and evaluators use the same injectable
+records as plan building.
+
+The result is a new unsigned transaction. Outer key and bootstrap signatures are
+removed; signed nested bodies and witnesses remain intact. Spending redeemers
+follow their original inputs when new inputs change the order. Budgets, the
+script-data commitment, fees and collateral are recomputed. Original snapshots
+remain unchanged. Enclosing CBOR array framing can normalize, so retain the source
+CBOR separately if you need it for archival interchange.
+
+To supply a draft-dependent redeemer, identify it by its original purpose and
+index. The witness must already exist in the draft:
+
+```haskell
+import qualified Cometa.Evaluation as Evaluation
+import qualified Cometa.PlutusData as Data
+import qualified Cometa.Transaction.Deferred as Deferred
+import qualified Cometa.Transaction.Redeemer as Redeemer
+import qualified Data.Map.Strict as Map
+
+let argument =
+      Deferred.redeemer (Data.Integer . toInteger)
+        (Deferred.inputIndex spendingReference)
+    replacements =
+      Map.singleton (Evaluation.RedeemerId Redeemer.Spending 0) argument
+
+result <- Balancing.balanceWithRedeemers config resolvedInputs replacements draft
+```
+
+The association follows that input even if its final index is no longer zero.
+Callbacks can run repeatedly and report errors through the ordinary build result.
+Nested redeemers belong to signed intents and are not replaced. Balancing does not
+query a provider, sign, submit, or establish full ledger validity.

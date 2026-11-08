@@ -81,6 +81,8 @@ array(cardano_cbor_reader_t* reader, int64_t expected)
     return result;                                                                                      \
   }
 
+READ_OBJECT(read_balance_input, cardano_transaction_input_t, cardano_transaction_input_from_cbor)
+READ_OBJECT(read_balance_transaction, cardano_transaction_t, cardano_transaction_from_cbor)
 READ_OBJECT(read_output, cardano_transaction_output_t, cardano_transaction_output_from_cbor)
 READ_OBJECT(read_utxo, cardano_utxo_t, cardano_utxo_from_cbor)
 READ_OBJECT(read_script, cardano_script_t, cardano_script_from_cbor)
@@ -696,6 +698,313 @@ cleanup:
   cardano_utxo_list_unref(&available);
   cardano_utxo_list_unref(&collateral);
   cardano_buffer_unref(&parameter_bytes);
+  return result;
+}
+
+/* Parsed redeemers and their collection cache their original CBOR. Native
+ * setters do not invalidate those caches, so create fresh outer wrappers before
+ * changing indices, payloads or budgets. Retain the existing data owners rather
+ * than clearing recursively: their exact payload encoding remains observable.
+ * The witness setter retains the replacement; the caller receives another owned
+ * reference. On failure the original witness set remains installed unchanged. */
+static cardano_error_t
+fresh_balance_redeemers(cardano_witness_set_t* witnesses, cardano_redeemer_list_t** output)
+{
+  if (output == NULL)
+  {
+    return CARDANO_ERROR_POINTER_IS_NULL;
+  }
+  *output                           = NULL;
+  cardano_redeemer_list_t* original = cardano_witness_set_get_redeemers(witnesses);
+  if (original == NULL)
+  {
+    return CARDANO_SUCCESS;
+  }
+
+  cardano_redeemer_list_t* fresh  = NULL;
+  cardano_error_t          result = cardano_redeemer_list_new(&fresh);
+  for (size_t i = 0U; result == CARDANO_SUCCESS && i < cardano_redeemer_list_get_length(original); ++i)
+  {
+    cardano_redeemer_t*    source      = NULL;
+    cardano_redeemer_t*    replacement = NULL;
+    cardano_plutus_data_t* data        = NULL;
+    cardano_ex_units_t*    units       = NULL;
+    result                             = cardano_redeemer_list_get(original, i, &source);
+    if (result == CARDANO_SUCCESS)
+    {
+      data   = cardano_redeemer_get_data(source);
+      units  = cardano_redeemer_get_ex_units(source);
+      result = cardano_redeemer_new(cardano_redeemer_get_tag(source), cardano_redeemer_get_index(source), data, units, &replacement);
+    }
+    if (result == CARDANO_SUCCESS)
+    {
+      result = cardano_redeemer_list_add(fresh, replacement);
+    }
+    cardano_redeemer_unref(&replacement);
+    cardano_plutus_data_unref(&data);
+    cardano_ex_units_unref(&units);
+    cardano_redeemer_unref(&source);
+  }
+  if (result == CARDANO_SUCCESS)
+  {
+    result = cardano_witness_set_set_redeemers(witnesses, fresh);
+  }
+  if (result == CARDANO_SUCCESS)
+  {
+    *output = fresh;
+    fresh   = NULL;
+  }
+  cardano_redeemer_list_unref(&original);
+  cardano_redeemer_list_unref(&fresh);
+  return result;
+}
+
+/** \brief Bind a decoded witness redeemer to its input and optional callback. */
+static cardano_error_t
+balance_redeemer(cardano_cbor_reader_t* reader, cardano_redeemer_list_t* redeemers, cardano_input_to_redeemer_map_t* inputs, cardano_deferred_redeemer_list_t* deferred, deferred_context_t* context)
+{
+  uint64_t                     tag = 0U, index = 0U;
+  bool                         callback = false;
+  cardano_transaction_input_t* input    = NULL;
+  cardano_redeemer_t*          found    = NULL;
+  cardano_error_t              result   = array(reader, 4);
+  if (result == CARDANO_SUCCESS)
+  {
+    result = cardano_cbor_reader_read_uint(reader, &tag);
+  }
+  if (result == CARDANO_SUCCESS)
+  {
+    result = cardano_cbor_reader_read_uint(reader, &index);
+  }
+  if (result == CARDANO_SUCCESS)
+  {
+    result = read_balance_input(reader, &input);
+  }
+  if (result == CARDANO_SUCCESS)
+  {
+    result = cardano_cbor_reader_read_bool(reader, &callback);
+  }
+  if (result == CARDANO_SUCCESS)
+  {
+    result = cardano_cbor_reader_read_end_array(reader);
+  }
+  for (size_t i = 0U; result == CARDANO_SUCCESS && i < cardano_redeemer_list_get_length(redeemers); ++i)
+  {
+    cardano_redeemer_t* item = NULL;
+    result                   = cardano_redeemer_list_get(redeemers, i, &item);
+    if (result == CARDANO_SUCCESS && (uint64_t)cardano_redeemer_get_tag(item) == tag && cardano_redeemer_get_index(item) == index)
+    {
+      if (found != NULL)
+      {
+        result = CARDANO_ERROR_DUPLICATED_KEY;
+      }
+      else
+      {
+        found = item;
+        cardano_redeemer_ref(found);
+      }
+    }
+    cardano_redeemer_unref(&item);
+  }
+  if (result == CARDANO_SUCCESS && found == NULL)
+  {
+    result = CARDANO_ERROR_ELEMENT_NOT_FOUND;
+  }
+  if (result == CARDANO_SUCCESS && input != NULL)
+  {
+    result = cardano_input_to_redeemer_map_insert(inputs, input, found);
+  }
+  if (result == CARDANO_SUCCESS && callback)
+  {
+    result = cardano_deferred_redeemer_list_add(deferred, found, deferred_callback, context);
+  }
+  cardano_transaction_input_unref(&input);
+  cardano_redeemer_unref(&found);
+  return result;
+}
+
+/* DEFINITIONS ***************************************************************/
+
+unsigned int
+cometa_transaction_balance(cometa_runtime_t* selector_runtime, cometa_runtime_t* evaluator_runtime, cometa_runtime_t* deferred_runtime, const unsigned char* config, size_t config_size, const unsigned char* request, size_t request_size, cardano_buffer_t** output, cardano_buffer_t** diagnostic, uint64_t* key_count)
+{
+  if (output == NULL || diagnostic == NULL || key_count == NULL)
+  {
+    return CARDANO_ERROR_POINTER_IS_NULL;
+  }
+  *output                                             = NULL;
+  *diagnostic                                         = NULL;
+  *key_count                                          = 0U;
+  cardano_cbor_reader_t*            reader            = cardano_cbor_reader_new(config, config_size);
+  cardano_cbor_reader_t*            payload           = NULL;
+  cardano_cbor_writer_t*            writer            = NULL;
+  cardano_buffer_t*                 parameter_bytes   = NULL;
+  cardano_protocol_parameters_t*    parameters        = NULL;
+  cardano_address_t*                change            = NULL;
+  cardano_address_t*                collateral_change = NULL;
+  cardano_utxo_list_t*              available         = NULL;
+  cardano_utxo_list_t*              collateral        = NULL;
+  cardano_utxo_list_t*              references        = NULL;
+  cardano_utxo_list_t*              selected          = NULL;
+  cardano_utxo_list_t*              resolved          = NULL;
+  cardano_transaction_t*            transaction       = NULL;
+  cardano_transaction_body_t*       body              = NULL;
+  cardano_witness_set_t*            witnesses         = NULL;
+  cardano_redeemer_list_t*          redeemers         = NULL;
+  cardano_input_to_redeemer_map_t*  input_map         = NULL;
+  cardano_deferred_redeemer_list_t* deferred          = NULL;
+  cardano_coin_selector_t*          selector          = NULL;
+  cardano_tx_evaluator_t*           evaluator         = NULL;
+  cardano_blake2b_hash_set_t*       signers           = NULL;
+  deferred_context_t*               contexts          = NULL;
+  uint64_t                          fee = 0U, padding = 0U, ignored = 0U;
+  int64_t                           count  = 0;
+  cardano_error_t                   result = reader == NULL ? CARDANO_ERROR_MEMORY_ALLOCATION_FAILED : array(reader, 10);
+  if (result != CARDANO_SUCCESS)
+  {
+    goto cleanup;
+  }
+  TRY(cardano_cbor_reader_read_bytestring(reader, &parameter_bytes));
+  TRY(cometa_parameters_from_snapshot(cardano_buffer_get_data(parameter_bytes), cardano_buffer_get_size(parameter_bytes), &parameters));
+  TRY(read_address(reader, &change));
+  TRY(read_utxos(reader, &available));
+  TRY(read_utxos(reader, &collateral));
+  TRY(read_address(reader, &collateral_change));
+  TRY(cardano_cbor_reader_read_uint(reader, &fee));
+  TRY(cardano_cbor_reader_read_uint(reader, &padding));
+  for (size_t i = 0U; i < 3U; ++i)
+  {
+    TRY(cardano_cbor_reader_read_uint(reader, &ignored));
+  }
+  TRY(cardano_cbor_reader_read_end_array(reader));
+  TRY(complete(reader));
+  if (padding > SIZE_MAX)
+  {
+    result = CARDANO_ERROR_INTEGER_OVERFLOW;
+    goto cleanup;
+  }
+  payload = cardano_cbor_reader_new(request, request_size);
+  if (payload == NULL)
+  {
+    result = CARDANO_ERROR_MEMORY_ALLOCATION_FAILED;
+    goto cleanup;
+  }
+  TRY(array(payload, 4));
+  TRY(read_balance_transaction(payload, &transaction));
+  if (transaction == NULL)
+  {
+    result = CARDANO_ERROR_POINTER_IS_NULL;
+    goto cleanup;
+  }
+  TRY(read_utxos(payload, &references));
+  TRY(read_utxos(payload, &selected));
+  TRY(cardano_input_to_redeemer_map_new(&input_map));
+  TRY(cardano_deferred_redeemer_list_new(&deferred));
+  witnesses = cardano_transaction_get_witness_set(transaction);
+  TRY(fresh_balance_redeemers(witnesses, &redeemers));
+  TRY(cardano_cbor_reader_read_start_array(payload, &count));
+  if (count < 0 || (uint64_t)count > SIZE_MAX / sizeof(deferred_context_t))
+  {
+    result = CARDANO_ERROR_DECODING;
+    goto cleanup;
+  }
+  contexts = calloc(count == 0 ? 1U : (size_t)count, sizeof(deferred_context_t));
+  if (contexts == NULL)
+  {
+    result = CARDANO_ERROR_MEMORY_ALLOCATION_FAILED;
+    goto cleanup;
+  }
+  for (int64_t i = 0; i < count; ++i)
+  {
+    contexts[i].runtime = deferred_runtime;
+    contexts[i].index   = (uint64_t)i;
+    TRY(balance_redeemer(payload, redeemers, input_map, deferred, &contexts[i]));
+  }
+  TRY(cardano_cbor_reader_read_end_array(payload));
+  TRY(cardano_cbor_reader_read_end_array(payload));
+  TRY(complete(payload));
+  if (selector_runtime == NULL)
+  {
+    TRY(cardano_random_improve_coin_selector_new(&selector));
+  }
+  else
+  {
+    TRY(cometa_coin_selector_new(selector_runtime, cardano_buffer_get_data(parameter_bytes), cardano_buffer_get_size(parameter_bytes), &selector));
+  }
+  TRY(cometa_evaluation_new(evaluator_runtime, &evaluator));
+  body = cardano_transaction_get_body(transaction);
+  /* Invalidate only the mutable outer body; nested intent/data caches survive. */
+  cardano_transaction_body_clear_cbor_cache(body);
+  if (fee > cardano_transaction_body_get_fee(body))
+  {
+    TRY(cardano_transaction_body_set_fee(body, fee));
+  }
+  TRY(cardano_balance_transaction(transaction, (size_t)padding, parameters, references, selected, input_map, available, selector, change, collateral, collateral_change != NULL ? collateral_change : change, evaluator, deferred));
+  TRY(cardano_utxo_list_new(&resolved));
+  cardano_utxo_list_t* sources[] = { available, collateral, selected, references };
+  for (size_t i = 0U; i < 4U; ++i)
+  {
+    for (size_t j = 0U; j < cardano_utxo_list_get_length(sources[i]); ++j)
+    {
+      cardano_utxo_t* item = NULL;
+      result               = cardano_utxo_list_get(sources[i], j, &item);
+      if (result == CARDANO_SUCCESS)
+      {
+        result = cardano_utxo_list_add(resolved, item);
+      }
+      cardano_utxo_unref(&item);
+      if (result != CARDANO_SUCCESS)
+      {
+        goto cleanup;
+      }
+    }
+  }
+  TRY(cardano_transaction_get_unique_signers(transaction, resolved, &signers));
+  if (padding > UINT64_MAX - cardano_blake2b_hash_set_get_length(signers))
+  {
+    result = CARDANO_ERROR_INTEGER_OVERFLOW;
+    goto cleanup;
+  }
+  *key_count = padding + cardano_blake2b_hash_set_get_length(signers);
+  writer     = cardano_cbor_writer_new();
+  if (writer == NULL)
+  {
+    result = CARDANO_ERROR_MEMORY_ALLOCATION_FAILED;
+    goto cleanup;
+  }
+  TRY(cardano_transaction_to_cbor(transaction, writer));
+  TRY(cardano_cbor_writer_encode_in_buffer(writer, output));
+cleanup:
+  if (result != CARDANO_SUCCESS && transaction != NULL)
+  {
+    const char* message = cardano_transaction_get_last_error(transaction);
+    if (message != NULL && message[0] != '\0')
+    {
+      *diagnostic = cardano_buffer_new_from((const byte_t*)message, strlen(message));
+    }
+  }
+  cardano_cbor_reader_unref(&reader);
+  cardano_cbor_reader_unref(&payload);
+  cardano_cbor_writer_unref(&writer);
+  cardano_buffer_unref(&parameter_bytes);
+  cardano_protocol_parameters_unref(&parameters);
+  cardano_address_unref(&change);
+  cardano_address_unref(&collateral_change);
+  cardano_utxo_list_unref(&available);
+  cardano_utxo_list_unref(&collateral);
+  cardano_utxo_list_unref(&references);
+  cardano_utxo_list_unref(&selected);
+  cardano_utxo_list_unref(&resolved);
+  cardano_deferred_redeemer_list_unref(&deferred);
+  cardano_input_to_redeemer_map_unref(&input_map);
+  cardano_redeemer_list_unref(&redeemers);
+  cardano_witness_set_unref(&witnesses);
+  cardano_transaction_body_unref(&body);
+  cardano_transaction_unref(&transaction);
+  cardano_coin_selector_unref(&selector);
+  cardano_tx_evaluator_unref(&evaluator);
+  cardano_blake2b_hash_set_unref(&signers);
+  free(contexts);
   return result;
 }
 
