@@ -4652,3 +4652,10 @@ or platform. The new distribution still requires
 hosted validation on Linux x64/ARM64, macOS Intel/ARM64, Windows and GHC 9.10;
 the earlier installed-library matrix does not establish those results. Published
 artifact installation and final licensing/package checks remain release gates.
+
+The integrated implementation also passed all 699 tests on Linux x86_64 with
+GHC 9.6.7. The generator checks the native revision and clean tracked source,
+preserves all 366 C compilation units, and includes full dependency license
+notices. `cabal check` passes for Cometa and the native package (the latter reports
+only expected warnings for C-only libraries without exposed Haskell modules).
+The platform matrix and archive consumer validation are tracked in PR #33.

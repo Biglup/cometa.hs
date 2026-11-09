@@ -27,7 +27,7 @@ extra-source-files:
   native/cardano-c.ref
   native/NOTICE
   native/*.json
-  native/licenses/*
+  native/licenses/*.txt
   docs/requirements.txt
   docs/userguide/*.md
   docs/userguide/conf.py
