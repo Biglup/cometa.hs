@@ -72,6 +72,7 @@ import Test.Tasty.Hedgehog (testProperty)
 import qualified Transaction
 import qualified TransactionAccountingProperties
 import qualified TransactionBody
+import qualified TransactionCollectionOperations
 import qualified TransactionDeferred
 import qualified TransactionWitnesses
 import qualified Value
@@ -90,6 +91,7 @@ main =
         TransactionAccountingProperties.tests,
         IntegerSemantics.tests,
         CollectionOperations.tests,
+        TransactionCollectionOperations.tests,
         InspectionCollections.tests,
         HexEncoding.tests,
         PublicTransaction.tests,

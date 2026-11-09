@@ -379,6 +379,7 @@ test-suite cometa-test
     test/cbits/collections_oracle.c
     test/cbits/integer_semantics_oracle.c
     test/cbits/collection_operations_oracle.c
+    test/cbits/transaction_collection_operations_oracle.c
   cc-options: -std=c11 -Wall -Wextra
   other-modules:
     Collections
@@ -388,6 +389,7 @@ test-suite cometa-test
     TransactionAccountingProperties
     IntegerSemantics
     CollectionOperations
+    TransactionCollectionOperations
     InspectionCollections
     HexEncoding
     NativeWorkflows
