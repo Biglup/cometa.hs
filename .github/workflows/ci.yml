@@ -175,10 +175,10 @@ jobs:
       - name: Install pinned style tools from official releases
         run: |
           mkdir -p "$RUNNER_TEMP/style-bin"
-          curl --fail --location https://github.com/tweag/ormolu/releases/download/0.8.0.2/ormolu-x86_64-linux.zip -o "$RUNNER_TEMP/ormolu.zip"
+          curl --fail --location --retry 3 --retry-delay 5 --connect-timeout 30 --max-time 120 https://github.com/tweag/ormolu/releases/download/0.8.0.2/ormolu-x86_64-linux.zip -o "$RUNNER_TEMP/ormolu.zip"
           echo "f737b11835537d020d83a497903a392f19d4943aea03b75f76f1c5719d70f9f8  $RUNNER_TEMP/ormolu.zip" | sha256sum --check
           unzip -j "$RUNNER_TEMP/ormolu.zip" -d "$RUNNER_TEMP/style-bin"
-          curl --fail --location https://github.com/ndmitchell/hlint/releases/download/v3.8/hlint-3.8-x86_64-linux.tar.gz -o "$RUNNER_TEMP/hlint.tar.gz"
+          curl --fail --location --retry 3 --retry-delay 5 --connect-timeout 30 --max-time 120 https://github.com/ndmitchell/hlint/releases/download/v3.8/hlint-3.8-x86_64-linux.tar.gz -o "$RUNNER_TEMP/hlint.tar.gz"
           echo "882363872064c70801858b4e9fa17468531fc30b91ed5b8d260eb48fc90b3e61  $RUNNER_TEMP/hlint.tar.gz" | sha256sum --check
           tar -xzf "$RUNNER_TEMP/hlint.tar.gz" -C "$RUNNER_TEMP/style-bin" --strip-components=1
       - name: Check native adapter formatting
