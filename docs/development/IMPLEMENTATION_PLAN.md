@@ -1,9 +1,9 @@
 # Cometa Haskell binding: design and implementation plan
 
-Status: native API coverage and independent reliability tests complete; release validation remains.
+Status: API coverage, reliability, platform checks and preprod validation complete; publication remains.
 Created: 2026-11-04.
 Owner: Angel Castillo / Biglup.
-Last updated: 2026-11-09 (release-readiness validation).
+Last updated: 2026-11-09 (final preprod validation).
 Repository: https://github.com/Biglup/cometa.hs.
 Cabal package: `cometa` (local development name; no Hackage publication yet).
 
@@ -14,19 +14,20 @@ and coverage ledger define the current public interface.
 
 ## Current release gates
 
-The native-symbol ledger has no pending mappings. PR30 adds independent
-selection, accounting and identity reliability checks; its platform results
-must still be reviewed. Deferred-redeemer query ergonomics are implemented.
+Native API coverage has no pending mappings. PR31 passed the Linux x64/ARM64,
+macOS Intel/ARM64, Windows and GHC 9.10 checks. Source-package consumer validation,
+performance baselines and the final examples/documentation review are complete.
+The [final preprod run](PREPROD_VALIDATION.md) completed all 16 supported flows
+with 36 confirmed, ledger-valid transactions and reconciled cleanup and balances.
+Deferred-redeemer query ergonomics are implemented.
 
-- Complete the final example/documentation review and independent source-package
-  consumer checks on the supported compiler/platform matrix.
-- Record reproducible build/sign/inspect/CBOR performance baselines. These are
-  measurements, not cross-platform performance guarantees.
-- Rerun supported live preprod workflows with the final native pin and retain
-  confirmation/cleanup evidence. Dijkstra live coverage depends on the network's
-  actual protocol; offline validation must remain clearly distinguished.
+Remaining release work:
+
 - Prepare the chosen release version, changelog, Hackage package/docs and GitHub
-  artifacts; validate the published install and update ecosystem links.
+  artifacts.
+- Validate installation from the published package and update ecosystem links.
+- Retain explicit offline-only Dijkstra validation until a protocol-12 network is
+  available; preprod was protocol 11 at this run.
 
 Excluded infrastructure and speculative additional APIs are not release blockers.
 
@@ -4595,3 +4596,20 @@ the runner cache, even though the checkout and archive suites had passed. The
 helper now permits ordinary Cabal downloads by default and offers an explicit
 `--offline` option for fully cached runs. Isolation from checkout source/configuration
 is unchanged. This is a verification-tool fix, with no library or native changes.
+
+
+### Final preprod validation (2026-11-09)
+
+See `PREPROD_VALIDATION.md` for the tested revisions, complete transaction journal,
+fees, deposits, asset deltas, account state and Dijkstra boundary. All 16 supported
+connected flows completed with 36 independently confirmed, ledger-valid
+transactions. Stake/DRep cycles returned 2,010 ADA; the new governance proposal
+holds its expected 1,000-ADA deposit. The wallet delta exactly matches 8.436355 ADA
+in fees, the two-ADA donation and that proposal deposit. Script-output cleanup,
+reserved collateral, reference outputs, vote choices and final registration
+states were checked independently. A transient account-index delay was handled
+with reads, never transaction resubmission.
+
+Preprod stayed at protocol 11. The 25 offline Dijkstra/subtransaction builder tests,
+signed swap example and zero-submission protocol gate check passed. No live
+Dijkstra transaction was submitted. No binding/native source changes were needed.
