@@ -377,6 +377,8 @@ test-suite cometa-test
     test/cbits/governance_oracle.c
     test/cbits/slot_config_oracle.c
     test/cbits/collections_oracle.c
+    test/cbits/integer_semantics_oracle.c
+    test/cbits/collection_operations_oracle.c
   cc-options: -std=c11 -Wall -Wextra
   other-modules:
     Collections
@@ -384,6 +386,8 @@ test-suite cometa-test
     StandaloneSetEncoding
     TransactionDeferred
     TransactionAccountingProperties
+    IntegerSemantics
+    CollectionOperations
     InspectionCollections
     HexEncoding
     NativeWorkflows
@@ -590,11 +594,13 @@ test-suite cometa-runtime-test
     test/cbits/runtime_oracle.c
     test/cbits/transaction_indices_oracle.c
     test/cbits/contextual_transaction_oracle.c
+    test/cbits/encoding_normalization_oracle.c
   include-dirs: cbits
   cc-options: -std=c11 -Wall -Wextra
   ghc-options: -threaded -rtsopts
   other-modules:
     TransactionInspection
+    EncodingNormalization
     Fixtures.Inspection
     Cometa.Transaction.Inspection
     Cometa.Inspection

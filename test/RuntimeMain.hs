@@ -22,6 +22,7 @@ import qualified CoinSelection
 import qualified ContextualTransaction
 import qualified DeferredRedeemer
 import qualified DijkstraBuilder
+import qualified EncodingNormalization
 import qualified Evaluation
 import qualified NativeCoinSelection
 import qualified NativeEvaluation
@@ -45,7 +46,8 @@ main =
     localOption (NumThreads 1) $
       testGroup
         "Runtime extension points"
-        [ TransactionInspection.tests,
+        [ EncodingNormalization.tests,
+          TransactionInspection.tests,
           Runtime.tests,
           Provider.tests,
           ParameterSnapshot.tests,

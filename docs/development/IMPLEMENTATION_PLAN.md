@@ -4216,3 +4216,138 @@ submissions are part of this slice. Hosted platform checks remain a separate PR
 gate. The final ledger has 3,364 adapted, 220 implemented, 170 intentionally
 omitted generic infrastructure entries and 133 pending mappings; these categories
 are not a percentage of application functionality.
+
+
+### Accounting regression and native semantic contracts
+
+The PR26 macOS ARM run exposed a generator defect, not a platform-specific
+accounting failure. A zero mint quantity normalized to an empty Value, but the
+generator still supplied `Just mint` to a subtransaction field that requires a
+nonempty mint when present. The generator now omits zero mint. The original
+Hedgehog replay (`94:a21`, seed `4085352775158129799 12998842054718267357`)
+passes, and a deterministic regression retains the shrunk case and the adjacent
+negative, zero and positive mint cases. Each accounting property also passed
+1,000 local trials.
+
+#### Standard integer workflows
+
+Reviewed GHC 9.6.7's actual
+[Integer implementation](https://github.com/ghc/ghc/blob/ghc-9.6.7-release/libraries/ghc-bignum/src/GHC/Num/Integer.hs)
+and [Data.Bits](https://github.com/ghc/ghc/blob/ghc-9.6.7-release/libraries/base/Data/Bits.hs)
+against the pinned `lib/src/common/bigint.c` and vendored mini-GMP source.
+`IntegerSemantics` compares ordinary `Integer`, `Data.Bits` and byte folds with
+native operations through a test-only adapter. Signed multiword inputs, limb
+boundaries, both byte orders, failed parsing, short output buffers and repeated
+owner cleanup are included. The arithmetic properties and fixtures are original;
+no upstream arithmetic implementation or tests were copied.
+
+Native division truncates toward zero: its divide/remainder pair corresponds to
+`quotRem`, and its function named `mod` corresponds to `rem`, not Prelude `mod`.
+Right shift uses sign extension. Population count uses absolute magnitude, and
+binary digit count reports one digit for zero. Unsigned fixed-width export takes
+the low 64 bits of the magnitude. These distinctions are recorded per symbol;
+standard Haskell operations replace native mutable integer owners without a new
+public BigInt wrapper. Zero divisors are rejected by the test adapter before
+mini-GMP can abort; error behavior is not claimed to be equivalent.
+
+Two native defects have bounded characterization tests, rather than fabricated
+Haskell equivalences:
+
+- Zero reports a byte size of one, but native export writes zero words and returns
+  insufficient-buffer-size. Both endian orders reproduce this failure.
+- The uint64 power exponent narrows to `unsigned long`. The cheap case
+  `0 ^ (2 ^ 32)` therefore becomes `0 ^ 0` on LLP64 Windows. The test records
+  the platform distinction without allocating an enormous result.
+
+These need native fixes and regression tests before their complete contracts can
+be marked adapted. Modular inverse/exponentiation, general radix conversion and
+portable signed fixed-width conversion also remain pending; ordinary Integer
+arithmetic is not evidence of complete native-symbol coverage.
+
+Source review also found signed-boundary overflow risks in native `from_int`
+and `to_int`, and that `from_string` does not honor its explicit size beyond
+checking for zero. These are recorded for native follow-up; the tests do not
+execute undefined signed arithmetic or present decimal transport as a complete
+bounded-span/radix parser.
+
+
+#### Encoding policy, cloning and signed identity
+
+`EncodingNormalization` compares native clone/cache operations with immutable
+public values. Nonminimal script nodes with definite child lists can be rebuilt
+through `Native.fromJson . Native.toJson` to match native cache clearing. Leaf
+script operations are covered by that composition. Composite scripts and lists
+have a distinct contract: native clearing retains each child list's original
+definite/indefinite policy, whereas fresh JSON reconstruction uses definite lists.
+Tests assert both agreement and this non-equivalence; composite cache operations
+remain pending rather than being classified as ordinary ownership plumbing.
+
+Real Ed25519 signatures over synthetic transaction and subtransaction bodies
+prove that clearing nonminimal body encodings can change their IDs and invalidate
+existing signatures. Cometa's semantic no-op body setters retain signed bytes;
+meaningful body changes remove the affected witnesses. Clearing an enclosing
+native transaction does not clear a nested intent's body. The C oracle clears a
+deep clone and verifies the original native serialization is unchanged. Digest
+clones are also read after releasing their source. Malformed, truncated and
+trailing input cases exercise cleanup after partial construction.
+
+These are original synthetic fixtures and native source-derived contract tests,
+not live-network acceptance tests. The tests use definite body maps with
+nonminimal field/header widths: native body parsers reject indefinite maps. Full
+transaction/subtransaction cache clearing and raw Value/input-redeemer cloning
+remain pending where normalized domain values do not preserve all native stored
+state. No implicit normalization or public mutable cache API was added.
+
+
+#### Raw collection operations
+
+Reviewed containers v0.6.7's
+[Data.Map.Strict.Internal](https://github.com/haskell/containers/blob/v0.6.7/containers/src/Data/Map/Strict/Internal.hs)
+and cardano-api's
+[Value implementation](https://github.com/IntersectMBO/cardano-api/blob/c2212851b06b9c2acc5bb0bfe1b8a8e8cf2be03a/cardano-api/src/Cardano/Api/Value/Internal.hs)
+against native asset-ID, asset-name, multiasset and withdrawal maps. The former
+supplies ordinary replacement/union/alter contracts; the latter sums duplicates
+and removes zeros, which suits economic Value but cannot stand in for raw map
+storage. No upstream implementations or generators were copied. The existing
+cardano-api attribution remains in `test/Fixtures/TRANSACTION_ACCOUNTING.md`.
+
+The caller workflow uses validated domain keys, ordinary maps or ordered pairs,
+and existing checked collection codecs at the serialization boundary. Tests
+exercise the following distinctions directly against native operations:
+
+- Asset-ID insertion replaces a unique key and retains a stored zero. Native
+  positional ordering follows encoded byte length/bytes, not domain `Ord`.
+- Decoded asset-name maps preserve duplicates; lookup and insertion use the
+  first occurrence. Arithmetic takes the last left-hand occurrence, accumulates
+  every right-hand occurrence, then removes zero results.
+- Withdrawal insertion appends duplicate accounts. Lookup uses the first match,
+  and amounts preserve the full unsigned 64-bit range.
+- Multiasset replacement acts on whole policy groups, preserving raw child maps
+  and empty groups. Arithmetic treats overlapping and previously absent policies
+  differently. Getter snapshots observe empty groups that CBOR serialization
+  would omit.
+
+`CollectionOperations` checks these rules with independent Map/list equations,
+plus absent keys, out-of-range indices, key-list/index agreement, structural
+comparison and clone/update independence. Four generated families passed 1,000
+cases each, with explicit zero weighting. Signed endpoints are tested as stored
+amounts; generated arithmetic is bounded to avoid native signed-overflow UB.
+Native owners and retained getter references are released on every success and
+failure path. This adds proof for existing Haskell workflows, not new public
+mutable collection wrappers.
+
+#### Verification
+
+All 650 tests pass locally: 411 public, 181 runtime and 58 Blockfrost tests.
+`cabal build all` succeeds with warnings as errors. Ormolu, HLint, strict C
+format/syntax, native inventory, package/source-archive checks, strict Sphinx
+and portable Haddock builds pass. Focused accounting, integer,
+collection and encoding runs pass Valgrind with zero errors and no definitely,
+indirectly or possibly lost allocations; no suppressions were used. The native
+pin and production APIs are unchanged, and no live transactions were submitted.
+
+The ledger now records 3,435 adapted, 220 implemented, 170 intentionally omitted
+and 62 pending entries. The reduction is supported by native differential tests
+and source review; it is not a claim of complete application or symbol coverage.
+Remaining encoding-policy, modular arithmetic, conversion and raw-state gaps are
+listed individually. Hosted compiler/platform checks remain a separate PR gate.
