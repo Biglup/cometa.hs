@@ -26,6 +26,7 @@ import qualified Callback
 import qualified Cbor
 import qualified Certificates
 import qualified Cip8
+import qualified CollectionOperations
 import qualified Collections
 import qualified Cometa
 import qualified Cometa.Crypto.Blake2b as Blake2b
@@ -47,6 +48,7 @@ import qualified Hedgehog.Gen as Gen
 import qualified Hedgehog.Range as Range
 import qualified HexEncoding
 import qualified InspectionCollections
+import qualified IntegerSemantics
 import qualified Metadata
 import qualified NativeWorkflows
 import qualified Ownership
@@ -86,6 +88,8 @@ main =
         TransactionBody.tests,
         TransactionDeferred.tests,
         TransactionAccountingProperties.tests,
+        IntegerSemantics.tests,
+        CollectionOperations.tests,
         InspectionCollections.tests,
         HexEncoding.tests,
         PublicTransaction.tests,

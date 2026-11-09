@@ -51,14 +51,14 @@ import qualified Cometa.Transaction.Utxo as Utxo
 import qualified Cometa.TransactionId as Id
 import qualified Cometa.UnitInterval as Unit
 import qualified Cometa.Value as Value
-import Control.Monad (forM_)
+import Control.Monad (forM_, when)
 import qualified Data.ByteString as B
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Data.Word (Word64, Word8)
 import qualified Fixtures.ProtocolParameters as ProtocolFixture
-import Hedgehog (Gen, Property, classify, evalEither, evalIO, forAll, property, (===))
+import Hedgehog (Gen, Property, PropertyT, classify, evalEither, evalIO, forAll, property, withTests, (===))
 import qualified Hedgehog.Gen as Gen
 import qualified Hedgehog.Range as Range
 import Test.Tasty (TestTree, testGroup)
@@ -108,6 +108,7 @@ tests =
     "Native transaction accounting properties"
     [ testProperty "mixed implicit deposits, refunds and withdrawals follow independent totals" propImplicit,
       testProperty "top-level, local and batch conservation includes signed mint and account flows" propConservation,
+      testProperty "zero mint is absent in the shrunk accounting regression" zeroMintRegression,
       testProperty "pool deposit deduplication is local and global at the appropriate scope" propPoolDeposits
     ]
 
@@ -244,7 +245,7 @@ scenarioFields f salt chargedFee value = do
   direct <- Fields.mkEntries [(fixtureAccount f, scenarioDirectDeposit value)]
   let fields =
         (Fields.fields [inputReference] [output])
-          { Fields.fieldMint = Just mint,
+          { Fields.fieldMint = if scenarioMint value == 0 then Nothing else Just mint,
             Fields.fieldWithdrawals = Just withdrawals,
             Fields.fieldDirectDeposits = Just direct,
             Fields.fieldDonation = Just (scenarioDonation value),
@@ -263,10 +264,25 @@ propConservation :: Property
 propConservation = property $ do
   outerCase <- forAll scenario
   localCase <- forAll scenario
+  checkConservation outerCase localCase
+
+-- The CI failure shrank to zero local mint and a top-level burn. Retain this
+-- exact case independently of random seeds, then cover zero at either level.
+zeroMintRegression :: Property
+zeroMintRegression = withTests 1 . property $ do
+  let zero = Scenario 0 0 0 0 0 0 0 (-100)
+  checkConservation zero {scenarioMint = -1000} zero
+  forM_ [-1, 0, 1] $ \amount -> do
+    checkConservation zero {scenarioMint = amount} zero
+    checkConservation zero zero {scenarioMint = amount}
+
+checkConservation :: Scenario -> Scenario -> PropertyT IO ()
+checkConservation outerCase localCase = do
   f <- evalEither fixture
   parameters <- evalEither ProtocolFixture.parameters
   (outerFields, outerInput, outerExpected) <- evalEither (scenarioFields f 17 (scenarioFee outerCase) outerCase)
   (localFields, localInput, localExpected) <- evalEither (scenarioFields f 18 0 localCase)
+  when (scenarioMint localCase == 0) $ Fields.fieldMint localFields === Nothing
   extraIdentifier <- evalEither (Id.fromBytes (B.replicate 32 19))
   let extra = Utxo.utxo (Input.input extraIdentifier 0) (Utxo.output outerInput)
       expected = normalize (Map.unionWith (+) outerExpected localExpected)
