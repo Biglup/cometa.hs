@@ -3,9 +3,9 @@
 
 The project and extracted package live outside the checkout. Only the small
 consumer sources are copied from it; no cabal.project.local, fixtures or build
-outputs are reused. Cabal's ordinary package store and cached index are reused,
-with --offline preventing dependency downloads. Native dependencies must already
-be built and are supplied explicitly.
+outputs are reused. Cabal uses its configured package repository and store.
+Use --offline only when all dependencies selected for this consumer are cached.
+Native dependencies must already be built and are supplied explicitly.
 """
 
 import argparse
@@ -64,6 +64,8 @@ def main():
                         help="existing native include directory (repeatable)")
     parser.add_argument("--extra-lib-dirs", type=Path, action="append", required=True,
                         help="existing native library directory (repeatable)")
+    parser.add_argument("--offline", action="store_true",
+                        help="disallow downloads; requires the consumer dependency plan to be cached")
     args = parser.parse_args()
     archive = args.archive.resolve(strict=True)
     includes = [path.resolve(strict=True) for path in args.extra_include_dirs]
@@ -102,8 +104,9 @@ def main():
                 [str(path) for path in libraries] + ([environment[variable]] if environment.get(variable) else [])
             )
         target = "exe:package-consumer"
-        for command in (["cabal", "build", "--offline", target],
-                        ["cabal", "run", "--offline", target]):
+        options = ["--offline"] if args.offline else []
+        for command in (["cabal", "build", *options, target],
+                        ["cabal", "run", *options, target]):
             subprocess.run(command, cwd=project, env=environment, check=True)
     print("Isolated source-package consumer verification passed")
 

@@ -4585,3 +4585,13 @@ the benchmark, formatting/lint, package metadata and strict Sphinx. The changed
 payment documentation snippet is compiled separately. Hosted platform checks and
 final preprod validation remain release gates. No live transactions were submitted
 and no production library or native pin changes are included in this pass.
+
+
+#### Source-consumer CI dependency resolution
+
+The first hosted consumer runs failed before compilation because the helper
+forced `--offline`. Its independent project selected dependencies absent from
+the runner cache, even though the checkout and archive suites had passed. The
+helper now permits ordinary Cabal downloads by default and offers an explicit
+`--offline` option for fully cached runs. Isolation from checkout source/configuration
+is unchanged. This is a verification-tool fix, with no library or native changes.
