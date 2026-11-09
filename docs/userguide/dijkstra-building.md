@@ -36,11 +36,15 @@ Account operations describe ledger account constraints and transfers:
 
 These account operations and script credential guards require a ledger era that
 supports them. Building an offline transaction does not query account balances or
-establish whether a governance action is eligible. Proposal building
-requires guardrails policy hashes for parameter changes and treasury withdrawals;
-use an explicit executable Plutus script hash in those `Action` values and
-attach its script. These proposal operations supply the unit argument
-`Constr 0 []` to the proposing script; they do not accept a custom argument.
+establish whether a governance action is eligible. Parameter-change and
+treasury-withdrawal actions may name a guardrails policy. When they do,
+`Plan.propose` supplies the unit argument `Constr 0 []`; attach the policy script
+or resolve its reference-script UTxO separately. Actions without a policy do not
+create a proposing redeemer. Use `Plan.proposeWithRedeemer` for an explicit
+argument or `Plan.proposeWithDeferredRedeemer` for an argument derived from the
+balanced draft. Both custom-argument operations require an action naming a policy.
+See [proposal building](transaction-building.md#governance-proposals-and-treasury-assertions)
+for the full contract.
 
 `examples/DijkstraBuilding.hs` compiles an offline account and governance workflow
 using synthetic inputs and one error boundary:

@@ -21,9 +21,13 @@ certificates, withdrawals, metadata and validity bounds. Dijkstra operations add
 key or script guards, required outer guards, direct account deposits and account
 balance intervals. Governance operations accept typed actions, anchors, voters
 and voting procedures; proposal deposits come from the protocol snapshot.
-Parameter-change and treasury-withdrawal proposals require a Plutus V4 guardrails
-policy hash and its witness or reference script. Their proposing redeemer uses
-`Constr 0 []`, supplied by the builder.
+Parameter-change and treasury-withdrawal proposals may name a guardrails policy.
+When they do, supply its Plutus V4 script witness or reference script.
+`SubPlan.propose` supplies the unit redeemer `Constr 0 []`;
+`SubPlan.proposeWithRedeemer` accepts an explicit argument, and
+`SubPlan.proposeWithDeferredRedeemer` derives it from the local draft. The latter
+two operations require an action naming a policy. Proposals without a policy
+create no proposing redeemer.
 Conflicting input snapshots or arguments fail at the build boundary. Quantities,
 aggregates and deposits must fit the native signed range. Results must fit the
 configured transaction size and execution-unit limits, and output values must

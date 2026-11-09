@@ -2,7 +2,10 @@ cabal-version: 3.0
 name: cometa
 version: 0.1.0.0
 synopsis: Idiomatic Haskell bindings to cardano-c
-description: An experimental foundation for Haskell-owned Cardano domain values.
+description:
+  Haskell-owned Cardano values with transaction construction, signing, script
+  evaluation and provider interfaces backed by cardano-c. Includes an optional
+  Blockfrost provider sublibrary.
 license: Apache-2.0
 license-file: LICENSE
 author: Biglup Labs
@@ -30,6 +33,8 @@ extra-source-files:
   docs/development/*.json
   docs/development/*.csv
   test/Fixtures/*.md
+  test/package-consumer/*.hs
+  test/package-consumer/*.cabal
   test/valgrind/*.supp
 
 source-repository head
@@ -1130,3 +1135,17 @@ executable cometa-deferred-withdraw-zero
 executable cometa-plutus-v4-guarded-subtransaction
   import: connected-example
   main-is: Connected/PlutusV4GuardedSubTransaction.hs
+
+benchmark cometa-performance
+  import: language
+  type: exitcode-stdio-1.0
+  hs-source-dirs: benchmark test
+  main-is: Main.hs
+  other-modules: Fixtures.ProtocolParameters
+  ghc-options: -rtsopts
+  build-depends:
+    base >=4.18 && <4.22,
+    aeson >=2.2 && <2.3,
+    bytestring >=0.11 && <0.13,
+    transformers >=0.6 && <0.7,
+    cometa

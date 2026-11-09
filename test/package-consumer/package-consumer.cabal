@@ -1,0 +1,16 @@
+cabal-version: 3.0
+name: package-consumer
+version: 0.0.0
+build-type: Simple
+
+executable package-consumer
+  main-is: Main.hs
+  default-language: Haskell2010
+  ghc-options: -Wall -Werror
+  build-depends:
+    base >=4.18 && <4.22,
+    aeson >=2.2 && <2.3,
+    bytestring >=0.11 && <0.13,
+    transformers >=0.6 && <0.7,
+    cometa,
+    cometa:blockfrost
