@@ -4415,7 +4415,8 @@ public API; it does not claim completion of the remaining contracts.
 
 The native merged branch's MSVC test build exposed a pre-existing `__int128`
 fee-oracle dependency. Native [PR224](https://github.com/Biglup/cardano-c/pull/224)
-replaces that test-only arithmetic with exact portable mini-GMP arithmetic; all
-96 fee tests and their Valgrind run pass locally. It changes no production code
-and is not required for this binding's pinned static-library build. Hosted
-platform results remain separate validation gates.
+replaces that test arithmetic with exact portable mini-GMP arithmetic; all
+96 fee tests and their Valgrind run pass locally. Subsequent MSVC linking exposed
+missing data-import declarations for the network slot constants; the native PR
+also addresses shared-library linkage. This binding builds the static library.
+Hosted platform results remain separate validation gates.

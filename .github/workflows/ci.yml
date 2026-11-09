@@ -205,7 +205,7 @@ jobs:
       - name: Build strict guide and check links
         run: |
           python -m sphinx -n -W --keep-going -b html docs/userguide docs/_build/html
-          python -m sphinx -n -W --keep-going -b linkcheck docs/userguide docs/_build/linkcheck
+          python -m sphinx -n -W --keep-going -b linkcheck -D linkcheck_retries=3 docs/userguide docs/_build/linkcheck
       - uses: actions/upload-artifact@v4
         with:
           name: user-guide
