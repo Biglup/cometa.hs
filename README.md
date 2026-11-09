@@ -44,11 +44,13 @@ workflows require a network that supports those features.
 ## Installation
 
 Cometa.hs is not yet published on Hackage. Build the checkout with GHC, Cabal and
-the cardano-c revision pinned in [`native/cardano-c.ref`](native/cardano-c.ref).
-See the [installation guide](docs/userguide/installation.md) for native library
-paths and runtime linking.
+a C toolchain. Prepare its bundled native dependency from the cardano-c checkout
+pinned in [`native/cardano-c.ref`](native/cardano-c.ref), then build normally. See
+the [installation guide](docs/userguide/installation.md) for prerequisites and the
+optional installed-library configuration.
 
 ```sh
+python3 tools/package-native.py /path/to/pinned/cardano-c
 cabal build all
 cabal run cometa-transaction-building
 ```

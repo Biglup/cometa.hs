@@ -25,6 +25,9 @@ extra-source-files:
   .readthedocs.yaml
   assets/*.png
   native/cardano-c.ref
+  native/NOTICE
+  native/*.json
+  native/licenses/*
   docs/requirements.txt
   docs/userguide/*.md
   docs/userguide/conf.py
@@ -40,6 +43,11 @@ extra-source-files:
 source-repository head
   type: git
   location: https://github.com/Biglup/cometa.hs.git
+
+flag system-cardano-c
+  description: Link an installed cardano-c instead of the bundled source package.
+  default: False
+  manual: True
 
 common language
   default-language: Haskell2010
@@ -89,11 +97,12 @@ library core
     base >=4.18 && <4.22,
     bytestring >=0.11 && <0.13,
     text >=2.0 && <2.2
-  extra-libraries: cardano-c
-  -- The pinned static native archive uses pthread-backed sodium initialization.
-  -- Cabal links the archive directly rather than importing its CMake target.
-  if os(linux) || os(osx)
-    extra-libraries: pthread
+  if flag(system-cardano-c)
+    extra-libraries: cardano-c
+    if os(linux) || os(osx)
+      extra-libraries: m, pthread
+  else
+    build-depends: cardano-c-clib ==0.1.0.0
   c-sources:
     cbits/cometa_provider.c
     cbits/cometa_cbor.c

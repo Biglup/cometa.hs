@@ -5,46 +5,59 @@ GHC and Cabal. Consult the repository's `cabal.project` and package description
 for its current compiler and dependency bounds; a platform is supported only
 when the corresponding CI build has passed.
 
-## Native dependency
+## Build a checkout
 
-Install the cardano-c headers and library from the revision recorded in
-`native/cardano-c.ref`. The manifest in
-`docs/development/native-baseline.json` records the header and corpus baseline.
-Headers and the linked library must come from the same compatible installation.
-Follow cardano-c's build instructions for your platform.
-
-When cardano-c is outside the compiler's default search paths, pass its installed
-include and library directories to Cabal:
+The default build compiles the pinned cardano-c source as the `cardano-c-clib`
+Cabal dependency. You need a C toolchain as well as GHC, Cabal and Python 3 to
+prepare a Git checkout. Obtain cardano-c at the revision recorded in
+`native/cardano-c.ref`, then run these commands from the Cometa.hs directory:
 
 ```sh
+python3 tools/package-native.py /path/to/pinned/cardano-c
 cabal update
-cabal build all --extra-include-dirs=/path/to/cardano-c/include --extra-lib-dirs=/path/to/cardano-c/lib
-cabal test all --test-show-details=direct --extra-include-dirs=/path/to/cardano-c/include --extra-lib-dirs=/path/to/cardano-c/lib
+cabal build all
+cabal test all --test-show-details=direct
 ```
 
-Replace the paths with the installation prefix on your computer. The include
-directory must contain `cardano/cardano.h`. Keep the same native configuration
-when building tests and Haddock.
+The preparation command creates `.native/cardano-c-clib`, which the repository's
+Cabal project includes automatically. No separate cardano-c installation or
+include/library search flags are needed for this configuration.
 
-## Runtime linking
+The intended Hackage distribution uses a native source package dependency so
+Cabal can build it automatically. Neither package is published yet; use the
+checkout preparation above until release artifacts are available.
 
-A successful link does not ensure that the runtime loader can find a shared
-library. Install cardano-c in a loader-visible location, or configure the loader
-search path for your environment (`LD_LIBRARY_PATH` on Linux,
-`DYLD_LIBRARY_PATH` on macOS, or `PATH` on Windows). Static installations may need
-additional native dependencies at link time; follow the matching cardano-c build
-configuration.
+## Use an installed cardano-c library
+
+To use an existing native installation instead, enable `system-cardano-c` and
+supply its include and library directories when necessary:
+
+```sh
+cabal build all -fsystem-cardano-c --extra-include-dirs=/path/to/cardano-c/include --extra-lib-dirs=/path/to/cardano-c/lib
+```
+
+Use the revision recorded in `native/cardano-c.ref`. Headers and library must
+come from the same compatible installation; the include directory must contain
+`cardano/cardano.h`. Keep the flag and native paths when running tests or building
+Haddock. The repository's `tools/build-native.py` helper selects this configuration
+when preparing an installed native library for development.
+
+For a shared installation, make the library available to the runtime loader
+through the installation location or the environment's search path
+(`LD_LIBRARY_PATH` on Linux, `DYLD_LIBRARY_PATH` on macOS, or `PATH` on Windows).
+Static installations may need additional native dependencies at link time;
+follow the matching cardano-c build configuration.
 
 If headers cannot be found, check the include prefix. If linking fails, check the
 library directory and architecture. If a built program fails to load cardano-c,
-check the runtime search path and ensure it resolves the same library used during
-compilation.
+check that the runtime search path resolves the library used during compilation.
 
 ## Use in an application
 
 Until a release is available, add the checked-out Cometa.hs directory to your
-application's Cabal project and declare `cometa` in the application's
-`build-depends`. Use an explicit source revision for reproducible builds. See
+application's Cabal project alongside its prepared `.native/cardano-c-clib`
+directory, and declare `cometa` in the application's `build-depends`. Use explicit
+source revisions for reproducible builds. See
 [hashes](hashes.md) for the current public interface and
 [API reference](api-reference.md) for local Haddock generation.
 

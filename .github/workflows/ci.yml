@@ -58,9 +58,10 @@ jobs:
           ref: ${{ steps.pin.outputs.revision }}
           path: .native/cardano-c
           persist-credentials: false
-      - name: Build pinned native static library
-        id: native
-        run: python tools/build-native.py .native/cardano-c .native/build --configure-cabal
+      - name: Prepare bundled native source package
+        run: |
+          python tools/package-native.py .native/cardano-c
+          printf 'package cometa\n  ghc-options: -Werror\n' > cabal.project.local
       - name: Build with warnings as errors
         run: cabal build all
       - name: Run tests
@@ -140,27 +141,21 @@ jobs:
           name: haddock-${{ matrix.os }}-ghc-${{ matrix.ghc }}
           path: docs/_build/api/
           if-no-files-found: error
-      - name: Check package and build source distribution consumer
-        env:
-          NATIVE_INCLUDE_DIR: ${{ steps.native.outputs.include-dir }}
-          NATIVE_LIBRARY_DIR: ${{ steps.native.outputs.library-dir }}
+      - name: Check packages and create source archives
         run: |
           cabal check
-          cabal sdist --output-directory=.sdist
-          consumer_dir="$RUNNER_TEMP/cometa-consumer"
-          if [ "$RUNNER_OS" = "Windows" ]; then
-            consumer_dir="$(cygpath -u "$RUNNER_TEMP")/cometa-consumer"
-          fi
-          mkdir -p "$consumer_dir"
-          tar -xzf .sdist/cometa-*.tar.gz -C "$consumer_dir"
-          cd "$consumer_dir"/cometa-*
-          cabal build all --enable-tests --extra-include-dirs="$NATIVE_INCLUDE_DIR" --extra-lib-dirs="$NATIVE_LIBRARY_DIR"
-          cabal test all --enable-tests --test-show-details=direct --extra-include-dirs="$NATIVE_INCLUDE_DIR" --extra-lib-dirs="$NATIVE_LIBRARY_DIR"
-      - name: Run independent source-package consumer
+          (cd .native/cardano-c-clib && cabal check)
+          cabal sdist all --output-directory=.sdist
+      - name: Build and test source archives with an independent consumer
         run: >-
           python tools/check-source-package.py .sdist/cometa-*.tar.gz
-          --extra-include-dirs "${{ steps.native.outputs.include-dir }}"
-          --extra-lib-dirs "${{ steps.native.outputs.library-dir }}"
+          --native-archive .sdist/cardano-c-clib-*.tar.gz
+          --test-package
+      - uses: actions/upload-artifact@v4
+        with:
+          name: source-packages-${{ matrix.os }}-ghc-${{ matrix.ghc }}
+          path: .sdist/*.tar.gz
+          if-no-files-found: error
       - name: Exercise performance harness
         if: matrix.os == 'ubuntu-24.04' && matrix.ghc == '9.6.7'
         run: cabal bench cometa-performance --benchmark-options="1"
@@ -173,6 +168,41 @@ jobs:
           timeout 600s valgrind --suppressions=test/valgrind/ghc-9.6.7.supp --fair-sched=yes --leak-check=full --show-leak-kinds=definite,indirect --errors-for-leak-kinds=definite,indirect --error-exitcode=1 "$(cabal list-bin cometa-test)" --num-threads=1 +RTS -N2 -RTS
           timeout 600s valgrind --suppressions=test/valgrind/ghc-9.6.7.supp --fair-sched=yes --leak-check=full --show-leak-kinds=definite,indirect --errors-for-leak-kinds=definite,indirect --error-exitcode=1 "$(cabal list-bin cometa-runtime-test)" --num-threads=1 +RTS -N2 -RTS
           timeout 600s valgrind --suppressions=test/valgrind/ghc-9.6.7.supp --fair-sched=yes --leak-check=full --show-leak-kinds=definite,indirect --errors-for-leak-kinds=definite,indirect --error-exitcode=1 "$(cabal list-bin cometa-blockfrost-test)" --num-threads=1 +RTS -N2 -RTS
+
+  system-library:
+    name: Installed native library / Linux
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: haskell-actions/setup@v2
+        with:
+          ghc-version: '9.6.7'
+          cabal-version: '3.12.1.0'
+          cabal-update: false
+      - name: Configure secure package repository and update index
+        run: |
+          cabal user-config init --force --augment=$'repository hackage.haskell.org\n  url: https://hackage.haskell.org/\n  secure: True'
+          cabal update
+      - name: Read native source pin
+        id: pin
+        run: echo "revision=$(cat native/cardano-c.ref)" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v4
+        with:
+          repository: Biglup/cardano-c
+          ref: ${{ steps.pin.outputs.revision }}
+          path: .native/cardano-c
+          persist-credentials: false
+      - name: Build installed native library and select system mode
+        id: native
+        run: python tools/build-native.py .native/cardano-c .native/build --configure-cabal
+      - name: Test installed-library mode
+        run: cabal test all --test-show-details=direct
+      - name: Verify installed-library consumer
+        run: |
+          cabal sdist cometa --output-directory=.sdist
+          python tools/check-source-package.py .sdist/cometa-*.tar.gz --extra-include-dirs "${{ steps.native.outputs.include-dir }}" --extra-lib-dirs "${{ steps.native.outputs.library-dir }}"
 
   quality:
     runs-on: ubuntu-24.04
