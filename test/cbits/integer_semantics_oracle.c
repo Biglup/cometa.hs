@@ -23,6 +23,7 @@
 
 #include <cardano/cardano.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 
 /* DEFINITIONS ***************************************************************/
@@ -40,7 +41,7 @@ cometa_test_integer_semantics(
   uint8_t     operation,
   const char* left,
   const char* right,
-  uint32_t    argument,
+  uint64_t    argument,
   char*       output,
   size_t      capacity)
 {
@@ -55,7 +56,7 @@ cometa_test_integer_semantics(
     return CARDANO_ERROR_POINTER_IS_NULL;
   }
 
-  if ((strlen(left) > 256U) || (strlen(right) > 256U) || (argument > 4096U))
+  if ((strlen(left) > 256U) || (strlen(right) > 256U) || (((operation != 30U) && (operation != 32U)) && (argument > 4096U)))
   {
     return CARDANO_ERROR_INVALID_ARGUMENT;
   }
@@ -127,25 +128,25 @@ cometa_test_integer_semantics(
       cardano_bigint_not(first, result);
       break;
     case 11:
-      cardano_bigint_shift_left(first, argument, result);
+      cardano_bigint_shift_left(first, (uint32_t)argument, result);
       break;
     case 12:
-      cardano_bigint_shift_right(first, argument, result);
+      cardano_bigint_shift_right(first, (uint32_t)argument, result);
       break;
     case 13:
       cardano_bigint_unref(&result);
-      status = cardano_bigint_from_int(cardano_bigint_test_bit(first, argument) ? 1 : 0, &result);
+      status = cardano_bigint_from_int(cardano_bigint_test_bit(first, (uint32_t)argument) ? 1 : 0, &result);
       break;
     case 14:
-      cardano_bigint_set_bit(first, argument);
+      cardano_bigint_set_bit(first, (uint32_t)argument);
       cardano_bigint_assign(first, result);
       break;
     case 15:
-      cardano_bigint_clear_bit(first, argument);
+      cardano_bigint_clear_bit(first, (uint32_t)argument);
       cardano_bigint_assign(first, result);
       break;
     case 16:
-      cardano_bigint_flip_bit(first, argument);
+      cardano_bigint_flip_bit(first, (uint32_t)argument);
       cardano_bigint_assign(first, result);
       break;
     case 17:
@@ -201,14 +202,31 @@ cometa_test_integer_semantics(
       status = cardano_bigint_from_unsigned_int(cardano_bigint_get_bytes_size(first), &result);
       break;
     case 30:
-      /* A bounded witness for uint64 -> unsigned long narrowing on LLP64.
-       * 0^(2^32) is always cheap; never accept an arbitrary giant power. */
-      if (!cardano_bigint_is_zero(first))
+    case 32:
+      /* Full-width powers remain resource-bounded by requiring base0/1/-1.
+       * Operation32 also checks that the result may alias the input base. */
+      cardano_bigint_increment(result);
+      cardano_bigint_abs(first, remainder);
+      if (cardano_bigint_compare(remainder, result) > 0)
       {
         status = CARDANO_ERROR_INVALID_ARGUMENT;
         break;
       }
-      cardano_bigint_pow(first, UINT64_C(1) << 32, result);
+      if (operation == 32U)
+      {
+        cardano_bigint_pow(first, argument, first);
+        cardano_bigint_assign(first, result);
+      }
+      else
+      {
+        cardano_bigint_pow(first, argument, result);
+      }
+      break;
+    case 31:
+      /* Reconstruct the signed fixed-width result as an independent decimal
+       * transport. INT64_MIN exercises both native signed conversion paths. */
+      cardano_bigint_unref(&result);
+      status = cardano_bigint_from_int(cardano_bigint_to_int(first), &result);
       break;
     default:
       status = CARDANO_ERROR_INVALID_ARGUMENT;
@@ -249,12 +267,13 @@ cleanup:
 }
 
 /* Magnitude byte import/export, independently checked against Haskell folds.
- * Zero's native export error is intentionally returned, never patched here. */
+ * A sign flag separately exercises negative magnitude export, including zero. */
 int
 cometa_test_integer_bytes(
   const unsigned char* input,
   size_t               input_size,
   uint8_t              little_endian,
+  uint8_t              negative,
   unsigned char*       output,
   size_t               output_capacity,
   char*                decimal,
@@ -267,6 +286,11 @@ cometa_test_integer_bytes(
   decimal[0]               = '\0';
   cardano_bigint_t* value  = NULL;
   cardano_error_t   status = cardano_bigint_from_bytes(input, input_size, little_endian ? CARDANO_BYTE_ORDER_LITTLE_ENDIAN : CARDANO_BYTE_ORDER_BIG_ENDIAN, &value);
+  if ((status == CARDANO_SUCCESS) && (negative != 0U))
+  {
+    cardano_bigint_negate(value, value);
+  }
+
   if (status == CARDANO_SUCCESS)
   {
     const size_t required = cardano_bigint_get_string_size(value, 10);
@@ -293,5 +317,56 @@ cometa_test_integer_bytes(
     }
   }
   cardano_bigint_unref(&value);
+  return (int)status;
+}
+
+/* Parse an independently sized byte span. Copy the actual input into an exact
+ * allocation so nonterminated inputs have no hidden Haskell CString terminator.
+ * input_size may exceed span_size to test that suffix bytes are ignored. */
+int
+cometa_test_integer_span(
+  const char* input,
+  size_t      input_size,
+  size_t      span_size,
+  char*       output,
+  size_t      capacity)
+{
+  cardano_bigint_t* value  = NULL;
+  cardano_error_t   status = CARDANO_SUCCESS;
+  char*             exact  = NULL;
+
+  if ((input == NULL) || (output == NULL) || (capacity == 0U))
+  {
+    return CARDANO_ERROR_POINTER_IS_NULL;
+  }
+
+  if ((input_size == 0U) || (input_size > 256U) || (span_size > input_size))
+  {
+    return CARDANO_ERROR_INVALID_ARGUMENT;
+  }
+
+  exact = malloc(input_size);
+  if (exact == NULL)
+  {
+    return CARDANO_ERROR_MEMORY_ALLOCATION_FAILED;
+  }
+  memcpy(exact, input, input_size);
+  status = cardano_bigint_from_string(exact, span_size, 10, &value);
+
+  if (status == CARDANO_SUCCESS)
+  {
+    const size_t required = cardano_bigint_get_string_size(value, 10);
+    if ((required == 0U) || (required > capacity))
+    {
+      status = CARDANO_ERROR_INSUFFICIENT_BUFFER_SIZE;
+    }
+    else
+    {
+      status = cardano_bigint_to_string(value, output, required, 10);
+    }
+  }
+
+  cardano_bigint_unref(&value);
+  free(exact);
   return (int)status;
 }

@@ -44,7 +44,8 @@ import qualified Data.ByteString as B
 import qualified Data.ByteString.Lazy as L
 import Data.Either (isLeft)
 import Data.Int (Int64)
-import Data.List (foldl', sortOn)
+import Data.List (sortOn)
+import qualified Data.List as List
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Maybe (fromMaybe)
@@ -134,7 +135,7 @@ replaceFirst key amount values = case break ((== key) . fst) values of
   (before, _ : after) -> before <> [(key, amount)] <> after
 
 updates :: Pairs -> Pairs -> Pairs
-updates = foldl' (\values (key, amount) -> replaceFirst key amount values)
+updates = List.foldl' (\values (key, amount) -> replaceFirst key amount values)
 
 -- Copying lhs through insert makes its final occurrence win. Each rhs entry
 -- then contributes once; arithmetic removes zero results but ordinary inserts do
@@ -216,9 +217,9 @@ multiExpected operation left right = Reply (multiSnapshot result) (multiSnapshot
   where
     result = case operation of
       1 -> Map.union right left
-      2 -> Map.filter (not . null) (foldl' (combine 1) left (Map.toList right))
-      3 -> Map.filter (not . null) (foldl' (combine (-1)) left (Map.toList right))
-      4 -> foldl' set left (Map.toList right)
+      2 -> Map.filter (not . null) (List.foldl' (combine 1) left (Map.toList right))
+      3 -> Map.filter (not . null) (List.foldl' (combine (-1)) left (Map.toList right))
+      4 -> List.foldl' set left (Map.toList right)
       _ -> left
     combine sign current (policy, values) = Map.alter (Just . maybe (if sign == 1 then values else arithmetic sign [] values) (\previous -> arithmetic sign previous values)) policy current
     set current (_, []) = current
