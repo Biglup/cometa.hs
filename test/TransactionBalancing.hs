@@ -379,7 +379,9 @@ cancellation = do
   -- never materializes, and cancellation must unwind its joined native scope.
   threadDelay 200000
   _ <- forkFinally (killThread worker) (putMVar cancelled)
-  outcome <- timeout 2000000 ((,) <$> readMVar finished <*> readMVar cancelled)
+  -- Use the builder fixtures' five-second join bound: full Valgrind runs also
+  -- charge callback scheduling and native finalization to this deadline.
+  outcome <- timeout 5000000 ((,) <$> readMVar finished <*> readMVar cancelled)
   case outcome of
     Just (Left failure, Right ()) -> fromException failure @?= Just ThreadKilled
     Just other -> assertFailure ("cancellation returned normally or lost its exception: " <> show other)

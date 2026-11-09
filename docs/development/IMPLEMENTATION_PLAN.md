@@ -4421,3 +4421,15 @@ on network slot constants. The proposed shared-library linkage changes were
 reverted; the cause remains under investigation against a known-good baseline.
 PR224 changes only the fee test and its changelog entry. This binding builds the
 static library. Hosted platform results remain separate validation gates.
+
+PR224 merged as `b877ada64418a0c3c2925dc81d72a5b4cab18484`; only the fee test
+and changelog changed, so the binding's production native pin remains unchanged.
+Hosted PR28 checks passed on Windows, macOS ARM/Intel and Linux ARM. GHC 9.10
+reported redundant unqualified `foldl'` imports because Prelude now exports it;
+the two test modules use qualified `Data.List.foldl'` on both compiler versions.
+The Linux Valgrind run exceeded the balancing cancellation test's two-second
+join deadline. It now matches the neighboring builder fixtures' five-second
+bound, retaining both completion joins, exact `ThreadKilled` and live-context
+assertions. Local validation passes all 423 public tests and all 181 runtime
+tests under Valgrind, with zero errors or lost allocations and no suppressions.
+Hosted checks for these test-only corrections must still pass.

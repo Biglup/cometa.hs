@@ -34,7 +34,8 @@ import Data.Bits (clearBit, complement, complementBit, popCount, setBit, shiftL,
 import qualified Data.ByteString as BS
 import Data.Char (intToDigit)
 import Data.Int (Int64)
-import Data.List (foldl', unfoldr)
+import Data.List (unfoldr)
+import qualified Data.List as List
 import Data.Word (Word64, Word8)
 import Foreign.C.String (CString, peekCString, withCString)
 import Foreign.C.Types (CInt (..), CSize (..))
@@ -145,7 +146,7 @@ checkBytes =
   forM_ [[0], [0, 0], [1], [0, 1], [128, 255], [0, 1, 0, 255], replicate 32 255] $ \bytes ->
     forM_ [False, True] $ \little -> forM_ [False, True] $ \negative -> do
       let ordered = if little then reverse bytes else bytes
-          magnitude = foldl' (\acc byte -> acc * 256 + toInteger byte) 0 ordered
+          magnitude = List.foldl' (\acc byte -> acc * 256 + toInteger byte) 0 ordered
           value = if negative then negate magnitude else magnitude
           count = fromInteger ((magnitudeLength magnitude + 7) `quot` 8)
           expected = magnitudeBytes little value
@@ -167,7 +168,7 @@ propMagnitudeBytes = property $ do
   little <- forAll Gen.bool
   negative <- forAll Gen.bool
   let ordered = if little then reverse bytes else bytes
-      magnitude = foldl' (\acc byte -> acc * 256 + toInteger byte) 0 ordered
+      magnitude = List.foldl' (\acc byte -> acc * 256 + toInteger byte) 0 ordered
       value = if negative then negate magnitude else magnitude
       expected = magnitudeBytes little value
   (status, decimal, encoded) <- evalIO (byteOracle bytes little negative (BS.length expected))
