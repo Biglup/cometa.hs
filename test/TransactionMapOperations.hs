@@ -96,6 +96,12 @@ at index values
   | index < 0 = Nothing
   | otherwise = case drop index values of [] -> Nothing; value : _ -> Just value
 
+-- | Fail explicitly when a fixture changes shape instead of using partial indexing.
+fixtureAt :: Int -> [a] -> IO a
+fixtureAt index values = case at index values of
+  Just value -> pure value
+  Nothing -> assertFailure "fixture index is out of bounds" >> fail "fixture"
+
 selected :: (a -> T.Term) -> (b -> T.Term) -> Maybe (a, b) -> T.Term
 selected key value = maybe T.TNull (\(k, v) -> T.TList [key k, value v])
 
@@ -110,8 +116,10 @@ reply inserted chosen count bytes = T.TList [T.TBool inserted, chosen, chosen, T
 checkWithdrawals :: IO ()
 checkWithdrawals = do
   keys <- accounts
-  forM_ [[], [(head keys, 0)], zip keys [0, maxBound, 1, 2]] $ \source ->
-    forM_ ["invalid", Reward.toText (head keys), Reward.toText (last keys)] $ \text -> do
+  firstKey <- fixtureAt 0 keys
+  lastKey <- fixtureAt (length keys - 1) keys
+  forM_ [[], [(firstKey, 0)], zip keys [0, maxBound, 1, 2]] $ \source ->
+    forM_ ["invalid", Reward.toText firstKey, Reward.toText lastKey] $ \text -> do
       let encoded = Collections.encodeWithdrawalsCbor source
           parsed = Reward.fromText text
           expected = either (const source) (\key -> source <> [(key, maxBound)]) parsed
@@ -122,6 +130,8 @@ checkWithdrawals = do
 checkDeposits :: IO ()
 checkDeposits = do
   keys <- accounts
+  firstKey <- fixtureAt 0 keys
+  lastKey <- fixtureAt (length keys - 1) keys
   forM_ [[], take 1 (zip keys [0 ..]), zip keys [0, maxBound, 1, 2]] $ \source -> do
     if null source
       then pure ()
@@ -129,7 +139,7 @@ checkDeposits = do
         entries <- must (Fields.mkEntries source)
         sortOn (Reward.toBytes . fst) (Fields.entries entries) @?= sortOn (Reward.toBytes . fst) source
     assertBool "duplicate public deposit accepted" (isLeft (Fields.mkEntries (source <> source)) || null source)
-    forM_ [B.empty, "invalid", Text.encodeUtf8 (Reward.toText (head keys)), Text.encodeUtf8 (Reward.toText (last keys))] $ \text -> do
+    forM_ [B.empty, "invalid", Text.encodeUtf8 (Reward.toText firstKey), Text.encodeUtf8 (Reward.toText lastKey)] $ \text -> do
       let parsed = Reward.fromText (Text.decodeUtf8 text)
           inserted = B.null text || either (const False) (\key -> all ((/= key) . fst) source) parsed
           extra = if B.null text || not inserted then [] else either (const []) (\key -> [(key, maxBound)]) parsed
@@ -142,6 +152,8 @@ checkDeposits = do
 checkIntervals :: IO ()
 checkIntervals = do
   keys <- accounts
+  firstKey <- fixtureAt 0 keys
+  lastKey <- fixtureAt (length keys - 1) keys
   let intervals = [Fields.ExactBalance 0, Fields.ExactBalance maxBound, Fields.BalanceRange Nothing (Just maxBound), Fields.BalanceRange (Just 0) Nothing]
       bytes = association (E.encodeBytes . Reward.toBytes) interval
   forM_ [[], zip keys intervals] $ \source -> do
@@ -150,7 +162,7 @@ checkIntervals = do
       else do
         entries <- must (Fields.mkEntries source)
         length (Fields.entries entries) @?= length source
-    forM_ [B.empty, "invalid", Text.encodeUtf8 (Reward.toText (head keys)), Text.encodeUtf8 (Reward.toText (last keys))] $ \text -> do
+    forM_ [B.empty, "invalid", Text.encodeUtf8 (Reward.toText firstKey), Text.encodeUtf8 (Reward.toText lastKey)] $ \text -> do
       let parsed = Reward.fromText (Text.decodeUtf8 text)
           inserted = B.null text || either (const False) (\key -> all ((/= key) . fst) source) parsed
           extra = if B.null text || not inserted then [] else either (const []) (\key -> [(key, Fields.ExactBalance maxBound)]) parsed
@@ -178,8 +190,11 @@ checkRedeemers = do
   identifiers <- traverse (must . Id.fromBytes . B.replicate 32) [0, 1, 2]
   retained <- must (Data.decodeCbor (B.pack [24, 1]))
   let inputs = map (`Input.input` 0) identifiers
-      redeemers = [Redeemer.Redeemer Redeemer.Spending 3 retained (ExUnits 0 maxBound), Redeemer.Redeemer Redeemer.Rewarding 0 (Data.fromData (Data.Integer 2)) (ExUnits maxBound 0)]
-      pairs = [(head inputs, head redeemers), (inputs !! 1, last redeemers), (head inputs, last redeemers)]
+  firstInput <- fixtureAt 0 inputs
+  secondInput <- fixtureAt 1 inputs
+  let firstRedeemer = Redeemer.Redeemer Redeemer.Spending 3 retained (ExUnits 0 maxBound)
+      secondRedeemer = Redeemer.Redeemer Redeemer.Rewarding 0 (Data.fromData (Data.Integer 2)) (ExUnits maxBound 0)
+      pairs = [(firstInput, firstRedeemer), (secondInput, secondRedeemer), (firstInput, secondRedeemer)]
       encodePairs values = encode (E.encodeListLen (fromIntegral (length values)) <> foldMap (\(key, value) -> E.encodeListLen 2 <> raw (Input.encodeCbor key) <> raw (Redeemer.encodeCbor value)) values)
   forM_ [[], take 1 pairs, pairs, reverse pairs] $ \source ->
     forM_ inputs $ \query ->
@@ -195,6 +210,8 @@ checkSubtransactions = do
   donatedBody <- must (SubBody.fromBody (SubBody.fromFields ((Fields.fields [] []) {Fields.fieldDonation = Just 0})))
   let values = [Sub.fromBody donatedBody, Sub.fromBody plainBody]
   ids <- traverse (Sub.transactionId >=> must) values
+  firstValue <- fixtureAt 0 values
+  firstId <- fixtureAt 0 ids
   missing <- must (Id.fromBytes (B.replicate 32 42))
   forM_ [[], values, reverse values] $ \source -> do
     tagged <- traverse (\value -> do identifier <- Sub.transactionId value >>= must; pure (identifier, value)) source
@@ -205,8 +222,8 @@ checkSubtransactions = do
       actual @?= expected
   -- New empty sets are searchable, but empty CBOR imports are schema-invalid.
   subOracle (encode (E.encodeTag 258 <> E.encodeListLen 0)) (Id.toBytes missing) >>= assertBool "empty subtransaction set imported" . isLeft
-  let duplicate = encode (E.encodeTag 258 <> E.encodeListLen 2 <> foldMap (raw . Sub.encodeCbor) [head values, head values])
-  subOracle duplicate (Id.toBytes (head ids)) >>= assertBool "duplicate subtransaction ids imported" . isLeft
+  let duplicate = encode (E.encodeTag 258 <> E.encodeListLen 2 <> foldMap (raw . Sub.encodeCbor) [firstValue, firstValue])
+  subOracle duplicate (Id.toBytes firstId) >>= assertBool "duplicate subtransaction ids imported" . isLeft
 
 -- FFI ------------------------------------------------------------------------
 
