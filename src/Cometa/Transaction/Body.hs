@@ -32,6 +32,7 @@ module Cometa.Transaction.Body
     encodeCborWith,
     SetField (..),
     setEncoding,
+    inputsAreTagged,
     withSetEncoding,
     EncodedBody,
     decodeCbor,
@@ -48,7 +49,7 @@ import qualified Codec.CBOR.Decoding as D
 import qualified Codec.CBOR.Encoding as E
 import Cometa.Address.Reward (RewardAddress)
 import qualified Cometa.Crypto.Blake2b as Blake2b
-import Cometa.Encoding.Set (SetEncoding)
+import Cometa.Encoding.Set (SetEncoding (TaggedSet))
 import Cometa.Error (Error (..))
 import qualified Cometa.Internal.SetEncoding as SetEncoding
 import qualified Cometa.Internal.TransactionCbor as Cbor
@@ -229,6 +230,12 @@ encodeCborWith requested value = do
 -- | Observe one field's set tag. An absent optional field returns 'Nothing'.
 setEncoding :: SetField -> EncodedBody -> Maybe SetEncoding
 setEncoding field (EncodedBody _ _ values) = SetEncoding.encoding <$> Map.lookup (setFieldKey field) values
+
+-- | Whether the encoded spending-input collection carries set tag 258.
+-- Other tagged collections do not affect this result; an absent input field
+-- returns 'False'. This observes the exact body snapshot without re-encoding.
+inputsAreTagged :: EncodedBody -> Bool
+inputsAreTagged encoded = setEncoding Inputs encoded == Just TaggedSet
 
 -- | Change one present field's set tag. Absence and an unchanged tag preserve
 -- the exact original body. A change rebuilds the outer map in numeric key order,

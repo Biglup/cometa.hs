@@ -23,14 +23,21 @@ module EncodingNormalization (tests) where
 -- IMPORTS --------------------------------------------------------------------
 
 import qualified Codec.CBOR.Encoding as E
+import qualified Cometa.AssetId as Asset
+import qualified Cometa.AssetName as Name
 import qualified Cometa.Credential as Credential
 import qualified Cometa.Crypto.Blake2b as Hash
 import qualified Cometa.Crypto.Ed25519.PublicKey as PublicKey
 import qualified Cometa.Crypto.Ed25519.SigningKey as SigningKey
-import Cometa.Error (Error)
+import qualified Cometa.Encoding.Cbor as Encoded
+import qualified Cometa.Encoding.Collections as Collections
+import qualified Cometa.Encoding.Reencode as Reencode
+import Cometa.Encoding.Set (SetEncoding (TaggedSet, UntaggedSet))
+import Cometa.Error (Error (InvalidValueQuantity))
 import Cometa.Internal.FFI.Native (NativeCode)
 import qualified Cometa.Internal.Runtime as Runtime
 import qualified Cometa.Internal.TransactionCbor as Cbor
+import qualified Cometa.PolicyId as Policy
 import qualified Cometa.Script.Native as Native
 import qualified Cometa.SubTransaction as Sub
 import qualified Cometa.SubTransaction.Body as SubBody
@@ -40,6 +47,8 @@ import qualified Cometa.Transaction.Fields as Fields
 import qualified Cometa.Transaction.Witness as Witness
 import qualified Cometa.Transaction.Witnesses as Witnesses
 import qualified Cometa.TransactionId as TxId
+import qualified Cometa.Value as Value
+import qualified Cometa.Value.Raw as Raw
 import Control.Monad (forM_, replicateM, (>=>))
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as B
@@ -47,7 +56,9 @@ import Data.Either (isLeft)
 import Data.Maybe (fromMaybe)
 import Data.Word (Word8)
 import Foreign.C.Types (CSize (..), CUInt (..))
+import Foreign.Marshal.Alloc (alloca)
 import Foreign.Ptr (Ptr)
+import Foreign.Storable (peek)
 import System.Mem (performGC)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertBool, assertFailure, testCase, (@?=))
@@ -58,7 +69,9 @@ tests :: TestTree
 tests =
   testGroup
     "Encoding normalization and signed identity"
-    [ testCase "fresh scripts match cache clearing with definite child-list policy" scripts,
+    [ testCase "raw value clones preserve signed coin, zeros, duplicates and empty groups" rawSnapshots,
+      testCase "encoded input tag observer differs from native dirty-cache heuristic" bodySetMode,
+      testCase "fresh scripts match cache clearing with definite child-list policy" scripts,
       testCase "script-list clearing normalizes descendants and preserves its envelope" scriptLists,
       testCase "composite cache clearing preserves indefinite child-list policy" scriptPolicies,
       testCase "native transaction cache clearing changes signed identity" transactions,
@@ -115,6 +128,7 @@ scripts = do
     assertBool "Nonminimal fixture already fresh" (bytes /= changed)
     Native.toJson fresh @?= Native.toJson original
     normalize 0 bytes >>= (@?= Right changed)
+    Reencode.nativeScript original >>= (@?= Right fresh)
     sourceHash <- Native.hash original >>= must
     freshHash <- Native.hash fresh >>= must
     assertBool "Script hash ignored original representation" (sourceHash /= freshHash)
@@ -135,6 +149,9 @@ scriptLists = do
   let expected = indefinite (foldMap Native.encodeCbor fresh)
       definite = Cbor.encode (E.encodeListLen (fromIntegral (length fresh))) <> foldMap Native.encodeCbor fresh
   normalize 1 original >>= (@?= Right expected)
+  encoded <- Encoded.fromBytes original >>= must
+  result <- Reencode.nativeScripts encoded >>= must
+  Encoded.toBytes result @?= expected
   assertBool "List envelope policy was erased" (expected /= definite)
   map Native.encodeCbor supplied @?= map nonminimalScript supplied
 
@@ -157,6 +174,8 @@ scriptPolicies = do
         fresh <- must (freshScript imported)
         changed <- normalize 0 original >>= must
         changed @?= expected
+        public <- Reencode.nativeScript imported >>= must
+        Native.encodeCbor public @?= expected
         assertBool "Construction JSON silently retained native indefinite policy" (changed /= Native.encodeCbor fresh)
         parsed <- must (Native.decodeCbor changed)
         Native.toJson parsed @?= Native.toJson fresh
@@ -197,6 +216,8 @@ transactions = do
       original = Tx.encodeCbor signed
   verifyWitnesses (TxId.toBytes identifier) witnesses
   changedBytes <- normalize 2 original >>= must
+  public <- Reencode.transaction signed >>= must
+  Tx.encodeCbor public @?= changedBytes
   changed <- must (Tx.decodeCbor changedBytes)
   changedId <- Tx.transactionId changed >>= must
   assertBool "Native body cache clearing retained nonminimal hash" (changedId /= identifier)
@@ -220,6 +241,8 @@ subTransactions = do
   let signed = Sub.assemble body witnesses Nothing
       original = Sub.encodeCbor signed
   changedBytes <- normalize 3 original >>= must
+  public <- Reencode.subTransaction signed >>= must
+  Sub.encodeCbor public @?= changedBytes
   changed <- must (Sub.decodeCbor changedBytes)
   changedId <- Sub.transactionId changed >>= must
   assertBool "Sub-body cache clearing retained nonminimal hash" (changedId /= identifier)
@@ -267,7 +290,74 @@ failures = do
   forM_ (zip [0 ..] [script, list, transaction, sub, hash]) $ \(kind, valid) ->
     forM_ [B.empty, valid <> B.singleton 0, B.take (B.length valid - 1) valid] (normalize kind >=> (assertBool "Malformed normalization input accepted" . isLeft))
 
+-- Raw snapshots have deliberately more information than normalized Value.
+-- Serialize native stored associations via getters rather than value_to_cbor,
+-- whose map serialization can omit the empty groups under examination.
+rawSnapshots :: IO ()
+rawSnapshots = do
+  first <- must (Policy.fromBytes (B.replicate 28 1))
+  second <- must (Policy.fromBytes (B.replicate 28 2))
+  empty <- must (Name.fromBytes B.empty)
+  binary <- must (Name.fromBytes (B.pack [0, 255]))
+  let groups = [(second, []), (first, [(binary, 7)]), (first, [(binary, 2), (empty, 0), (binary, -1)])]
+  forM_ [negate (2 ^ (63 :: Int)), -1, 0, 2 ^ (63 :: Int) - 1] $ \amount -> do
+    snapshot <- must (Raw.mkSnapshot amount groups)
+    Raw.coin snapshot @?= amount
+    Raw.assets snapshot @?= [(first, [(empty, 0), (binary, 2), (binary, -1)]), (second, [])]
+    request <- must (rawBytes amount groups)
+    expected <- must (rawBytes (Raw.coin snapshot) (Raw.assets snapshot))
+    copy <- Runtime.withBytes request $ \input size -> Runtime.withOwnedBuffer "test.rawValue.clone" (cRawValueClone input size)
+    copy @?= Right expected
+    performGC
+    Raw.assets snapshot @?= [(first, [(empty, 0), (binary, 2), (binary, -1)]), (second, [])]
+  snapshot <- must (Raw.mkSnapshot 0 groups)
+  let normalized = Raw.toValue snapshot
+  Value.quantity (Asset.Native first binary) normalized @?= 1
+  Value.quantity (Asset.Native first empty) normalized @?= 0
+  roundTrip <- must (Raw.fromValue normalized)
+  assertBool "Lossy normalization unexpectedly retained raw representation" (roundTrip /= snapshot)
+  Raw.toValue roundTrip @?= normalized
+  forM_ [negate (2 ^ (63 :: Int)) - 1, 2 ^ (63 :: Int)] $ \quantity -> do
+    Raw.mkSnapshot quantity [] @?= Left (InvalidValueQuantity quantity)
+    Raw.mkSnapshot 0 [(first, [(empty, quantity)])] @?= Left (InvalidValueQuantity quantity)
+    Raw.fromValue (Value.lovelace quantity) @?= Left (InvalidValueQuantity quantity)
+  emptySnapshot <- must (Raw.mkSnapshot 0 [])
+  emptyBytes <- must (rawBytes (Raw.coin emptySnapshot) (Raw.assets emptySnapshot))
+  Runtime.withBytes emptyBytes (\input size -> Runtime.withOwnedBuffer "test.rawValue.emptyClone" (cRawValueClone input size)) >>= (@?= Right emptyBytes)
+  where
+    rawBytes amount groups = do
+      encoded <- traverse (\(policy, names) -> (Cbor.encode (E.encodeBytes (Policy.toBytes policy)) <>) <$> Collections.encodeAssetNamesCbor names) groups
+      pure (Cbor.encode (E.encodeListLen 2 <> E.encodeInteger amount <> E.encodeMapLen (fromIntegral (length groups))) <> mconcat encoded)
+
+bodySetMode :: IO ()
+bodySetMode = do
+  key <- must (Credential.keyHashFromBytes (B.replicate 28 6))
+  base <- must (Body.fromBody ((Body.body [] [] 0) {Body.bodyFields = (Fields.fields [] []) {Fields.fieldGuards = Just [Credential.KeyCredential key]}}))
+  forM_ [base, Body.withSetEncoding Body.Inputs TaggedSet base, Body.withSetEncoding Body.Inputs UntaggedSet base] $ \body -> do
+    let expected = Body.setEncoding Body.Inputs body == Just TaggedSet
+    Body.inputsAreTagged body @?= expected
+    Runtime.withBytes (Body.toCbor body) $ \input size -> alloca $ \before -> alloca $ \after -> do
+      cBodySetMode input size before after >>= (@?= 0)
+      observed <- peek before
+      dirty <- peek after
+      observed @?= if expected then 1 else 0
+      dirty @?= 1
+  let mixed = Body.withSetEncoding Body.Inputs UntaggedSet base
+  Body.setEncoding Body.Guards mixed @?= Just TaggedSet
+  Body.inputsAreTagged mixed @?= False
+  -- Once the body cache is discarded, the native input-set writer emits
+  -- tag258 unconditionally. Observe the new bytes, keeping the source exact.
+  reencoded <- Reencode.transaction (Tx.fromBody mixed) >>= must
+  Body.inputsAreTagged (Tx.body reencoded) @?= True
+  Body.inputsAreTagged mixed @?= False
+
 -- FOREIGN IMPORTS ------------------------------------------------------------
 
 foreign import ccall safe "cometa_test_encoding_normalize"
   cNormalize :: CUInt -> Ptr Word8 -> CSize -> Ptr (Ptr Runtime.Buffer) -> IO NativeCode
+
+foreign import ccall safe "cometa_test_raw_value_clone"
+  cRawValueClone :: Ptr Word8 -> CSize -> Ptr (Ptr Runtime.Buffer) -> IO NativeCode
+
+foreign import ccall safe "cometa_test_body_set_mode"
+  cBodySetMode :: Ptr Word8 -> CSize -> Ptr CUInt -> Ptr CUInt -> IO NativeCode

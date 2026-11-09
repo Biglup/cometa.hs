@@ -53,6 +53,7 @@ library core
     Cometa.Internal.Ownership
     Cometa.Internal.Hex
     Cometa.Internal.FFI.Cbor
+    Cometa.Internal.FFI.Reencode
     Cometa.Internal.Transaction
     Cometa.Internal.FFI.Transaction
     Cometa.Internal.SigningKey
@@ -91,6 +92,7 @@ library core
   c-sources:
     cbits/cometa_provider.c
     cbits/cometa_cbor.c
+    cbits/cometa_reencode.c
     cbits/cometa_transaction.c
     cbits/cometa_signing_key.c
     cbits/cometa_ed25519_values.c
@@ -204,6 +206,8 @@ library
     Cometa.Error.Code
     Cometa.Encoding.Cbor
     Cometa.Encoding.Integer
+    Cometa.Encoding.Reencode
+    Cometa.Value.Raw
     Cometa.Encoding.Hex
     Cometa.Encoding.Collections
     Cometa.Encoding.Set
@@ -215,6 +219,7 @@ library
     Cometa.CoinSelection
   other-modules:
     Cometa.Internal.Runtime
+    Cometa.Internal.Reencode
     Cometa.Internal.ProviderRuntime
     Cometa.Internal.CoinSelection
     Cometa.Internal.CoinSelection.Native
@@ -650,6 +655,8 @@ test-suite cometa-runtime-test
     Cometa.Crypto.Pbkdf2
     Cometa.Encoding.Cbor
     Cometa.Encoding.Integer
+    Cometa.Encoding.Reencode
+    Cometa.Value.Raw
     Cometa.Encoding.Set
     Cometa.Encoding.Collections
     Cometa.Error
@@ -697,6 +704,7 @@ test-suite cometa-runtime-test
     Cometa.Internal.ProtocolValues
     Cometa.Internal.ProviderRuntime
     Cometa.Internal.Runtime
+    Cometa.Internal.Reencode
     Cometa.Internal.TransactionCbor
     Cometa.Internal.SetEncoding
     Cometa.Internal.TransactionFields
