@@ -32,6 +32,7 @@ module Cometa.Metadata
     Metadatum,
     View (..),
     mkInteger,
+    integerFromText,
     mkBytes,
     mkText,
     list,
@@ -75,6 +76,7 @@ import qualified Codec.CBOR.Decoding as Decode
 import qualified Codec.CBOR.Encoding as Encode
 import Codec.CBOR.Read (deserialiseFromBytes)
 import Codec.CBOR.Write (toStrictByteString)
+import qualified Cometa.Encoding.Integer as Integer
 import Cometa.Error (Error (..))
 import qualified Cometa.Internal.Hex as Hex
 import Control.Monad (replicateM)
@@ -145,6 +147,12 @@ mkInteger :: Integer -> Either Error Metadatum
 mkInteger n
   | n < negate (2 ^ (64 :: Int)) || n >= 2 ^ (64 :: Int) = Left (InvalidMetadataInteger n)
   | otherwise = Right (Metadatum (IntegerValue n))
+
+-- | Parse native-compatible integer text in a validated radix, then apply the
+-- ledger metadata integer bounds. Parsing errors are 'InvalidIntegerText';
+-- out-of-range values return 'InvalidMetadataInteger'.
+integerFromText :: Integer.Radix -> Text -> Either Error Metadatum
+integerFromText radix text = Integer.fromText radix text >>= mkInteger
 
 -- | Validate a byte string of 0 through 64 bytes.
 mkBytes :: ByteString -> Either Error Metadatum

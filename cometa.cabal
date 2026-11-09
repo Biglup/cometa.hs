@@ -203,6 +203,7 @@ library
     Cometa.Error
     Cometa.Error.Code
     Cometa.Encoding.Cbor
+    Cometa.Encoding.Integer
     Cometa.Encoding.Hex
     Cometa.Encoding.Collections
     Cometa.Encoding.Set
@@ -380,6 +381,7 @@ test-suite cometa-test
     test/cbits/integer_semantics_oracle.c
     test/cbits/collection_operations_oracle.c
     test/cbits/transaction_collection_operations_oracle.c
+    test/cbits/numeric_conversions_oracle.c
   cc-options: -std=c11 -Wall -Wextra
   other-modules:
     Collections
@@ -390,6 +392,7 @@ test-suite cometa-test
     IntegerSemantics
     CollectionOperations
     TransactionCollectionOperations
+    NumericConversions
     InspectionCollections
     HexEncoding
     NativeWorkflows
@@ -646,6 +649,7 @@ test-suite cometa-runtime-test
     Cometa.Crypto.Emip3
     Cometa.Crypto.Pbkdf2
     Cometa.Encoding.Cbor
+    Cometa.Encoding.Integer
     Cometa.Encoding.Set
     Cometa.Encoding.Collections
     Cometa.Error

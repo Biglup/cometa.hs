@@ -51,6 +51,7 @@ import qualified InspectionCollections
 import qualified IntegerSemantics
 import qualified Metadata
 import qualified NativeWorkflows
+import qualified NumericConversions
 import qualified Ownership
 import qualified Parameters
 import qualified PasswordCrypto
@@ -90,6 +91,7 @@ main =
         TransactionDeferred.tests,
         TransactionAccountingProperties.tests,
         IntegerSemantics.tests,
+        NumericConversions.tests,
         CollectionOperations.tests,
         TransactionCollectionOperations.tests,
         InspectionCollections.tests,

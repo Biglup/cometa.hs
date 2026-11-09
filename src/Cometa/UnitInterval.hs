@@ -20,6 +20,8 @@
 module Cometa.UnitInterval
   ( UnitInterval,
     mkUnitInterval,
+    fromDouble,
+    toDouble,
     numerator,
     denominator,
     toRational,
@@ -31,7 +33,7 @@ where
 
 -- IMPORTS --------------------------------------------------------------------
 
-import Cometa.Error (Error)
+import Cometa.Error (Error (..))
 import Cometa.Internal.ProtocolValues (NonNegativeRational, UnitInterval, mkUnitInterval)
 import qualified Cometa.Internal.ProtocolValues as Internal
 import Data.ByteString (ByteString)
@@ -39,6 +41,25 @@ import Data.Word (Word64)
 import Prelude hiding (toRational)
 
 -- DEFINITIONS ----------------------------------------------------------------
+
+-- | Convert a finite number in @[0,1]@ using the native decimal-floor rule:
+-- reduce @floor(value * 10^15) / 10^15@. This may round down and is not the
+-- exact binary rational representation of the Double. NaN, infinities and values
+-- outside the interval return 'InvalidUnitIntervalDouble'. Negative zero is zero.
+fromDouble :: Double -> Either Error UnitInterval
+fromDouble value
+  | isNaN value || isInfinite value || value < 0 || value > 1 = Left InvalidUnitIntervalDouble
+  | otherwise =
+      let n = floor (value * 1000000000000000)
+          d = 1000000000000000
+          divisor = gcd n d
+       in mkUnitInterval (n `quot` divisor) (d `quot` divisor)
+
+-- | Approximate the fraction by converting its numerator and denominator
+-- separately to Double and dividing, matching the native conversion. This can
+-- differ from rounding an exact Rational once.
+toDouble :: UnitInterval -> Double
+toDouble value = fromIntegral (numerator value) / fromIntegral (denominator value)
 
 -- | Original unsigned numerator.
 numerator :: UnitInterval -> Word64

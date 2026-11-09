@@ -31,6 +31,7 @@ The [API reference](api-reference.md) explains how to browse the declarations fo
 installation
 hashes
 cbor
+integer-conversions
 signing
 message-signing
 bip32
