@@ -386,6 +386,7 @@ test-suite cometa-test
     test/cbits/integer_semantics_oracle.c
     test/cbits/collection_operations_oracle.c
     test/cbits/transaction_collection_operations_oracle.c
+    test/cbits/transaction_map_operations_oracle.c
     test/cbits/numeric_conversions_oracle.c
   cc-options: -std=c11 -Wall -Wextra
   other-modules:
@@ -397,6 +398,7 @@ test-suite cometa-test
     IntegerSemantics
     CollectionOperations
     TransactionCollectionOperations
+    TransactionMapOperations
     NumericConversions
     InspectionCollections
     HexEncoding

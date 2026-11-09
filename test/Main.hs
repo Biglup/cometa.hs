@@ -75,6 +75,7 @@ import qualified TransactionAccountingProperties
 import qualified TransactionBody
 import qualified TransactionCollectionOperations
 import qualified TransactionDeferred
+import qualified TransactionMapOperations
 import qualified TransactionWitnesses
 import qualified Value
 
@@ -94,6 +95,7 @@ main =
         NumericConversions.tests,
         CollectionOperations.tests,
         TransactionCollectionOperations.tests,
+        TransactionMapOperations.tests,
         InspectionCollections.tests,
         HexEncoding.tests,
         PublicTransaction.tests,
