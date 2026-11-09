@@ -105,3 +105,16 @@ Hash arrays use tag 258 by default. `encodeHashesCborWith UntaggedSet` produces 
 untagged array; decoding accepts either form. This is a representation choice:
 native hash-set re-encoding always emits the tagged form. Persist the original
 bytes separately when exact imported encoding matters.
+
+## Floating-point and simple values
+
+`decodeDouble` accepts half-, single- and double-precision encodings and returns a
+Haskell `Double`, including signed zero, infinities and NaN. It does not coerce
+integer items. Inspecting a value leaves its original encoding unchanged.
+
+`decodeSimple` returns a `Word8`: false is 20, true is 21, null is 22 and undefined
+is 23. It also accepts other byte-valued simple items accepted by the native
+reader; application-specific meanings remain the caller's responsibility.
+`encodeUndefined` produces `f7`. Undefined is distinct from null and an absent
+map entry. These operations use the same `IO (Either Error ...)` boundary as the
+other scalar codecs.
