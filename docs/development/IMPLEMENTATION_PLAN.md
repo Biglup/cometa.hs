@@ -4505,3 +4505,34 @@ focused public groups and all nine encoding groups pass Valgrind without errors
 or definitely, indirectly or possibly lost allocations, without suppressions. Full formatting/lint and strict Sphinx pass. Final package, Haddock
 and hosted platform checks remain release/review gates. No live transactions or
 native library changes are part of this PR.
+
+
+### Independent reliability tests (2026-11-09)
+
+The next release-hardening pass adds ten tests through public APIs: seven
+new generated properties, two identity fixture tests, and one fixed rounding
+regression. Selection checks use independent Integer-map conservation, exact
+selected/remaining snapshots, signed net funding and minimum-Ada boundaries.
+Accounting checks cover witness-size boundaries, per-byte Rational reference
+pricing, aggregate execution rounding, and pool identity across multiple intents.
+Identity tests use independently generated BLAKE2b/Ed25519 literals and verify
+both outer-envelope independence and nested-witness commitments.
+
+Reviewed source contracts and generator limits are recorded in
+`test/Fixtures/RELIABILITY.md` and `test/Fixtures/ACCOUNTING_RELIABILITY.md`, with
+pinned cardano-coin-selection, cardano-api and cardano-ledger references. These
+are original tests of library contracts, not execution of the ledger state
+machine or a claim of network admission. No native source, dependency pin,
+public API, or package dependency changes are needed.
+
+The merged map fixtures also used partial list operations rejected by GHC 9.10
+under warnings-as-errors. They now use explicit checked fixture access and named
+redeemers, without weakening warnings or changing production behavior.
+
+Local validation: all 699 tests pass (458 public, 183 runtime, 58 Blockfrost).
+The new generated properties also pass 1,000 cases each. All 16 new/corrected
+tests pass Valgrind with zero errors and no definitely, indirectly or possibly
+lost allocations, without suppressions. Formatting, HLint, package validation
+and strict Sphinx/Haddock pass. Hosted compiler/platform checks are tracked
+in the PR; release preparation and final preprod validation remain subsequent
+work.

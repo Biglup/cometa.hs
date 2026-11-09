@@ -398,6 +398,9 @@ test-suite cometa-test
     StandaloneSetEncoding
     TransactionDeferred
     TransactionAccountingProperties
+    AccountingReliability
+    SelectionReliability
+    IdentityReliability
     IntegerSemantics
     CollectionOperations
     TransactionCollectionOperations

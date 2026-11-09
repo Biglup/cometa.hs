@@ -18,6 +18,7 @@ module Main (main) where
 
 -- IMPORTS --------------------------------------------------------------------
 
+import qualified AccountingReliability
 import qualified Address
 import qualified AssetId
 import qualified Bip32
@@ -48,6 +49,7 @@ import Hedgehog (Property, evalEither, evalIO, forAll, property, (===))
 import qualified Hedgehog.Gen as Gen
 import qualified Hedgehog.Range as Range
 import qualified HexEncoding
+import qualified IdentityReliability
 import qualified InspectionCollections
 import qualified IntegerSemantics
 import qualified Metadata
@@ -62,6 +64,7 @@ import qualified Proposals
 import qualified ProtocolValues
 import qualified PublicTransaction
 import qualified Scripts
+import qualified SelectionReliability
 import qualified SetEncoding
 import qualified SlotConfig
 import qualified SoftwareKeyHandler
@@ -92,6 +95,9 @@ main =
         TransactionBody.tests,
         TransactionDeferred.tests,
         TransactionAccountingProperties.tests,
+        AccountingReliability.tests,
+        SelectionReliability.tests,
+        IdentityReliability.tests,
         IntegerSemantics.tests,
         NumericConversions.tests,
         CollectionOperations.tests,
