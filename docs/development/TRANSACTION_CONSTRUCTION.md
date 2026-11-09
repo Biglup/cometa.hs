@@ -62,9 +62,9 @@ canonical encodings and make no original-CBOR identity claim.
 
 ## Remaining native surface audit
 
-This slice completes the identified treasury/proposing builder gaps. It does not
-claim complete native function coverage. The remaining coherent serialization
-work is:
+The identified construction and standalone inspection surfaces have named
+acceptance tests. This does not claim complete native function coverage. The
+representation contracts are:
 
 Standalone asset-name maps, withdrawal maps and variable-length hash sets now
 have codecs in `Cometa.Encoding.Collections`, with typed lists preserving native
@@ -73,13 +73,15 @@ outer collection tags. Explicit transaction-level tag edits remove stale key
 signatures. These controls do not recursively normalize embedded values or imply
 that every native collection exposes a mutable tag setter.
 
-Remaining work:
+Audited behavior:
 
 - Standalone certificate/proposal tags, pool-owner encoding and committee
   credential envelopes are covered by the merged standalone-set slice.
-- Remaining standalone CIP-116 leaf values and collection shapes. Ordinary
-  traversal suffices for native array schemas only after their exact shape and
-  ordering are verified; the ledger keeps other outputs pending.
+- Standalone CIP-116 leaf values and collection shapes are covered by named
+  inspectors or source-audited element traversal. Tests distinguish sorted hashes,
+  duplicate-preserving sequences, unique guards/subtransaction IDs, tagged data
+  and the object/entry-array asset schemas. Duplicate object keys that cannot
+  survive Aeson decoding fail explicitly.
 - Standalone contextual rebalancing now has explicit funding, redeemer identity,
   commitment and encoding contracts in `Transaction.Balancing`. General recursive
   cache normalization is not implied by this operation; exact imports remain

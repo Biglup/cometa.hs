@@ -113,3 +113,53 @@ text; deposit zero remains `"0"`. Guard keys use tagged credentials and absent
 script data becomes null. Inline script-data maps retain duplicate entries and
 pair order. These are the same schemas nested in top-level and subtransaction
 body inspection.
+
+## Assets, digests and collection boundaries
+
+`Inspection.assetName` renders a validated name as lowercase hexadecimal; the
+empty name remains an empty string and arbitrary bytes need no text encoding.
+`Inspection.blake2bHash` renders any validated nonempty digest in hexadecimal.
+`Inspection.hashes` returns an array ordered by digest byte length, then bytes,
+retaining duplicates. It does not infer a digest's role or recompute it.
+
+Choose the asset schema explicitly. `Inspection.assets` takes associations of
+`PolicyId` and asset-name/quantity associations, returning an object keyed by
+hexadecimal policy and name. `Inspection.assetEntries` takes the same input and
+returns ordered `{script_hash, assets}` records; each record's `assets` remains a
+name-keyed object. `Inspection.policyAssets` inspects just name/quantity
+associations as an object. `Inspection.policyAssetEntries` renders those
+associations as ordered `{asset_name, amount}` records instead.
+
+These functions retain explicit zero quantities, empty names and empty policy
+groups. Quantities are decimal strings and must fit signed 64 bits; overflow
+returns `InvalidValueQuantity`. Policy entries sort by policy bytes; asset entries
+sort by name byte length, then bytes. Repeated names retain their input order in
+`policyAssetEntries`. Repeated policy groups in either policy schema use the last
+group, matching native map decoding. Object schemas cannot represent repeated property names in
+`Aeson.Value`: all three schemas containing name-keyed objects reject repeated
+asset names in retained groups with `InvalidValueCbor`.
+Use `policyAssetEntries` when those repeated associations matter.
+
+`Inspection.blsKey` describes a pool's 96-byte public key and 48-byte possession
+proof without verifying either. `Inspection.committeeMembers` describes ordered
+cold credentials and decimal expiry epochs. `Inspection.withdrawals` accepts
+reward-account/amount associations, including zero and repeated accounts, and
+returns ordered key/value records. Its order follows encoded address bytes,
+while redeemer indices use the separately documented ledger account order.
+
+`Inspection.guards` preserves the supplied credential order and rejects repeated
+credentials. `Inspection.subTransactions` preserves supplied intent order and
+rejects repeated body identifiers, including intents with different witnesses
+for the same body. Both accept an empty list and return an empty JSON array.
+These checks matter: traversing an element inspector over an arbitrary list does
+not establish valid guard or subtransaction collection semantics.
+
+Other existing ordered domain collections can use ordinary traversal. A committee
+removal list from `Action.removalsToList` already has the native credential order;
+inspect each credential. A pool's validated owner set has ascending 28-byte hashes;
+inspect those as digest strings. Relay lists, proposal lists and each Plutus
+language's script lists retain their order and duplicates. Plutus scripts use
+`Inspection.plutusScript`, which renders the language/bytes payload; the generic
+`Inspection.script` adds an extra wrapper. Script-data constructors, lists and
+maps instead use `Inspection.plutusData` and keep their tagged schemas, including
+ordered duplicate map entries.

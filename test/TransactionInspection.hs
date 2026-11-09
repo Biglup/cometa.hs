@@ -29,8 +29,11 @@ import qualified Cometa.AssetName as AssetName
 import qualified Cometa.Certificate as Certificate
 import qualified Cometa.Certificate.Collection as Certificates
 import qualified Cometa.Credential as Credential
+import qualified Cometa.Crypto.Blake2b as Hash
 import qualified Cometa.Crypto.Ed25519.PublicKey as PublicKey
 import qualified Cometa.Crypto.Ed25519.Signature as Signature
+import qualified Cometa.Encoding.Collections as Collections
+import Cometa.Error (Error (InvalidValueCbor, InvalidValueQuantity))
 import qualified Cometa.Governance.Action as Action
 import qualified Cometa.Governance.ActionId as ActionId
 import qualified Cometa.Governance.Anchor as Anchor
@@ -46,6 +49,7 @@ import qualified Cometa.Metadata as Metadata
 import qualified Cometa.NetworkId as Network
 import qualified Cometa.PlutusData as Data
 import qualified Cometa.PolicyId as PolicyId
+import qualified Cometa.Pool.BlsKey as Bls
 import qualified Cometa.Pool.Metadata as PoolMetadata
 import qualified Cometa.Pool.Parameters as Pool
 import qualified Cometa.Pool.Relay as Relay
@@ -103,7 +107,9 @@ tests :: TestTree
 tests =
   testGroup
     "Transaction JSON inspection"
-    [ testCase "protocol collections and Dijkstra standalone schemas match parent fields" standaloneCollections,
+    [ testCase "remaining asset, hash, pool and governance native schemas" remainingInspection,
+      testCase "native array and tagged subtype equivalences retain schema and ordering" inspectionArrayEquivalence,
+      testCase "protocol collections and Dijkstra standalone schemas match parent fields" standaloneCollections,
       testCase "standalone leaf schemas, optional fields and native lifetime boundaries" standaloneLeaves,
       testCase "standalone leaf inspectors reject complete schema-invalid CBOR" standaloneLeafFailures,
       testCase "standalone values match typed fields of pinned transaction JSON" standaloneCorpus,
@@ -726,3 +732,167 @@ standaloneCollections = do
           (46, Encoding.encodeMapLen 1 <> array [Encoding.encodeWord 0, Encoding.encodeBytes B.empty] <> Encoding.encodeNull)
         ]
   forM_ invalid $ \(kind, bytes) -> Internal.runUnchecked kind (Write.toStrictByteString bytes) >>= assertBool "Invalid standalone collection schema accepted" . isLeft
+
+remainingInspection :: IO ()
+remainingInspection = do
+  let check kind bytes action expected = do
+        let original = B.copy bytes
+        action >>= (@?= Right expected)
+        forM_ [B.empty, B.take (B.length bytes - 1) bytes, bytes <> B.singleton 0] (Internal.runUnchecked kind >=> (assertBool "Malformed standalone inspection accepted" . isLeft))
+        snapshots <- replicateM 5 (action >>= must)
+        performGC
+        snapshots @?= replicate 5 expected
+        bytes @?= original
+      array values = Write.toStrictByteString (Encoding.encodeTag 258 <> Encoding.encodeListLen (fromIntegral (length values))) <> mconcat values
+      assetObject names = object [name .= (amount :: Text.Text) | (name, amount) <- names]
+  emptyName <- must (AssetName.fromBytes B.empty)
+  binaryName <- must (AssetName.fromBytes (B.pack [255, 0]))
+  maxName <- must (AssetName.fromBytes (B.replicate 32 128))
+  forM_ [emptyName, binaryName, maxName] $ \name -> check 47 (AssetName.encodeCbor name) (Standalone.assetName name) (String (AssetName.toHex name))
+  digests <- traverse (must . Hash.fromBytes) [B.replicate 64 2, B.singleton 255, B.replicate 28 1, B.replicate 28 1]
+  forM_ digests $ \digest -> check 48 (Hash.encodeCbor digest) (Standalone.blake2bHash digest) (String (Hash.toHex digest))
+  let expectedHashes = toJSON (["ff", Text.replicate 28 "01", Text.replicate 28 "01", Text.replicate 64 "02"] :: [Text.Text])
+  check 52 (Collections.encodeHashesCbor digests) (Standalone.hashes digests) expectedHashes
+  Standalone.hashes [] >>= (@?= Right (toJSON ([] :: [Value])))
+  bls <- must (Bls.mkBlsKey (B.replicate 96 3) (B.replicate 48 4))
+  let blsJson = object ["public_key" .= Text.replicate 96 "03", "possession_proof" .= Text.replicate 48 "04"]
+  check 49 (Bls.encodeCbor bls) (Standalone.blsKey bls) blsJson
+  cold <- keyFixture
+  scriptHash <- must (Credential.scriptHashFromBytes (B.replicate 28 2))
+  members <- must (Committee.membersFromList [(Credential.ScriptCredential scriptHash, maxBound), (Credential.KeyCredential cold, 0)])
+  let keyJson = object ["tag" .= ("pubkey_hash" :: Text.Text), "value" .= Text.replicate 28 "01"]
+      scriptJson = object ["tag" .= ("script_hash" :: Text.Text), "value" .= Text.replicate 28 "02"]
+      membersJson = toJSON [object ["key" .= keyJson, "value" .= ("0" :: Text.Text)], object ["key" .= scriptJson, "value" .= ("18446744073709551615" :: Text.Text)]]
+  check 50 (Committee.encodeMembers members) (Standalone.committeeMembers members) membersJson
+  Standalone.committeeMembers Committee.emptyMembers >>= (@?= Right (toJSON ([] :: [Value])))
+  stake <- keyFixture
+  let account = Reward.fromCredential Network.testnet (Credential.KeyCredential stake)
+      scriptAccount = Reward.fromCredential Network.mainnet (Credential.ScriptCredential scriptHash)
+      withdrawals = [(scriptAccount, maxBound), (account, 0), (account, 7)]
+      entry address amount = object ["key" .= Reward.toText address, "value" .= (amount :: Text.Text)]
+      withdrawalsJson = toJSON [entry account "0", entry account "7", entry scriptAccount "18446744073709551615"]
+  check 51 (Collections.encodeWithdrawalsCbor withdrawals) (Standalone.withdrawals withdrawals) withdrawalsJson
+  Standalone.withdrawals [] >>= (@?= Right (toJSON ([] :: [Value])))
+  guard <- keyFixture
+  let guards = [Credential.ScriptCredential scriptHash, Credential.KeyCredential guard]
+      guardsJson = toJSON [scriptJson, keyJson]
+  check 53 (array (map Credential.encodeCbor guards)) (Standalone.guards guards) guardsJson
+  Standalone.guards [] >>= (@?= Right (toJSON ([] :: [Value])))
+  Standalone.guards (guards <> guards) >>= assertBool "Duplicate guard accepted" . isLeft
+  firstBody <- must (SubBody.fromBody (SubBody.body [] []))
+  secondBody <- must (SubBody.fromBody (SubBody.fromFields ((Fields.fields [] []) {Fields.fieldDonation = Just 0})))
+  let first = Sub.fromBody firstBody
+      second = Sub.fromBody secondBody
+  firstJson <- Standalone.subTransaction first >>= must
+  secondJson <- Standalone.subTransaction second >>= must
+  check 54 (array (map Sub.encodeCbor [second, first])) (Standalone.subTransactions [second, first]) (toJSON [secondJson, firstJson])
+  Standalone.subTransactions [] >>= (@?= Right (toJSON ([] :: [Value])))
+  Standalone.subTransactions [first, first] >>= assertBool "Duplicate intent accepted" . isLeft
+  key <- must (PublicKey.fromBytes (B.replicate 32 8))
+  signature <- must (Signature.fromBytes (B.replicate 64 9))
+  witnesses <- must (Witnesses.mkWitnesses [Witness.verificationWitness key signature] [] [] [] [])
+  let differentlyWitnessed = Sub.setWitnesses (Witnesses.fromWitnesses witnesses) first
+  Standalone.subTransactions [first, differentlyWitnessed] >>= assertBool "Duplicate body with distinct witness accepted" . isLeft
+  policy <- must (PolicyId.fromBytes (B.replicate 28 5))
+  otherPolicy <- must (PolicyId.fromBytes (B.replicate 28 6))
+  let names = [(maxName, 0), (binaryName, negate (2 ^ (63 :: Int))), (emptyName, 2 ^ (63 :: Int) - 1)]
+      namesJson = assetObject [("", "9223372036854775807"), ("ff00", "-9223372036854775808"), ("8080808080808080808080808080808080808080808080808080808080808080", "0")]
+      entriesJson = toJSON [object ["asset_name" .= (name :: Text.Text), "amount" .= (amount :: Text.Text)] | (name, amount) <- [("", "9223372036854775807"), ("ff00", "-9223372036854775808"), (Text.replicate 32 "80", "0")]]
+      groups = [(otherPolicy, []), (policy, names)]
+      groupsJson = object ["05050505050505050505050505050505050505050505050505050505" .= namesJson, "06060606060606060606060606060606060606060606060606060606" .= object []]
+      groupEntries = toJSON [object ["script_hash" .= PolicyId.toHex policy, "assets" .= namesJson], object ["script_hash" .= PolicyId.toHex otherPolicy, "assets" .= object []]]
+  nameBytes <- must (Collections.encodeAssetNamesCbor names)
+  let groupBytes = Write.toStrictByteString (Encoding.encodeMapLen 2 <> Encoding.encodeBytes (PolicyId.toBytes policy)) <> nameBytes <> Write.toStrictByteString (Encoding.encodeBytes (PolicyId.toBytes otherPolicy) <> Encoding.encodeMapLen 0)
+  check 55 groupBytes (Standalone.assets groups) groupsJson
+  check 56 groupBytes (Standalone.assetEntries groups) groupEntries
+  check 57 nameBytes (Standalone.policyAssets names) namesJson
+  check 58 nameBytes (Standalone.policyAssetEntries names) entriesJson
+  Standalone.assets [] >>= (@?= Right (object []))
+  Standalone.assetEntries [] >>= (@?= Right (toJSON ([] :: [Value])))
+  Standalone.policyAssets [] >>= (@?= Right (object []))
+  Standalone.policyAssetEntries [] >>= (@?= Right (toJSON ([] :: [Value])))
+  -- Explicit object restrictions prevent Aeson silently collapsing native keys.
+  let repeatedNames = [(emptyName, 0), (emptyName, 1)]
+      duplicateName = Left (InvalidValueCbor "Repeated asset names cannot be represented as JSON object keys")
+  Standalone.policyAssets repeatedNames >>= (@?= duplicateName)
+  Standalone.assets [(policy, repeatedNames)] >>= (@?= duplicateName)
+  Standalone.assetEntries [(policy, repeatedNames)] >>= (@?= duplicateName)
+  Standalone.assets [(policy, [(emptyName, 1)]), (policy, [])] >>= (@?= Right (object ["05050505050505050505050505050505050505050505050505050505" .= object []]))
+  let repeatedJson = toJSON [object ["asset_name" .= ("" :: Text.Text), "amount" .= ("0" :: Text.Text)], object ["asset_name" .= ("" :: Text.Text), "amount" .= ("1" :: Text.Text)]]
+  repeatedBytes <- must (Collections.encodeAssetNamesCbor repeatedNames)
+  check 58 repeatedBytes (Standalone.policyAssetEntries repeatedNames) repeatedJson
+  -- Duplicate policy keys replace the whole previous group in native decoding.
+  Standalone.assetEntries [(policy, [(emptyName, 1)]), (policy, [(binaryName, 0)])] >>= (@?= Right (toJSON [object ["script_hash" .= PolicyId.toHex policy, "assets" .= assetObject [("ff00", "0")]]]))
+  Standalone.assets [(policy, repeatedNames), (policy, [(binaryName, 0)])] >>= (@?= Right (object ["05050505050505050505050505050505050505050505050505050505" .= assetObject [("ff00", "0")]]))
+  forM_ [negate (2 ^ (63 :: Int)) - 1, 2 ^ (63 :: Int)] $ \amount -> do
+    let failure = Left (InvalidValueQuantity amount)
+    Standalone.policyAssets [(emptyName, amount)] >>= (@?= failure)
+    Standalone.policyAssetEntries [(emptyName, amount)] >>= (@?= failure)
+    Standalone.assets [(policy, [(emptyName, amount)])] >>= (@?= failure)
+    Standalone.assetEntries [(policy, [(emptyName, amount)])] >>= (@?= failure)
+  -- Complete, well-framed schema failures are distinct from framing failures.
+  let invalid = [(47, Encoding.encodeBytes (B.replicate 33 0)), (48, Encoding.encodeWord 0), (49, Encoding.encodeListLen 2 <> Encoding.encodeBytes (B.replicate 95 0) <> Encoding.encodeBytes (B.replicate 48 0)), (50, Encoding.encodeMapLen 1 <> Encoding.encodeWord 0 <> Encoding.encodeWord 0), (51, Encoding.encodeMapLen 1 <> Encoding.encodeWord 0 <> Encoding.encodeWord 0), (52, Encoding.encodeListLen 1 <> Encoding.encodeWord 0), (53, Encoding.encodeListLen 1 <> Encoding.encodeWord 0), (54, Encoding.encodeListLen 1 <> Encoding.encodeWord 0), (55, Encoding.encodeMapLen 1 <> Encoding.encodeWord 0 <> Encoding.encodeMapLen 0), (56, Encoding.encodeMapLen 1 <> Encoding.encodeWord 0 <> Encoding.encodeMapLen 0), (57, Encoding.encodeMapLen 1 <> Encoding.encodeBytes B.empty <> Encoding.encodeNull), (58, Encoding.encodeMapLen 1 <> Encoding.encodeBytes B.empty <> Encoding.encodeNull)]
+  forM_ invalid $ \(kind, encoded) -> Internal.runUnchecked kind (Write.toStrictByteString encoded) >>= assertBool "Invalid standalone schema accepted" . isLeft
+
+inspectionArrayEquivalence :: IO ()
+inspectionArrayEquivalence = do
+  stake <- keyFixture
+  poolKey <- keyFixture
+  cold <- keyFixture
+  scriptHash <- must (Credential.scriptHashFromBytes (B.replicate 28 2))
+  vrf <- must (Pool.vrfKeyHashFromBytes (B.replicate 32 3))
+  margin <- must (Unit.mkUnitInterval 1 2)
+  dns <- must (Relay.mkDnsName "relay.example.com")
+  bls <- must (Bls.mkBlsKey (B.replicate 96 4) (B.replicate 48 5))
+  let relays = [Relay.MultiHostName dns, Relay.SingleHostName Nothing dns, Relay.SingleHostAddress Nothing Nothing Nothing, Relay.MultiHostName dns]
+      account = Reward.fromCredential Network.testnet (Credential.KeyCredential stake)
+      pool = Pool.PoolParameters poolKey vrf (Just bls) 0 0 margin account (Set.singleton stake) relays Nothing
+  poolJson <- Standalone.poolParameters pool >>= must
+  relayJson <- traverse (Standalone.relay >=> must) relays
+  field "relays" poolJson >>= (@?= toJSON relayJson)
+  blsJson <- Standalone.blsKey bls >>= must
+  field "bls_key" poolJson >>= (@?= blsJson)
+  owner <- must (Hash.fromBytes (Credential.keyHashBytes stake))
+  ownerJson <- Standalone.blake2bHash owner >>= must
+  field "pool_owners" poolJson >>= (@?= toJSON [ownerJson])
+  -- The native credential set sorts by kind/hash and retains equal-key entries.
+  let removals = Action.removalsFromList [Credential.ScriptCredential scriptHash, Credential.KeyCredential cold, Credential.KeyCredential cold]
+      action = Action.UpdateCommittee Nothing removals Committee.emptyMembers margin
+  actionJson <- Standalone.governanceAction action >>= must
+  removalJson <- traverse (Standalone.credential >=> must) (Action.removalsToList removals)
+  field "members_to_remove" actionJson >>= (@?= toJSON removalJson)
+  url <- must (Anchor.mkUrl "https://example.com/proposal")
+  digest <- must (Anchor.dataHashFromBytes (B.replicate 32 6))
+  let anchor = Anchor.Anchor url digest
+      firstProposal = Proposal.Proposal 0 account Action.InfoAction anchor
+      secondProposal = Proposal.Proposal 1 account Action.InfoAction anchor
+      proposals = [secondProposal, firstProposal, secondProposal]
+      fields = (Fields.fields [] []) {Fields.fieldProposalProcedures = Just (Proposal.fromList proposals)}
+  proposalJson <- traverse (Standalone.proposal >=> must) proposals
+  proposalBody <- must (Body.fromBody ((Body.body [] [] 0) {Body.bodyFields = fields}))
+  bodyJson <- Standalone.body proposalBody >>= must
+  field "proposal_procedures" bodyJson >>= (@?= toJSON proposalJson)
+
+  -- Each language's native list/set writer uses the same payload writer and
+  -- preserves insertion order and duplicates. Parent writers use these payloads.
+  forM_ [Plutus.V1, Plutus.V2, Plutus.V3, Plutus.V4] $ \version -> do
+    first <- must (Plutus.fromBytes version (B.pack [2, 1]))
+    second <- must (Plutus.fromBytes version (B.pack [1, 2]))
+    let values = [first, second, first]
+        auxiliary = Auxiliary.fromAuxiliaryData (Auxiliary.auxiliaryData Nothing Nothing values)
+    payloads <- traverse (Standalone.plutusScript >=> must) values
+    auxiliaryJson <- Standalone.auxiliaryData auxiliary >>= must
+    field "plutus_scripts" auxiliaryJson >>= (@?= toJSON payloads)
+    witnesses <- must (Witnesses.mkWitnesses [] [] (map Script.Plutus values) [] [])
+    witnessJson <- Standalone.witnesses (Witnesses.fromWitnesses witnesses) >>= must
+    field "plutus_scripts" witnessJson >>= (@?= toJSON payloads)
+  -- Plutus constructor/list/map subtype functions are tagged, not bare arrays.
+  let one = Data.fromData (Data.Integer 1)
+      two = Data.fromData (Data.Integer 2)
+      integerJson amount = object ["tag" .= ("integer" :: Text.Text), "value" .= (amount :: Text.Text)]
+      oneJson = integerJson "1"
+      twoJson = integerJson "2"
+      entries = [object ["key" .= oneJson, "value" .= twoJson], object ["key" .= oneJson, "value" .= oneJson]]
+  Standalone.plutusData (Data.fromData (Data.Constr maxBound [Data.toData one, Data.toData two])) >>= (@?= Right (object ["tag" .= ("constr" :: Text.Text), "alternative" .= ("18446744073709551615" :: Text.Text), "data" .= [oneJson, twoJson]]))
+  Standalone.plutusData (Data.fromData (Data.List [Data.toData two, Data.toData one])) >>= (@?= Right (object ["tag" .= ("list" :: Text.Text), "contents" .= [twoJson, oneJson]]))
+  Standalone.plutusData (Data.fromData (Data.Map [(Data.toData one, Data.toData two), (Data.toData one, Data.toData one)])) >>= (@?= Right (object ["tag" .= ("map" :: Text.Text), "contents" .= entries]))

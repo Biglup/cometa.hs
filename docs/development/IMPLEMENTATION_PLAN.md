@@ -4105,3 +4105,114 @@ supports both compiler baselines without suppressing warnings. A follow-up hoste
 run validates these two portability corrections. All 54 offline example entry
 points pass locally, and a credential-free production TLS request to Blockfrost's
 preprod health endpoint returned HTTP 200 using the system trust store.
+
+
+### Standalone inspection and native surface reconciliation
+
+This pass starts from merged PR25 (`650bc63`). Reviewed the actual cardano-api
+Serialise/Json.hs source at `5e63165a4bb7481a03d2e50464dc9c4f106c9fa5` again:
+explicit serialization functions return ordinary JSON/bytes and structured errors.
+Cometa keeps named inspection operations returning `IO (Either Error Value)`;
+no global JSON instances or native collection handles are introduced.
+
+The twelve additional operations cover asset names, hashes, BLS keys, committee
+members, withdrawals, hash collections, guards, subtransactions and the two asset
+map schemas. Each operation reads typed Haskell values and releases all native
+intermediates before returning copied JSON. Remaining array/subtype writers are
+represented by tested existing inspectors and ordinary traversal where their
+ordering and validation contracts actually match.
+
+Native source audit used the pinned tree's assets/{asset_name_map,multi_asset}.c,
+crypto/blake2b_hash_set.c, common/{guard_set,withdrawal_map}.c, plutus_data writers,
+pool_params writers, proposal_procedures collection writers, Plutus list/set
+writers and transaction_body/sub_transaction_set.c. Stable insertion sort in
+collections/array.c retains tie order. Distinctions verified against complete outputs:
+
+- Hashes sort by byte length before bytes and retain duplicates. Guards preserve
+  insertion order but reject duplicate credentials. Subtransactions reject equal
+  body IDs even when witness contents differ. Empty native writer arrays are
+  supported independently of nonempty CBOR parser restrictions.
+- Asset-name maps retain zero and repeated names, sorted stably by length/bytes.
+  Their entry-array schema can represent duplicates. Object schemas cannot
+  represent duplicate names in `Aeson.Value`, so those inputs fail explicitly.
+- Repeated policy keys replace the entire previous group during native decoding.
+  Both multiasset schemas retain empty groups and explicit zero. The entry-array
+  schema still nests a name-keyed object; it does not recursively select the
+  asset-name entry-array schema. Overwritten groups are not mistaken for retained
+  duplicate JSON keys, but all supplied quantities must satisfy signed64 bounds.
+- Plutus constructor/list/map writers have tagged schemas; they are not plain
+  element arrays. Relay alternatives reuse the generic relay inspector without
+  adding another wrapper. Script and proposal sequences retain order/duplicates.
+
+`TransactionInspection.remainingInspection` and `inspectionArrayEquivalence`
+exercise native scalar/collection schemas, invalid complete CBOR, malformed
+framing, retained JSON after GC, signed subtransaction identities and parent-field
+correspondence. `InspectionCollections` supplies four original generated
+properties with independent JSON expectations for signed bounds, stable duplicate
+names, replacement policy groups and length-first hash ordering. No upstream
+fixtures or implementation were copied. These checks establish representation and
+binding behavior, not ledger acceptance.
+
+The ledger reconciliation checks native function bodies before mapping lifecycle
+or diagnostics to scoped ownership and immutable public values. It does not treat
+native `set_*`, cache clearing, raw map algebra or cursor cloning as interchangeable
+with Haskell value construction. Explicit per-field set-tag controls are linked
+to the existing all-field tagged/untagged native reconstruction tests. Remaining
+uncertain mappings stay pending with specific contract differences rather than a
+blanket completion claim.
+
+
+#### Coverage ledger scope
+
+An `omitted` entry is an intentionally unexposed generic C runtime contract, not
+an implemented operation or a claimed Haskell equivalence. This applies to
+mutable buffer capacity/read heads, incremental JSON writer contexts, borrowed
+lexical JSON views, reader-cursor branching and their parser-state vocabulary.
+Typed Cardano fields, exact encoded values and structured errors remain covered
+by their own rows. In particular, `Aeson.Value` is not credited with preserving
+ordered duplicate object properties or numeric spelling such as negative zero;
+the native JSON parser's first-key lookup and cached borrowed-string behavior
+are not presented as ordinary Aeson semantics.
+
+Source-confirmed owner/refcount/diagnostic delegations are mapped separately to
+actual scoped adapters and immutable domain values. Standalone generic JSON
+runtime operations have explicit omission rationales; their use inside a tested
+native inspection bridge is recorded as implemented where applicable. No C
+object or vtable is exposed simply to drive the pending count to zero.
+
+Unresolved rows retain precise differences: raw asset/withdrawal-map mutation and
+arithmetic can retain stored zeros/duplicates that normalized Value does not;
+native bigint `mod` uses truncating remainder for negatives; cache clearing can
+recursively re-encode signed content; generic IEEE/simple-value conversions and
+some numeric/display conveniences do not yet have tested public counterparts.
+Those are not newly discovered missing transaction-builder alternatives. The
+ledger must not advertise full native symbol parity while these remain pending.
+
+
+#### Raw hexadecimal workflow
+
+Reviewed base16-bytestring 1.0.2.0's actual Data.ByteString.Base16 source
+(https://hackage.haskell.org/package/base16-bytestring-1.0.2.0/docs/src/Data.ByteString.Base16.html)
+and cardano-api `c2212851b06b9c2acc5bb0bfe1b8a8e8cf2be03a` Serialise/Raw.hs
+`parseRawBytesHex`. Their caller workflow separates strict raw decoding from a
+typed domain decoder. `Cometa.Encoding.Hex` follows the familiar pure encode/decode
+pair, using Text at the textual boundary and structured InvalidHex. Empty raw
+bytes are valid; per-domain validators retain their own size/schema restrictions.
+No lenient decoder, new dependency, crypto wrapper or per-type aliases are added.
+HexEncoding tests all 256 bytes, malformed syntax, raw-to-typed workflows and
+arbitrary byte round trips in both cases. These are original tests, with no copied
+upstream implementation.
+
+
+#### Integrated verification
+
+All 626 tests pass locally (394 public, 174 runtime, 58 Blockfrost), with warnings
+as errors. Full library/example builds, Ormolu, HLint, strict C syntax/format,
+native inventory, package checks, source distribution, strict Sphinx and portable
+Haddock builds pass. Focused native inspection and generated collection runs pass
+Valgrind with zero errors and zero definitely, indirectly or possibly lost bytes;
+no suppressions were used. No native source or pin changes and no live transaction
+submissions are part of this slice. Hosted platform checks remain a separate PR
+gate. The final ledger has 3,364 adapted, 220 implemented, 170 intentionally
+omitted generic infrastructure entries and 133 pending mappings; these categories
+are not a percentage of application functionality.

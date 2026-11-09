@@ -31,7 +31,11 @@
  * 34 verification witness, 35 bootstrap witness;
  * 36 cost model, 37 cost models, 38 execution prices, 39 pool thresholds,
  * 40 DRep thresholds, 41 legacy proposed updates, 42 legacy update proposal,
- * 43 balance interval, 44 account intervals, 45 direct deposits, 46 required guards.
+ * 43 balance interval, 44 account intervals, 45 direct deposits, 46 required guards;
+ * 47 asset name, 48 BLAKE2b digest, 49 BLS key, 50 committee members,
+ * 51 withdrawals, 52 digests, 53 guards, 54 subtransactions,
+ * 55 assets object, 56 asset policy entries, 57 policy assets object,
+ * 58 policy asset entries.
  * \param input Borrowed complete CBOR bytes, valid through return.
  * \param size Byte count of input.
  * \param output Transferred JSON byte buffer on success, NULL on failure.

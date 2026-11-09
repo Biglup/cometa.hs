@@ -75,6 +75,18 @@ module Cometa.Inspection
     balanceIntervals,
     directDeposits,
     requiredGuards,
+    assetName,
+    blake2bHash,
+    blsKey,
+    committeeMembers,
+    withdrawals,
+    hashes,
+    guards,
+    subTransactions,
+    assets,
+    assetEntries,
+    policyAssets,
+    policyAssetEntries,
   )
 where
 
@@ -83,12 +95,16 @@ where
 import qualified Codec.CBOR.Encoding as Encoding
 import qualified Codec.CBOR.Write as Write
 import qualified Cometa.Address.Reward as Reward
+import qualified Cometa.AssetName as Name
 import qualified Cometa.Certificate as Certificate
 import qualified Cometa.Credential as Credential
-import Cometa.Error (Error (NativeContractViolation))
+import qualified Cometa.Crypto.Blake2b as Hash
+import qualified Cometa.Encoding.Collections as Collections
+import Cometa.Error (Error (InvalidValueCbor, NativeContractViolation))
 import qualified Cometa.Governance.Action as Action
 import qualified Cometa.Governance.ActionId as ActionId
 import qualified Cometa.Governance.Anchor as Anchor
+import qualified Cometa.Governance.Committee as Committee
 import qualified Cometa.Governance.Constitution as Constitution
 import qualified Cometa.Governance.DRep as DRep
 import qualified Cometa.Governance.Proposal as Proposal
@@ -96,6 +112,8 @@ import qualified Cometa.Governance.Voting as Voting
 import qualified Cometa.Internal.Inspection as Internal
 import qualified Cometa.Metadata as Metadata
 import qualified Cometa.PlutusData as Data
+import qualified Cometa.PolicyId as Policy
+import qualified Cometa.Pool.BlsKey as Bls
 import qualified Cometa.Pool.Metadata as PoolMetadata
 import qualified Cometa.Pool.Parameters as Pool
 import qualified Cometa.Pool.Relay as Relay
@@ -110,6 +128,7 @@ import qualified Cometa.Protocol.Version as Version
 import qualified Cometa.Script as Script
 import qualified Cometa.Script.Native as Native
 import qualified Cometa.Script.Plutus as Plutus
+import qualified Cometa.SubTransaction as Sub
 import qualified Cometa.Transaction.AuxiliaryData as Auxiliary
 import qualified Cometa.Transaction.Datum as Datum
 import qualified Cometa.Transaction.Fields as Fields
@@ -122,10 +141,16 @@ import qualified Cometa.Transaction.Witness as Witness
 import qualified Cometa.Transaction.Witnesses as Witnesses
 import qualified Cometa.UnitInterval as Unit
 import qualified Cometa.Value as Value
-import Data.Aeson (Value (Object))
+import Control.Monad (unless)
+import Data.Aeson (Value (Object), toJSON)
 import qualified Data.Aeson.KeyMap as KeyMap
 import Data.ByteString (ByteString)
+import Data.List (sortOn)
+import qualified Data.Map.Strict as Map
+import qualified Data.Set as Set
+import Data.Text (Text)
 import Data.Word (Word64)
+import Foreign.C.Types (CUInt)
 
 -- DEFINITIONS ----------------------------------------------------------------
 
@@ -390,3 +415,113 @@ requiredGuardsBytes entries = Write.toStrictByteString (Encoding.encodeMapLen (f
   where
     pairs = Fields.entries entries
     encodePair (key, payload) = Credential.encodeCbor key <> maybe (Write.toStrictByteString Encoding.encodeNull) Data.toCbor payload
+
+-- | Inspect an asset name as lowercase hexadecimal, including the empty name.
+-- Text decoding is not attempted.
+assetName :: Name.AssetName -> IO (Either Error Value)
+assetName = Internal.inspect "inspection.assetName" 47 . Name.encodeCbor
+
+-- | Inspect a validated nonempty digest as lowercase hexadecimal. No hashing or
+-- role inference is performed.
+blake2bHash :: Hash.Blake2bHash -> IO (Either Error Value)
+blake2bHash = Internal.inspect "inspection.blake2bHash" 48 . Hash.encodeCbor
+
+-- | Inspect a pool BLS public key (96 bytes) and possession proof (48 bytes) as
+-- hexadecimal. No group-membership or proof verification is performed.
+blsKey :: Bls.BlsKey -> IO (Either Error Value)
+blsKey = Internal.inspect "inspection.blsKey" 49 . Bls.encodeCbor
+
+-- | Inspect cold committee credentials and expiry epochs as ordered key/value
+-- entries. Credential kind and hash determine order; epochs are decimal
+-- strings.
+committeeMembers :: Committee.Members -> IO (Either Error Value)
+committeeMembers = Internal.inspect "inspection.committeeMembers" 50 . Committee.encodeMembers
+
+-- | Inspect reward accounts and withdrawn lovelace as ordered key/value entries.
+-- Empty input, zero and duplicate accounts are retained. Accounts sort stably
+-- by encoded address bytes, distinct from ledger redeemer-index ordering.
+withdrawals :: [(Reward.RewardAddress, Word64)] -> IO (Either Error Value)
+withdrawals = Internal.inspect "inspection.withdrawals" 51 . Collections.encodeWithdrawalsCbor
+
+-- | Inspect digests as a JSON array, sorted stably by byte length then bytes.
+-- Duplicate digests remain; empty input produces an empty array.
+hashes :: [Hash.Blake2bHash] -> IO (Either Error Value)
+hashes = Internal.inspect "inspection.hashes" 52 . Collections.encodeHashesCbor
+
+-- | Inspect guards in supplied order. Empty input returns an empty array.
+-- Key and script credentials remain tagged;
+-- repeated credentials return a native duplicate-key error.
+guards :: [Credential.Credential Credential.Guard] -> IO (Either Error Value)
+guards [] = pure (Right (toJSON ([] :: [Value])))
+guards credentials = Internal.inspect "inspection.guards" 53 (credentialListBytes credentials)
+
+-- | Inspect subtransactions in supplied order. Empty input returns an empty
+-- array. Repeated body identifiers return
+-- a native duplicate-key error, even if witnesses or outer framing differ.
+-- Signed body encodings are unchanged.
+subTransactions :: [Sub.SubTransaction] -> IO (Either Error Value)
+subTransactions [] = pure (Right (toJSON ([] :: [Value])))
+subTransactions transactions = Internal.inspect "inspection.subTransactions" 54 (subTransactionsBytes transactions)
+
+-- | Inspect policy/name associations as a JSON object keyed by hexadecimal
+-- policies and names. Empty policy groups and zero quantities remain present.
+-- Quantities must fit signed 64 bits ('Cometa.Error.InvalidValueQuantity').
+-- Repeated policies use their last supplied group. Repeated names in a retained
+-- group return 'InvalidValueCbor': object keys cannot retain repeated entries.
+-- Ordering of object properties is insignificant.
+assets :: [(Policy.PolicyId, [(Name.AssetName, Integer)])] -> IO (Either Error Value)
+assets = inspectAssetAssociations "inspection.assets" 55
+
+-- | Inspect policy groups as ordered @{script_hash, assets}@ entries. The inner
+-- @assets@ value is a name-keyed object, not an asset-entry array. Groups sort
+-- stably by policy bytes; empty groups and zero remain. Repeated policies use
+-- the last supplied group, matching native map decoding.
+-- Duplicate names return 'InvalidValueCbor'; signed overflow returns
+-- 'Cometa.Error.InvalidValueQuantity'. Use 'policyAssetEntries' for repeated names.
+assetEntries :: [(Policy.PolicyId, [(Name.AssetName, Integer)])] -> IO (Either Error Value)
+assetEntries = inspectAssetAssociations "inspection.assetEntries" 56
+
+-- | Inspect one policy's name/quantity associations as a hexadecimal-name-keyed
+-- object. Empty input and explicit zero are retained. Repeated names return
+-- 'InvalidValueCbor'; quantities outside signed 64 bits return
+-- 'Cometa.Error.InvalidValueQuantity'. No policy identity is required.
+policyAssets :: [(Name.AssetName, Integer)] -> IO (Either Error Value)
+policyAssets pairs = case encoded of
+  Left failure -> pure (Left failure)
+  Right bytes -> Internal.inspect "inspection.policyAssets" 57 bytes
+  where
+    encoded = do
+      bytes <- Collections.encodeAssetNamesCbor pairs
+      uniqueObjectKeys "Repeated asset names cannot be represented as JSON object keys" (map fst pairs)
+      pure bytes
+
+-- | Inspect one policy's assets as ordered @{asset_name, amount}@ entries.
+-- Names sort stably by byte length then bytes; repeated names keep their relative
+-- order. Empty input and explicit zeros remain. Quantities outside signed 64 bits
+-- return 'Cometa.Error.InvalidValueQuantity'. No policy identity is required.
+policyAssetEntries :: [(Name.AssetName, Integer)] -> IO (Either Error Value)
+policyAssetEntries pairs = case Collections.encodeAssetNamesCbor pairs of
+  Left failure -> pure (Left failure)
+  Right bytes -> Internal.inspect "inspection.policyAssetEntries" 58 bytes
+
+inspectAssetAssociations :: Text -> CUInt -> [(Policy.PolicyId, [(Name.AssetName, Integer)])] -> IO (Either Error Value)
+inspectAssetAssociations operation kind pairs = case encoded of
+  Left failure -> pure (Left failure)
+  Right bytes -> Internal.inspect operation kind bytes
+  where
+    encoded = do
+      groups <- traverse encodeGroup (sortOn (Policy.toBytes . fst) pairs)
+      mapM_ (uniqueObjectKeys "Repeated asset names cannot be represented as JSON object keys" . map fst) (Map.elems (Map.fromList pairs))
+      pure (Write.toStrictByteString (Encoding.encodeMapLen (fromIntegral (length groups))) <> mconcat groups)
+    encodeGroup (policy, quantities) = do
+      bytes <- Collections.encodeAssetNamesCbor quantities
+      pure (Write.toStrictByteString (Encoding.encodeBytes (Policy.toBytes policy)) <> bytes)
+
+uniqueObjectKeys :: (Ord key) => Text -> [key] -> Either Error ()
+uniqueObjectKeys message keys = unless (Set.size (Set.fromList keys) == length keys) (Left (InvalidValueCbor message))
+
+credentialListBytes :: [Credential.Credential purpose] -> ByteString
+credentialListBytes credentials = Write.toStrictByteString (Encoding.encodeTag 258 <> Encoding.encodeListLen (fromIntegral (length credentials))) <> foldMap Credential.encodeCbor credentials
+
+subTransactionsBytes :: [Sub.SubTransaction] -> ByteString
+subTransactionsBytes transactions = Write.toStrictByteString (Encoding.encodeTag 258 <> Encoding.encodeListLen (fromIntegral (length transactions))) <> foldMap Sub.encodeCbor transactions

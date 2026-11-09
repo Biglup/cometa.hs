@@ -7,6 +7,23 @@ Use a qualified import to distinguish encoding operations from your domain value
 import qualified Cometa.Encoding.Cbor as Cbor
 ```
 
+## Decode raw hexadecimal
+
+Use `Cometa.Encoding.Hex` when hexadecimal text contains raw bytes rather than a
+complete CBOR item. Decode the text, then apply the intended domain validator:
+
+```haskell
+import qualified Cometa.Encoding.Hex as Hex
+import qualified Cometa.Script.Plutus as Plutus
+
+readScript text = Hex.decode text >>= Plutus.fromBytes Plutus.V3
+```
+
+`Hex.decode` accepts either case and empty input. It rejects odd lengths,
+whitespace, prefixes and non-hexadecimal characters with `InvalidHex`.
+`Hex.encode` returns lowercase text. Both functions are pure; a successful hex
+decode does not establish that the bytes form a valid script or other domain value.
+
 ## Read an encoded value
 
 `fromBytes` reads one complete item from a `ByteString`. `fromHex` accepts the
