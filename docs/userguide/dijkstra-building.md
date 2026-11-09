@@ -43,7 +43,7 @@ or resolve its reference-script UTxO separately. Actions without a policy do not
 create a proposing redeemer. Use `Plan.proposeWithRedeemer` for an explicit
 argument or `Plan.proposeWithDeferredRedeemer` for an argument derived from the
 balanced draft. Both custom-argument operations require an action naming a policy.
-See [proposal building](transaction-building.md#governance-proposals-and-treasury-assertions)
+See [proposal building](transaction-building.md)
 for the full contract.
 
 `examples/DijkstraBuilding.hs` compiles an offline account and governance workflow
