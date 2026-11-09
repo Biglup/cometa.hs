@@ -1,9 +1,9 @@
 # Cometa Haskell binding: design and implementation plan
 
-Status: native API coverage reconciled; final reliability and release hardening remain.
+Status: native API coverage and independent reliability tests complete; release validation remains.
 Created: 2026-11-04.
 Owner: Angel Castillo / Biglup.
-Last updated: 2026-11-09 (five-batch native coverage reconciliation).
+Last updated: 2026-11-09 (release-readiness validation).
 Repository: https://github.com/Biglup/cometa.hs.
 Cabal package: `cometa` (local development name; no Hackage publication yet).
 
@@ -11,6 +11,24 @@ This file is the persistent handoff for the Haskell binding discussion. Keep it
 updated as decisions are made and phases are completed. API names and examples
 below are proposals unless explicitly recorded as implemented. The source, tests,
 and coverage ledger define the current public interface.
+
+## Current release gates
+
+The native-symbol ledger has no pending mappings. PR30 adds independent
+selection, accounting and identity reliability checks; its platform results
+must still be reviewed. Deferred-redeemer query ergonomics are implemented.
+
+- Complete the final example/documentation review and independent source-package
+  consumer checks on the supported compiler/platform matrix.
+- Record reproducible build/sign/inspect/CBOR performance baselines. These are
+  measurements, not cross-platform performance guarantees.
+- Rerun supported live preprod workflows with the final native pin and retain
+  confirmation/cleanup evidence. Dijkstra live coverage depends on the network's
+  actual protocol; offline validation must remain clearly distinguished.
+- Prepare the chosen release version, changelog, Hackage package/docs and GitHub
+  artifacts; validate the published install and update ecosystem links.
+
+Excluded infrastructure and speculative additional APIs are not release blockers.
 
 ## 1. Objective and requirements
 
@@ -4536,3 +4554,44 @@ lost allocations, without suppressions. Formatting, HLint, package validation
 and strict Sphinx/Haddock pass. Hosted compiler/platform checks are tracked
 in the PR; release preparation and final preprod validation remain subsequent
 work.
+
+### Release-readiness consumer, examples and performance (2026-11-09)
+
+The final guide audit corrected obsolete proposal restrictions: both top-level and
+local proposal APIs support optional policies and explicit/deferred arguments.
+The provider-backed payment example now accepts a caller-selected future expiry
+instead of an expired fixed slot. No public API changed. All 54 existing CI example
+commands pass locally; connected runners without `--submit` validate their offline
+entry points only, not transaction submission or confirmation.
+
+`tools/check-source-package.py` builds an independent executable from an extracted
+source archive in a temporary project. It imports only public APIs, including the
+optional Blockfrost sublibrary, and checks an independent hash vector, scoped
+signing/verification, address and transaction round trips, identifiers and native
+inspection. Native paths are supplied explicitly; checkout configuration, build
+outputs and test fixtures are not borrowed. The check passes locally with cached
+dependencies and no network. It complements the existing archive suite checks and
+is included in the compiler/platform matrix. An initial empty-message hash fixture
+was corrected to the supported nonempty `abc` vector; native empty-message rejection
+is already documented and tested, and no native change was needed.
+
+`benchmark/Main.hs` supplies reproducible build/sign/inspect/CBOR measurements.
+The fixture, configuration, observed results and limitations are recorded in
+`PERFORMANCE.md`. CI only checks execution, not timing. Package metadata now
+describes the implemented library rather than the initial foundation.
+
+Local checks pass for the independent archive consumer, all 54 example commands,
+the benchmark, formatting/lint, package metadata and strict Sphinx. The changed
+payment documentation snippet is compiled separately. Hosted platform checks and
+final preprod validation remain release gates. No live transactions were submitted
+and no production library or native pin changes are included in this pass.
+
+
+#### Source-consumer CI dependency resolution
+
+The first hosted consumer runs failed before compilation because the helper
+forced `--offline`. Its independent project selected dependencies absent from
+the runner cache, even though the checkout and archive suites had passed. The
+helper now permits ordinary Cabal downloads by default and offers an explicit
+`--offline` option for fully cached runs. Isolation from checkout source/configuration
+is unchanged. This is a verification-tool fix, with no library or native changes.

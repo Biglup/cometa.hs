@@ -19,18 +19,20 @@ import qualified Cometa.Transaction.Builder as Builder
 import qualified Cometa.Transaction.Plan as Plan
 import Control.Monad.Trans.Except (ExceptT (..), runExceptT)
 
-buildPayment provider wallet output = runExceptT $ do
+buildPayment provider wallet output expiry = runExceptT $ do
   parameters <- ExceptT (Provider.protocolParameters provider)
   available <- ExceptT (Provider.utxosAt provider wallet)
   let config = (Builder.defaultConfig parameters Slot.preview wallet)
         {Builder.availableUtxos = available}
-      plan = Plan.payTo output <> Plan.validUntil 1000000
+      plan = Plan.payTo output <> Plan.validUntil expiry
   ExceptT (Builder.build config plan)
 ```
 
 `Slot.preview` in this example selects Preview time conversion. Choose the
-configuration corresponding to your network. The change address determines the
-transaction body's network tag. The builder calculates fees and change and uses
+configuration corresponding to your network. Supply `expiry` as an absolute
+future slot on that network, allowing time to sign, submit and confirm the
+transaction. The builder does not query the current slot. The change address
+determines the transaction body's network tag. The builder calculates fees and change and uses
 its built-in selector and evaluator by default. It returns errors for insufficient
 funds, invalid requirements or balancing failures. The result has no key
 signatures; use the [signing workflow](evaluation-and-signing.md) and submit it

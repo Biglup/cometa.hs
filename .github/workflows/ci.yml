@@ -156,6 +156,14 @@ jobs:
           cd "$consumer_dir"/cometa-*
           cabal build all --enable-tests --extra-include-dirs="$NATIVE_INCLUDE_DIR" --extra-lib-dirs="$NATIVE_LIBRARY_DIR"
           cabal test all --enable-tests --test-show-details=direct --extra-include-dirs="$NATIVE_INCLUDE_DIR" --extra-lib-dirs="$NATIVE_LIBRARY_DIR"
+      - name: Run independent source-package consumer
+        run: >-
+          python tools/check-source-package.py .sdist/cometa-*.tar.gz
+          --extra-include-dirs "${{ steps.native.outputs.include-dir }}"
+          --extra-lib-dirs "${{ steps.native.outputs.library-dir }}"
+      - name: Exercise performance harness
+        if: matrix.os == 'ubuntu-24.04' && matrix.ghc == '9.6.7'
+        run: cabal bench cometa-performance --benchmark-options="1"
       - name: Check native allocations with Valgrind
         if: matrix.os == 'ubuntu-24.04' && matrix.ghc == '9.6.7'
         run: |
@@ -188,8 +196,8 @@ jobs:
           clang-format-18 --dry-run --Werror cbits/*.c cbits/*.h test/cbits/*.c
       - name: Check formatting and lint
         run: |
-          find src internal test examples blockfrost-src blockfrost-test \( -name '*.hs' -o -name '*.hsc' \) -print0 | xargs -0 "$RUNNER_TEMP/style-bin/ormolu" --mode check
-          "$RUNNER_TEMP/style-bin/hlint" src internal test examples blockfrost-src blockfrost-test
+          find src internal test examples benchmark blockfrost-src blockfrost-test \( -name '*.hs' -o -name '*.hsc' \) -print0 | xargs -0 "$RUNNER_TEMP/style-bin/ormolu" --mode check
+          "$RUNNER_TEMP/style-bin/hlint" src internal test examples benchmark blockfrost-src blockfrost-test
 
   documentation:
     runs-on: ubuntu-24.04

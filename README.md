@@ -181,7 +181,7 @@ policy IDs and multi-asset arithmetic.
 Attach a native or Plutus script with `Plan.attachScript`, or use an existing
 reference-script UTxO through `Plan.referenceInput`. `Output.mkOutput` accepts a
 datum and optional reference script; `Plan.spendWith` supplies a spending
-redeemer and optional datum witness. Plutus minting, withdrawals, certificates
+redeemer and optional datum witness. Plutus minting, withdrawals, certificates,
 votes and governance proposals have corresponding redeemer operations.
 
 Builders evaluate scripts locally by default. Supply current protocol parameters,
