@@ -105,3 +105,38 @@ Hash arrays use tag 258 by default. `encodeHashesCborWith UntaggedSet` produces 
 untagged array; decoding accepts either form. This is a representation choice:
 native hash-set re-encoding always emits the tagged form. Persist the original
 bytes separately when exact imported encoding matters.
+
+## Floating-point and simple values
+
+`decodeDouble` accepts half-, single- and double-precision encodings and returns a
+Haskell `Double`, including signed zero, infinities and NaN. It does not coerce
+integer items. Inspecting a value leaves its original encoding unchanged.
+
+`decodeSimple` returns a `Word8`: false is 20, true is 21, null is 22 and undefined
+is 23. It also accepts other byte-valued simple items accepted by the native
+reader; application-specific meanings remain the caller's responsibility.
+`encodeUndefined` produces `f7`. Undefined is distinct from null and an absent
+map entry. These operations use the same `IO (Either Error ...)` boundary as the
+other scalar codecs.
+
+## Explicit re-encoding
+
+Use `Cometa.Encoding.Reencode` only when deliberately changing a representation.
+`nativeScript`, `transaction` and `subTransaction` return new typed snapshots;
+`nativeScripts` accepts and returns a `Cbor` containing a standalone script list.
+The source remains unchanged. These operations follow native re-encoding rules,
+including retained indefinite script-list boundaries and fresh transaction set
+tags; they are not general canonical-CBOR encoders.
+
+Re-encoding may change script hashes and transaction IDs. Existing signatures and
+commitments are retained, not repaired. Review the result and rebuild/re-sign as
+needed before submission. For ordinary transaction construction, use the builder.
+
+`Transaction.Body.inputsAreTagged` inspects the actual encoded input collection.
+It does not claim that every set in the body has the same encoding.
+
+`Cometa.Value.Raw` provides immutable advanced snapshots of signed coin and asset
+associations, retaining zero entries, repeated asset names and empty policies.
+`mkSnapshot` validates signed 64-bit quantities. `fromValue` imports a normalized
+value; `toValue` explicitly combines duplicate quantities and removes zero entries
+and empty groups. Keep the raw snapshot when those representation details matter.

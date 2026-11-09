@@ -21,6 +21,8 @@
 module Cometa.Protocol.Rational
   ( NonNegativeRational,
     mkNonNegativeRational,
+    fromDouble,
+    toDouble,
     numerator,
     denominator,
     toRational,
@@ -31,7 +33,7 @@ where
 
 -- IMPORTS --------------------------------------------------------------------
 
-import Cometa.Error (Error)
+import Cometa.Error (Error (..))
 import Cometa.Internal.ProtocolValues (NonNegativeRational, mkNonNegativeRational)
 import qualified Cometa.Internal.ProtocolValues as Internal
 import Data.ByteString (ByteString)
@@ -39,6 +41,31 @@ import Data.Word (Word64)
 import Prelude hiding (toRational)
 
 -- DEFINITIONS ----------------------------------------------------------------
+
+-- | Convert a finite nonnegative Double using the native decimal-floor rule
+-- on its fractional part, then add the whole part. Reduce that fractional pair
+-- before adding the whole part, retaining native numerator/denominator choices.
+-- Nonfinite, negative or out-of-uint64 whole parts return 'InvalidProtocolDouble'.
+-- If the resulting exact numerator exceeds uint64, return
+-- 'InvalidProtocolRational' instead of reproducing native unsigned overflow.
+fromDouble :: Double -> Either Error NonNegativeRational
+fromDouble value
+  | isNaN value || isInfinite value || value < 0 = Left InvalidProtocolDouble
+  | whole > toInteger (maxBound :: Word64) = Left InvalidProtocolDouble
+  | otherwise =
+      let fractionalNumerator = floor ((value - fromInteger whole) * 1000000000000000)
+          fractionalDenominator = 1000000000000000
+          divisor = gcd fractionalNumerator fractionalDenominator
+          d = fractionalDenominator `quot` divisor
+          n = fractionalNumerator `quot` divisor + whole * d
+       in mkNonNegativeRational n d
+  where
+    whole = floor value
+
+-- | Convert numerator and denominator separately to Double and divide, matching
+-- the native approximation without changing the stored exact pair.
+toDouble :: NonNegativeRational -> Double
+toDouble value = fromIntegral (numerator value) / fromIntegral (denominator value)
 
 -- | Original numerator, without fraction reduction.
 numerator :: NonNegativeRational -> Word64

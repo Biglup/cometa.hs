@@ -33,6 +33,7 @@ module Cometa.PlutusData
     encodeCbor,
     decodeCbor,
     fromData,
+    integerFromText,
     toData,
     toCbor,
 
@@ -49,12 +50,14 @@ import qualified Codec.CBOR.Read as Read
 import qualified Codec.CBOR.Write as Write
 import Cometa.Crypto.Blake2b (Blake2bHash)
 import qualified Cometa.Crypto.Blake2b as Blake2b
+import qualified Cometa.Encoding.Integer as Integer
 import Cometa.Error (Error (..))
 import Control.Monad (replicateM, unless)
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as ByteString
 import qualified Data.ByteString.Lazy as Lazy
 import Data.Maybe (isNothing)
+import Data.Text (Text)
 import qualified Data.Text as Text
 import Data.Word (Word64)
 
@@ -89,6 +92,12 @@ instance Ord EncodedPlutusData where
   compare left right = compare (toCbor left) (toCbor right)
 
 -- DEFINITIONS ----------------------------------------------------------------
+
+-- | Parse an arbitrary-precision integer using a validated native-compatible
+-- radix and assemble its fresh script-data encoding. No ledger metadata bounds
+-- apply. Invalid text returns 'Cometa.Error.InvalidIntegerText'.
+integerFromText :: Integer.Radix -> Text -> Either Error EncodedPlutusData
+integerFromText radix text = fromData . Integer <$> Integer.fromText radix text
 
 -- | Serialize fresh semantic data with shortest integer/tag encodings, definite
 -- lists and maps, and byte chunks of at most 64 bytes. Map order and duplicates

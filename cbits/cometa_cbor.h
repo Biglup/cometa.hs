@@ -271,6 +271,37 @@ const unsigned char* cometa_cbor_buffer_data(const cardano_buffer_t* buffer);
  */
 size_t cometa_cbor_buffer_size(const cardano_buffer_t* buffer);
 
+/**
+ * \brief Writes CBOR undefined, returning one owned buffer reference.
+ * \param[out] output Owned result slot, initialized even on failure.
+ * \param[out] error Optional diagnostic storage.
+ * \param[in] error_size Diagnostic capacity including the terminator.
+ * \returns Native status; the caller releases any output reference.
+ */
+unsigned int cometa_cbor_encode_undefined(cardano_buffer_t** output, char* error, size_t error_size);
+
+/**
+ * \brief Reads one IEEE floating-point item, copying its value before cleanup.
+ * \param[in] data Borrowed encoded item bytes.
+ * \param[in] size Input byte count.
+ * \param[out] value Receives the converted double on success.
+ * \param[out] error Optional diagnostic storage.
+ * \param[in] error_size Diagnostic capacity including the terminator.
+ * \returns Native status; reader ownership never escapes the call.
+ */
+unsigned int cometa_cbor_decode_double(const unsigned char* data, size_t size, double* value, char* error, size_t error_size);
+
+/**
+ * \brief Reads a simple value into a fixed-width byte, without exposing C enum layout.
+ * \param[in] data Borrowed encoded item bytes.
+ * \param[in] size Input byte count.
+ * \param[out] value Receives the simple-value number on success.
+ * \param[out] error Optional diagnostic storage.
+ * \param[in] error_size Diagnostic capacity including the terminator.
+ * \returns Native status; reader ownership never escapes the call.
+ */
+unsigned int cometa_cbor_decode_simple(const unsigned char* data, size_t size, uint8_t* value, char* error, size_t error_size);
+
 #ifdef __cplusplus
 }
 #endif /* __cplusplus */

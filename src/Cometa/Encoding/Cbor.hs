@@ -49,6 +49,9 @@ module Cometa.Encoding.Cbor
     decodeText,
     encodeBool,
     decodeBool,
+    decodeDouble,
+    decodeSimple,
+    encodeUndefined,
 
     -- * Ordered collections
     encodeArray,
@@ -74,7 +77,7 @@ import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
 import Data.Word (Word8)
 import Foreign.C.String (CString)
-import Foreign.C.Types (CInt, CSize)
+import Foreign.C.Types (CDouble (..), CInt, CSize)
 import Foreign.Marshal.Alloc (alloca, allocaBytes)
 import Foreign.Ptr (Ptr, castPtr, nullPtr)
 import Foreign.Storable (peek, poke)
@@ -175,6 +178,31 @@ decodeBool cbor = withBytes (toBytes cbor) $ \input size -> alloca $ \output ->
   withDiagnostic $ \diagnostic capacity -> do
     code <- Native.cDecodeBool input size output diagnostic capacity
     statusResult "cbor.decodeBool" code ((/= 0) <$> peek output)
+
+-- | Decode an untagged IEEE half-, single- or double-precision value as a
+-- 'Double'. Signed zero, infinities and NaN are accepted. Integer items are not
+-- coerced to floating point; other types return 'NativeError'. The original
+-- encoding remains unchanged. NaN payload bits are not an interchange guarantee.
+decodeDouble :: Cbor -> IO (Either Error Double)
+decodeDouble cbor = withBytes (toBytes cbor) $ \input size -> alloca $ \output ->
+  withDiagnostic $ \diagnostic capacity -> do
+    code <- Native.cDecodeDouble input size output diagnostic capacity
+    statusResult "cbor.decodeDouble" code ((\(CDouble value) -> value) <$> peek output)
+
+-- | Decode the number of a simple value: false is 20, true is 21, null is 22
+-- and undefined is 23. Unassigned byte values and nonminimal two-byte encodings
+-- accepted by the reader are retained. Floating-point and other major types
+-- return 'NativeError'. This does not interpret application-specific meanings.
+decodeSimple :: Cbor -> IO (Either Error Word8)
+decodeSimple cbor = withBytes (toBytes cbor) $ \input size -> alloca $ \output ->
+  withDiagnostic $ \diagnostic capacity -> do
+    code <- Native.cDecodeSimple input size output diagnostic capacity
+    statusResult "cbor.decodeSimple" code (peek output)
+
+-- | Encode CBOR undefined (@f7@), distinct from null, an absent field and false.
+-- Use 'decodeSimple' to inspect its simple-value number, 23.
+encodeUndefined :: IO (Either Error Cbor)
+encodeUndefined = encodeResult "cbor.encodeUndefined" Native.cEncodeUndefined
 
 -- | Encode an array in list order with a definite-length outer encoding.
 -- Every child's bytes remain exact, including nonminimal or indefinite forms.

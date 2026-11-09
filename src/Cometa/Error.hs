@@ -194,6 +194,18 @@ data Error
     EmptyPlutusScript
   | -- | A protocol fraction has a negative or oversized component, or a zero denominator.
     InvalidProtocolRational !Integer !Integer
+  | -- | An integer text radix or uppercase rendering radix is unsupported.
+    InvalidIntegerRadix !Int
+  | -- | Integer text contains invalid digits or no digits; payload is diagnostic.
+    InvalidIntegerText !Text
+  | -- | A modular operation has a zero or otherwise unsupported modulus.
+    InvalidModulus !Integer
+  | -- | The given integer has no inverse for the given modulus.
+    NoModularInverse !Integer !Integer
+  | -- | A floating-point protocol fraction is nonfinite, negative or has an oversized whole part.
+    InvalidProtocolDouble
+  | -- | A floating-point unit interval is nonfinite or outside zero through one.
+    InvalidUnitIntervalDouble
   | -- | A unit interval fraction lies outside zero through one inclusive.
     InvalidUnitInterval !Integer !Integer
   | -- | An execution budget component is outside the unsigned 64-bit range.

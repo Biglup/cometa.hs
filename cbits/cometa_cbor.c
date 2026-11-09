@@ -279,6 +279,65 @@ cometa_cbor_decode_bool(const unsigned char* data, size_t size, int* value, char
 }
 
 unsigned int
+cometa_cbor_encode_undefined(cardano_buffer_t** output, char* error, size_t error_size)
+{
+  cardano_cbor_writer_t* writer = new_writer(output, error, error_size);
+
+  if (writer == NULL)
+  {
+    return CARDANO_ERROR_MEMORY_ALLOCATION_FAILED;
+  }
+
+  return finish_writer(writer, cardano_cbor_writer_write_undefined(writer), output, error, error_size);
+}
+
+unsigned int
+cometa_cbor_decode_double(const unsigned char* data, size_t size, double* value, char* error, size_t error_size)
+{
+  cardano_cbor_reader_t* reader = NULL;
+  unsigned int           result = cometa_cbor_reader_new(data, size, &reader, error, error_size);
+
+  if (result != CARDANO_SUCCESS)
+  {
+    return result;
+  }
+
+  cardano_error_t status = cardano_cbor_reader_read_double(reader, value);
+  if (status == CARDANO_SUCCESS)
+  {
+    status = require_finished(reader);
+  }
+  result = reader_status(reader, status, error, error_size);
+  cardano_cbor_reader_unref(&reader);
+
+  return result;
+}
+
+unsigned int
+cometa_cbor_decode_simple(const unsigned char* data, size_t size, uint8_t* value, char* error, size_t error_size)
+{
+  cardano_cbor_reader_t* reader = NULL;
+  unsigned int           result = cometa_cbor_reader_new(data, size, &reader, error, error_size);
+
+  if (result != CARDANO_SUCCESS)
+  {
+    return result;
+  }
+
+  cardano_cbor_simple_value_t native = CARDANO_CBOR_SIMPLE_VALUE_UNDEFINED;
+  cardano_error_t             status = cardano_cbor_reader_read_simple_value(reader, &native);
+  if (status == CARDANO_SUCCESS)
+  {
+    status = require_finished(reader);
+    *value = (uint8_t)native;
+  }
+  result = reader_status(reader, status, error, error_size);
+  cardano_cbor_reader_unref(&reader);
+
+  return result;
+}
+
+unsigned int
 cometa_cbor_encode_collection(int map, size_t count, const unsigned char* data, size_t size, cardano_buffer_t** output, char* error, size_t error_size)
 {
   *output = NULL;

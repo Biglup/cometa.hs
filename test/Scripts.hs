@@ -16,7 +16,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 -- | Typed script construction, exact identity, native conformance and VM goldens.
-module Scripts (tests) where
+module Scripts (tests, nativeValues) where
 
 -- IMPORTS --------------------------------------------------------------------
 

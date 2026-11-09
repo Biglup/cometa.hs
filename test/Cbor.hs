@@ -23,7 +23,7 @@ module Cbor (tests) where
 
 import qualified Cometa.Encoding.Cbor as Cbor
 import Cometa.Error (Error (..))
-import Control.Monad (replicateM_, (>=>))
+import Control.Monad (forM_, replicateM_, (>=>))
 import Data.Bifunctor (bimap)
 import qualified Data.ByteString as ByteString
 import Data.Either (isLeft)
@@ -44,7 +44,10 @@ tests :: TestTree
 tests =
   testGroup
     "CBOR foundation"
-    [ testCase "integer boundaries have independent expected encodings" checkIntegerVectors,
+    [ testCase "floating-point widths and IEEE special values are preserved" checkFloatingPoint,
+      testCase "simple values and undefined remain distinct" checkSimpleValues,
+      testCase "scalar failures release readers and permit recovery" checkScalarCleanup,
+      testCase "integer boundaries have independent expected encodings" checkIntegerVectors,
       testCase "out-of-range integers are rejected without truncation" checkIntegerBounds,
       testCase "byte, text and Boolean values have expected encodings" checkScalarVectors,
       testCase "nested nonminimal and indefinite items preserve exact bytes" checkRawItems,
@@ -241,3 +244,52 @@ integerVectors = [(0, "00"), (23, "17"), (24, "1818"), (255, "18ff"), (256, "190
 
 rawItems :: [Text]
 rawItems = ["1817", "5f41014102ff", "7f61616162ff", "9f00f68101ff", "bf016161016162ff", "d86400", "c249010000000000000000", "a201f60100"]
+
+-- | Independent RFC 8949 encodings cover each width and sign boundary.
+checkFloatingPoint :: IO ()
+checkFloatingPoint = do
+  forM_ [("f93c00", 1), ("f9c000", -2), ("f90001", 2 ** (-24)), ("f97bff", 65504), ("fa3fc00000", 1.5), ("fb3ff8000000000000", 1.5)] $ \(bytes, expected) -> do
+    item <- requireRight (Cbor.fromHex bytes)
+    Cbor.decodeDouble item >>= (@?= Right expected)
+    Cbor.toHex item @?= bytes
+  forM_ ["f98000", "fa80000000", "fb8000000000000000"] $ \bytes -> do
+    item <- requireRight (Cbor.fromHex bytes)
+    actual <- requireRight (Cbor.decodeDouble item)
+    assertBool "negative zero sign lost" (isNegativeZero actual)
+  forM_ [("f97c00", False), ("f9fc00", True), ("fa7f800000", False), ("fbfff0000000000000", True)] $ \(bytes, negative) -> do
+    item <- requireRight (Cbor.fromHex bytes)
+    actual <- requireRight (Cbor.decodeDouble item)
+    assertBool "infinity lost" (isInfinite actual)
+    (actual < 0) @?= negative
+  forM_ ["f97e00", "fa7fc00000", "fb7ff8000000000000"] $ \bytes -> do
+    item <- requireRight (Cbor.fromHex bytes)
+    requireRight (Cbor.decodeDouble item) >>= assertBool "NaN lost" . isNaN
+
+-- | Enumerate the byte-valued native simple domain, including nonminimal forms.
+checkSimpleValues :: IO ()
+checkSimpleValues = do
+  forM_ [0 .. 255] $ \number -> do
+    let bytes = ByteString.pack [248, number]
+    item <- requireRight (Cbor.fromBytes bytes)
+    Cbor.decodeSimple item >>= (@?= Right number)
+    Cbor.toBytes item @?= bytes
+  forM_ [0 .. 23] $ \number -> do
+    item <- requireRight (Cbor.fromBytes (ByteString.singleton (224 + number)))
+    Cbor.decodeSimple item >>= (@?= Right number)
+  item <- requireRight Cbor.encodeUndefined
+  Cbor.toHex item @?= "f7"
+  Cbor.decodeSimple item >>= (@?= Right 23)
+  Cbor.decodeBool item >>= assertBool "undefined decoded as Boolean" . isLeft
+  values <- mapM (requireRight . Cbor.fromHex) ["f4", "f5", "f6", "f7"]
+  mapM (requireRight . Cbor.decodeSimple) values >>= (@?= [20, 21, 22, 23])
+
+checkScalarCleanup :: IO ()
+checkScalarCleanup = replicateM_ 40 $ do
+  wrong <- requireRight (Cbor.encodeInteger 1)
+  Cbor.decodeDouble wrong >>= assertBool "integer coerced into Double" . isLeft
+  Cbor.decodeSimple wrong >>= assertBool "integer decoded as simple" . isLeft
+  float <- requireRight (Cbor.fromHex "f93c00")
+  Cbor.decodeSimple float >>= assertBool "float decoded as simple" . isLeft
+  forM_ ["f9", "f900", "fa0000", "fb00000000", "f8", "f701"] (Cbor.fromHex >=> (assertBool "invalid complete item accepted" . isLeft))
+  item <- requireRight Cbor.encodeUndefined
+  Cbor.decodeSimple item >>= (@?= Right 23)

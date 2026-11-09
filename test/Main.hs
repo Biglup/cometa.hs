@@ -40,6 +40,7 @@ import Control.Monad (forever, replicateM_)
 import qualified Data.ByteString as ByteString
 import qualified Data.Text as Text
 import qualified DerivationPath
+import qualified Diagnostics
 import qualified Ed25519
 import qualified ErrorCode
 import qualified Governance
@@ -51,6 +52,7 @@ import qualified InspectionCollections
 import qualified IntegerSemantics
 import qualified Metadata
 import qualified NativeWorkflows
+import qualified NumericConversions
 import qualified Ownership
 import qualified Parameters
 import qualified PasswordCrypto
@@ -74,6 +76,7 @@ import qualified TransactionAccountingProperties
 import qualified TransactionBody
 import qualified TransactionCollectionOperations
 import qualified TransactionDeferred
+import qualified TransactionMapOperations
 import qualified TransactionWitnesses
 import qualified Value
 
@@ -90,8 +93,10 @@ main =
         TransactionDeferred.tests,
         TransactionAccountingProperties.tests,
         IntegerSemantics.tests,
+        NumericConversions.tests,
         CollectionOperations.tests,
         TransactionCollectionOperations.tests,
+        TransactionMapOperations.tests,
         InspectionCollections.tests,
         HexEncoding.tests,
         PublicTransaction.tests,
@@ -117,6 +122,7 @@ main =
         Callback.tests,
         Ownership.tests,
         Cbor.tests,
+        Diagnostics.tests,
         Transaction.tests,
         Ed25519.tests,
         Bip32.tests,

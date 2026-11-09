@@ -30,6 +30,9 @@ module Cometa.Internal.FFI.Cbor
     cDecodeString,
     cEncodeBool,
     cDecodeBool,
+    cEncodeUndefined,
+    cDecodeDouble,
+    cDecodeSimple,
     cEncodeCollection,
     cReaderNew,
     cCollectionStart,
@@ -50,7 +53,7 @@ where
 import Cometa.Internal.FFI.Native (NativeCode)
 import Data.Word (Word64, Word8)
 import Foreign.C.String (CString)
-import Foreign.C.Types (CInt (..), CSize (..), CUInt (..))
+import Foreign.C.Types (CDouble (..), CInt (..), CSize (..), CUInt (..))
 import Foreign.Ptr (Ptr)
 
 -- TYPES ----------------------------------------------------------------------
@@ -127,3 +130,15 @@ foreign import ccall unsafe "cometa_cbor_buffer_data"
 -- | Bounded buffer length observer.
 foreign import ccall unsafe "cometa_cbor_buffer_size"
   cBufferSize :: Ptr NativeBuffer -> IO CSize
+
+-- | Return an owned encoding of undefined; diagnostics use caller storage.
+foreign import ccall safe "cometa_cbor_encode_undefined"
+  cEncodeUndefined :: Ptr (Ptr NativeBuffer) -> CString -> CSize -> IO NativeCode
+
+-- | Read a copied floating-point result; output is inspected only on success.
+foreign import ccall safe "cometa_cbor_decode_double"
+  cDecodeDouble :: Ptr Word8 -> CSize -> Ptr CDouble -> CString -> CSize -> IO NativeCode
+
+-- | Read a simple-value number through a fixed-width byte, not an enum ABI.
+foreign import ccall safe "cometa_cbor_decode_simple"
+  cDecodeSimple :: Ptr Word8 -> CSize -> Ptr Word8 -> CString -> CSize -> IO NativeCode

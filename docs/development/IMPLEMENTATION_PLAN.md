@@ -1,9 +1,9 @@
 # Cometa Haskell binding: design and implementation plan
 
-Status: foundation implementation in progress; domain phases remain planned.
+Status: native API coverage reconciled; final reliability and release hardening remain.
 Created: 2026-11-04.
 Owner: Angel Castillo / Biglup.
-Last updated: 2026-11-04 (repository foundation and native inventory).
+Last updated: 2026-11-09 (five-batch native coverage reconciliation).
 Repository: https://github.com/Biglup/cometa.hs.
 Cabal package: `cometa` (local development name; no Hackage publication yet).
 
@@ -4433,3 +4433,75 @@ bound, retaining both completion joins, exact `ThreadKilled` and live-context
 assertions. Local validation passes all 423 public tests and all 181 runtime
 tests under Valgrind, with zero errors or lost allocations and no suppressions.
 Hosted checks for these test-only corrections must still pass.
+
+### Completion of the five remaining coverage batches
+
+This pass resolves the 54 pending ledger entries against the unchanged native
+pin. The ledger now contains 3,485 adapted, 231 implemented and 171 intentionally
+omitted entries, with none pending. This is a symbol-by-symbol correspondence
+record, not a claim of complete ledger validation or release readiness.
+
+Transaction maps use existing public association lists and validated fields.
+Native indexed getters correspond to checked list access; reward-address entries
+are explicitly sorted by encoded bytes when matching native enumeration. Tests
+cover full-width amounts, null guard data, duplicate rejection, duplicate-preserving
+withdrawals and first-match redeemer lookup. Redeemer clones and found intents
+survive source mutation/release. Empty subtransaction sets can be constructed for
+lookup, but native CBOR import rejects an empty set; tests preserve that distinction.
+The public reward-text parser also retains its stricter network/prefix validation.
+
+Numeric workflows now have pure `Cometa.Encoding.Integer` parsing/rendering,
+explicit magnitude byte order and total modular operations. Metadata and Plutus
+integer text constructors reuse that parser. Both bounded `UnitInterval` and
+unbounded-above unsigned `Protocol.Rational` expose checked Double conversions.
+Native radix alphabets, NUL/whitespace/prefix rules and fractional decimal-floor
+behavior are tested independently. Native abort/overflow domains are preflighted;
+negative rendering bases use a safe positive-base size query in the oracle.
+No native arithmetic fixes or global build changes are introduced.
+
+Generic CBOR gains Double/simple-value decoders and an undefined encoder. Tests
+cover all byte-valued simple items, nonminimal native-accepted forms, signed zero,
+subnormals, infinities and NaN across IEEE widths. The adapters keep readers,
+writers and buffers scoped, copy scalar slots only on success and expose no enum
+layout. Original encoded snapshots remain exact.
+
+Advanced `Encoding.Reencode` explicitly applies the native mixed-depth encoding
+policy to new script/transaction snapshots. It is not canonicalization. Existing
+signatures and commitments remain unchanged even when IDs/hashes change; callers
+must review/rebuild/re-sign. Fresh native input-set encoding emits tag 258 even
+when the source was untagged. `Body.inputsAreTagged` observes actual encoded inputs,
+not the native dirty-cache heuristic or unrelated set fields. `Value.Raw` preserves
+signed coin, zero/repeated asset entries and empty policy groups; conversion to
+ordinary normalized Value is explicit. Ordinary transaction APIs are unchanged.
+
+`NetworkMagic` supplies named Word32 protocol values without conflating Shelley
+network tags. `Diagnostics` renders category-only English labels independently
+from Show and CIP-116 JSON. The sole newly intentional omission is
+`cardano_tx_evaluator_get_name`: it borrows a fixed label from a transient private
+adapter, while the public evaluator is an injected Haskell function without native
+identity. Exposing that label as user identity or introducing a new naming class
+would invent a misleading contract. No evaluation capability is omitted.
+
+API evidence reviewed before design:
+
+- cborg 0.2.10.0 `Codec.CBOR.Decoding`: complete scalar alternatives, `decodeDouble`
+  and Word8 `decodeSimple`; Cometa retains its existing complete-item IO/Either boundary.
+- GHC 9.6.7/base 4.18.3.0 `Data.List`/`Numeric`, text 2.0.2 `Data.Text.Read`,
+  and cryptonite 0.30 `Crypto.Number.ModArithmetic`: ordinary values, explicit
+  validity domains and total inverse results. Mini-GMP was separately audited
+  for the native lexical/arithmetic contracts; no cryptonite dependency is added.
+- cardano-api `c2212851b06b9c2acc5bb0bfe1b8a8e8cf2be03a`,
+  `Network/Internal/NetworkId.hs`, `Pretty.hs`,
+  `Experimental/Simple/Script.hs` and `Plutus/Internal/ScriptData.hs`:
+  separate network magic, explicit rendering and original-byte identity versus
+  fresh representation. Exact reviewed paths/contract details are captured in
+  the corresponding ledger rationales. Source review informs design; no upstream
+  implementation or test vectors were copied in this batch.
+
+Validation so far: all 689 tests pass (448 public, 183 runtime, 58 Blockfrost).
+Focused public properties pass 1,000 cases each before the final broader-rational
+boundary additions; final tests exercise those additional boundaries. All 42
+focused public groups and all nine encoding groups pass Valgrind without errors
+or definitely, indirectly or possibly lost allocations, without suppressions. Full formatting/lint and strict Sphinx pass. Final package, Haddock
+and hosted platform checks remain release/review gates. No live transactions or
+native library changes are part of this PR.
