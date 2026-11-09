@@ -87,3 +87,11 @@ of a transaction containing them. Keep the encoded wrapper when preserving an
 existing transaction's identity. Scalar anchor, action, DRep, voter and procedure
 decoders return semantic values; preserve their original enclosing encoding
 when identity matters.
+
+## Diagnostic labels
+
+`Cometa.Diagnostics.certificateKind`, `nativeScriptKind`, `vote` and `voterKind`
+produce English category labels for logs and errors. They include no credential
+hashes or payloads and do not depend on a type's derived `Show` representation.
+These labels use cardano-c's diagnostic vocabulary; use the domain encoders or
+inspection output when a structured interchange format is required.

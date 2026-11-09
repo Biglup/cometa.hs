@@ -118,3 +118,9 @@ Use `Cometa.Address.fromBytes` or `fromText` to import an address when its famil
 is not known in advance. Pattern matching on `ShelleyAddress`, `ByronAddress` or
 `RewardAddress` gives access to family-specific inspection. A decoded address
 does not establish whether the selected ledger era permits it as an output.
+
+`Cometa.NetworkMagic` supplies the full protocol magics `mainnet`, `preprod`,
+`preview` and `sanchonet` as `Word32` values. Use these where a Byron attribute or
+protocol configuration needs a magic number; they are not Shelley network tags.
+Custom networks can supply their own `Word32`. `NetworkMagic.name` returns a known
+lowercase name or `"unknown"`; it does not check endpoint availability.

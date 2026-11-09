@@ -40,6 +40,7 @@ import Control.Monad (forever, replicateM_)
 import qualified Data.ByteString as ByteString
 import qualified Data.Text as Text
 import qualified DerivationPath
+import qualified Diagnostics
 import qualified Ed25519
 import qualified ErrorCode
 import qualified Governance
@@ -121,6 +122,7 @@ main =
         Callback.tests,
         Ownership.tests,
         Cbor.tests,
+        Diagnostics.tests,
         Transaction.tests,
         Ed25519.tests,
         Bip32.tests,

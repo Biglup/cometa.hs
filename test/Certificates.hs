@@ -16,7 +16,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 -- | Certificate schema, constructor boundaries and native reconstruction tests.
-module Certificates (tests) where
+module Certificates (tests, sampleCertificates) where
 
 -- IMPORTS --------------------------------------------------------------------
 
