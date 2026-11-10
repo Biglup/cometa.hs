@@ -156,6 +156,7 @@ jobs:
         with:
           name: source-packages-${{ matrix.os }}-ghc-${{ matrix.ghc }}
           path: .sdist/*.tar.gz
+          include-hidden-files: true
           if-no-files-found: error
       - name: Exercise performance harness
         if: matrix.os == 'ubuntu-24.04' && matrix.ghc == '9.6.7'
