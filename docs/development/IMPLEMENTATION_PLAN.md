@@ -4684,3 +4684,18 @@ accepts both workflows; strict Sphinx and both Haddock output modes pass. The
 Hackage archive contains both public APIs and its interface; local HTML targets
 were checked. The installed-library CI source-package command now uses `sdist
 all`, avoiding Cabal interpreting the package name as a library component.
+
+### First candidate pipeline validation (2026-11-10)
+
+Release run `42748876750` passed all nine validation jobs, including the full
+platform matrix, source-archive consumers and Valgrind. Release preparation also
+passed and produced both source archives, Hackage documentation and checksums.
+The first native-package upload failed; Cabal's output was withheld, so the run
+does not establish whether authentication, uploader permissions or package
+validation caused the failure. It must not be reported as a successful candidate.
+
+The upload helper now reports bounded, credential-redacted Cabal diagnostics
+without rendering its token-bearing command or exception. Offline tests cover
+server error preservation, raw and encoded token redaction, terminal controls,
+multiline output and missing executables. Retry the candidate after this
+diagnostic change is merged; permanent publication remains pending.

@@ -174,6 +174,45 @@ class ArtifactTests(unittest.TestCase):
 
 
 class UploadBoundaryTests(unittest.TestCase):
+    def test_upload_failure_reports_server_reason_without_token(self):
+        failure = subprocess.CalledProcessError(
+            1, ["cabal", "--token=private-token"],
+            output="Uploading with --token=private-token",
+            stderr="HTTP 403 Forbidden: account is not an uploader. private-token")
+        with patch.object(release.subprocess, "run", side_effect=failure):
+            with self.assertRaises(release.ReleaseError) as caught:
+                release.cabal_upload(Path("native.tar.gz"), "candidate", "private-token")
+        message = str(caught.exception)
+        self.assertIn("HTTP 403 Forbidden: account is not an uploader", message)
+        self.assertIn("exit 1", message)
+        self.assertNotIn("private-token", message)
+        self.assertIn("[REDACTED]", message)
+
+    def test_upload_diagnostics_redact_encoded_tokens_and_limit_output(self):
+        token = "credential/with+punctuation"
+        failure = subprocess.CalledProcessError(
+            1, [], output=release.quote(token, safe=""),
+            stderr="\x1b[31mcredential/with+\x1b[0mpunctuation\n::error::response\n" + "x" * 5000)
+        message = release.upload_diagnostics(failure, token)
+        self.assertNotIn(token, message)
+        self.assertNotIn(release.quote(token, safe=""), message)
+        self.assertNotIn("\n", message)
+        self.assertNotIn("\x1b", message)
+        self.assertLessEqual(len(message), 4000)
+        self.assertIn("[REDACTED]", message)
+
+    def test_upload_failure_without_output_or_executable_is_actionable(self):
+        failures = [
+            (subprocess.CalledProcessError(1, []), "No diagnostic output"),
+            (FileNotFoundError("credential"), "Cannot start Cabal"),
+        ]
+        for failure, expected in failures:
+            with self.subTest(expected=expected), patch.object(release.subprocess, "run", side_effect=failure):
+                with self.assertRaises(release.ReleaseError) as caught:
+                    release.cabal_upload(Path("native.tar.gz"), "candidate", "credential")
+                self.assertIn(expected, str(caught.exception))
+                self.assertNotIn("credential", str(caught.exception))
+
     def test_cabal_flags_and_secret_safe_failure(self):
         for mode in ("candidate", "publish"):
             with patch.object(release.subprocess, "run") as run:
