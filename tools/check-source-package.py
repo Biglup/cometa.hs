@@ -11,6 +11,7 @@ Supply the bundled native source archive, or explicit installed-library paths.
 import argparse
 import json
 import os
+import re
 from pathlib import Path, PurePosixPath
 import shutil
 import subprocess
@@ -59,22 +60,30 @@ def extract_package(archive, destination, description="cometa.cabal"):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("archive", type=Path, help="cometa source .tar.gz produced by cabal sdist")
+    parser.add_argument("archive", type=Path, nargs="?", help="cometa source .tar.gz produced by cabal sdist")
     parser.add_argument("--extra-include-dirs", type=Path, action="append", default=[],
                         help="existing native include directory (repeatable)")
     parser.add_argument("--extra-lib-dirs", type=Path, action="append", default=[],
                         help="existing native library directory (repeatable)")
+    parser.add_argument("--published-version", help="verify this exact Cometa version from Hackage")
     parser.add_argument("--native-archive", type=Path, help="bundled cardano-c-clib source archive")
     parser.add_argument("--test-package", action="store_true", help="also build and test the extracted binding")
     parser.add_argument("--offline", action="store_true",
                         help="disallow downloads; requires the consumer dependency plan to be cached")
     args = parser.parse_args()
-    if args.native_archive:
+    if args.published_version:
+        if not re.fullmatch(r"[0-9]+(?:\.[0-9]+)+", args.published_version):
+            parser.error("Published version must be a numeric Cabal version")
+        if args.archive or args.native_archive or args.extra_include_dirs or args.extra_lib_dirs or args.test_package or args.offline:
+            parser.error("Published verification cannot use local archives, native paths, tests or offline mode")
+    elif not args.archive:
+        parser.error("Supply a source archive or --published-version")
+    elif args.native_archive:
         if args.extra_include_dirs or args.extra_lib_dirs:
             parser.error("Use a native source archive or installed-library paths, not both")
     elif not args.extra_include_dirs or not args.extra_lib_dirs:
         parser.error("Supply --native-archive or both native include and library paths")
-    archive = args.archive.resolve(strict=True)
+    archive = args.archive.resolve(strict=True) if args.archive else None
     includes = [path.resolve(strict=True) for path in args.extra_include_dirs]
     libraries = [path.resolve(strict=True) for path in args.extra_lib_dirs]
     if any(not path.is_dir() for path in includes + libraries):
@@ -82,16 +91,18 @@ def main():
 
     with tempfile.TemporaryDirectory(prefix="cometa-source-consumer-") as directory:
         project = Path(directory)
-        copied_archive = project / "source.tar.gz"
-        shutil.copyfile(archive, copied_archive)
-        package = extract_package(copied_archive, project / "source")
+        package = None
+        if archive:
+            copied_archive = project / "source.tar.gz"
+            shutil.copyfile(archive, copied_archive)
+            package = extract_package(copied_archive, project / "source")
         consumer = project / "consumer"
         consumer.mkdir()
         for name in ("Main.hs", "package-consumer.cabal"):
             shutil.copyfile(ROOT / "test/package-consumer" / name, consumer / name)
         # Cabal supports quoted paths. JSON quoting preserves spaces and avoids
         # interpreting path text as additional project configuration.
-        packages = [package, consumer]
+        packages = [package, consumer] if package else [consumer]
         if args.native_archive:
             native = extract_package(args.native_archive.resolve(strict=True), project / "native", "cardano-c-clib.cabal")
             packages.append(native)
@@ -101,7 +112,13 @@ def main():
             "benchmarks: False",
             "write-ghc-environment-files: never",
         ]
-        if not args.native_archive:
+        if args.published_version:
+            configuration.extend([
+                f"constraints: cometa == {args.published_version}",
+                "package cometa",
+                "  flags: -system-cardano-c",
+            ])
+        elif not args.native_archive:
             configuration.extend([
                 "package cometa",
                 "  flags: +system-cardano-c",
@@ -121,7 +138,7 @@ def main():
             )
         target = "exe:package-consumer"
         options = ["--offline"] if args.offline else []
-        commands = []
+        commands = [["cabal", "update"]] if args.published_version else []
         if args.test_package:
             commands.extend([
                 ["cabal", "build", "all", *options],
@@ -133,7 +150,8 @@ def main():
         ])
         for command in commands:
             subprocess.run(command, cwd=project, env=environment, check=True)
-    print("Isolated source-package consumer verification passed")
+    print("Isolated published-package consumer verification passed" if args.published_version
+          else "Isolated source-package consumer verification passed")
 
 
 if __name__ == "__main__":

@@ -18,9 +18,8 @@ With the native dependency configured as for a normal build, run:
 python3 tools/build-api-docs.py
 ```
 
-Open `docs/_build/api/index.html`, then choose the core library or optional
-Blockfrost provider. The archive keeps links between these components relative,
-so it can be moved or shared. Third-party API links point to Hackage.
+Open `docs/_build/api/index.html`. The reference includes the Blockfrost provider.
+The archive can be moved or shared; third-party API links point to Hackage.
 
 Keep the native include and library directories in `cabal.project.local` when
 the native library is installed outside the default search paths. For ordinary

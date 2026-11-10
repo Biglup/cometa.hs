@@ -30,3 +30,6 @@ __pycache__/
 
 # Source distribution consumer builds.
 .sdist/
+
+# Prepared release archives and manifest.
+release-artifacts/

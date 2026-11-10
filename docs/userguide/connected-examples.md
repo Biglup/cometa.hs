@@ -1,7 +1,7 @@
 # Run connected examples
 
 The named runners in `examples/Connected` build, sign and confirm complete
-transaction workflows using the optional Blockfrost provider. They use your
+transaction workflows using the included Blockfrost provider. They use your
 configured encrypted wallet. Running a runner without arguments prints usage
 without opening the wallet or making a request.
 

@@ -5,12 +5,13 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -201,7 +202,7 @@ jobs:
         run: cabal test all --test-show-details=direct
       - name: Verify installed-library consumer
         run: |
-          cabal sdist cometa --output-directory=.sdist
+          cabal sdist all --output-directory=.sdist
           python tools/check-source-package.py .sdist/cometa-*.tar.gz --extra-include-dirs "${{ steps.native.outputs.include-dir }}" --extra-lib-dirs "${{ steps.native.outputs.library-dir }}"
 
   quality:
@@ -224,6 +225,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y clang-format-18
           clang-format-18 --dry-run --Werror cbits/*.c cbits/*.h test/cbits/*.c
+      - name: Test release packaging and upload guards
+        run: python3 -m unittest discover -s test/release -v
       - name: Check formatting and lint
         run: |
           find src internal test examples benchmark blockfrost-src blockfrost-test \( -name '*.hs' -o -name '*.hsc' \) -print0 | xargs -0 "$RUNNER_TEMP/style-bin/ormolu" --mode check

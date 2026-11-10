@@ -55,10 +55,9 @@ cabal build all
 cabal run cometa-transaction-building
 ```
 
-The second command builds an offline payment with synthetic inputs. To use Cometa
+The example builds an offline payment with synthetic inputs. To use Cometa
 in an application, include the checkout in your `cabal.project` and add `cometa`
-to `build-depends`. Add `cometa:blockfrost` for the optional Blockfrost backend;
-the core library does not require HTTP dependencies.
+to `build-depends`. The Blockfrost provider is included.
 
 ## Build a payment
 

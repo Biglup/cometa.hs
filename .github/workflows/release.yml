@@ -1,0 +1,127 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Upload a candidate or publish permanently (requires a version tag)
+        type: choice
+        options: [candidate, publish]
+        default: candidate
+        required: true
+      github_prerelease:
+        description: Mark the GitHub release as a prerelease (publish mode only)
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: release-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    uses: ./.github/workflows/ci.yml
+
+  prepare:
+    needs: validate
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.manifest.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: haskell-actions/setup@v2
+        with:
+          ghc-version: '9.6.7'
+          cabal-version: '3.12.1.0'
+          cabal-update: false
+      - name: Configure package repository
+        run: |
+          cabal user-config init --force --augment=$'repository hackage.haskell.org\n  url: https://hackage.haskell.org/\n  secure: True'
+          cabal update
+      - name: Read native source pin
+        id: pin
+        run: echo "revision=$(cat native/cardano-c.ref)" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v4
+        with:
+          repository: Biglup/cardano-c
+          ref: ${{ steps.pin.outputs.revision }}
+          path: .native/cardano-c
+          persist-credentials: false
+      - name: Prepare source packages
+        run: |
+          python tools/package-native.py .native/cardano-c
+          cabal check
+          (cd .native/cardano-c-clib && cabal check)
+          cabal sdist all --output-directory=release-artifacts
+      - name: Validate source archives
+        run: >-
+          python tools/check-source-package.py release-artifacts/cometa-*.tar.gz
+          --native-archive release-artifacts/cardano-c-clib-*.tar.gz
+      - name: Build Hackage documentation
+        run: |
+          python tools/build-api-docs.py --hackage
+          cp dist-newstyle/cometa-*-docs.tar.gz release-artifacts/
+      - name: Validate release and record checksums
+        id: manifest
+        env:
+          RELEASE_MODE: ${{ inputs.mode }}
+        run: python tools/release.py prepare --mode "$RELEASE_MODE"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-packages
+          path: release-artifacts/
+          if-no-files-found: error
+
+  publish:
+    needs: prepare
+    runs-on: ubuntu-24.04
+    environment: release
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: haskell-actions/setup@v2
+        with:
+          ghc-version: '9.6.7'
+          cabal-version: '3.12.1.0'
+          cabal-update: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-packages
+          path: release-artifacts
+      - name: Configure package repository
+        run: |
+          cabal user-config init --force --augment=$'repository hackage.haskell.org\n  url: https://hackage.haskell.org/\n  secure: True'
+      - name: Upload source packages and documentation
+        env:
+          HACKAGE_TOKEN: ${{ secrets.HACKAGE_TOKEN }}
+          RELEASE_MODE: ${{ inputs.mode }}
+        run: python tools/release.py upload --mode "$RELEASE_MODE"
+      - name: Validate published installation
+        if: inputs.mode == 'publish'
+        env:
+          RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+        run: python tools/check-source-package.py --published-version "$RELEASE_VERSION"
+      - name: Create or update GitHub release
+        if: inputs.mode == 'publish'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+          GH_PRERELEASE: ${{ inputs.github_prerelease }}
+        run: |
+          test "$(gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_REF_NAME" --jq .sha)" = "$GITHUB_SHA"
+          if ! gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            options=()
+            if [ "$GH_PRERELEASE" = "true" ]; then options+=(--prerelease); fi
+            gh release create "$GITHUB_REF_NAME" --verify-tag --title "Cometa.hs $RELEASE_VERSION" --generate-notes "${options[@]}"
+          fi
+          gh release upload "$GITHUB_REF_NAME" release-artifacts/* --clobber

@@ -4659,3 +4659,28 @@ preserves all 366 C compilation units, and includes full dependency license
 notices. `cabal check` passes for Cometa and the native package (the latter reports
 only expected warnings for C-only libraries without exposed Haskell modules).
 The platform matrix and archive consumer validation are tracked in PR #33.
+
+### Release workflow and unified Blockfrost library (2026-11-10)
+
+Blockfrost now belongs to the main `cometa` library. Applications declare only
+`cometa`; there is no public `cometa:blockfrost` component. The HTTP/TLS dependencies
+are part of the main library. Provider injection and the public module names
+remain unchanged. Earlier optional-component descriptions above record the
+previous design and are superseded by this decision.
+
+The manual Release workflow uses the `release` GitHub environment and its
+`HACKAGE_TOKEN` secret. Both candidate and publish modes first run the full reusable
+CI workflow on the selected commit. No release runs on pull requests or pushes.
+Permanent publication requires an existing matching version tag. The workflow
+validates source-archive consumers, builds the unified API docs, records checksums,
+uploads the native dependency before Cometa, and verifies a Hackage-only consumer
+before attaching GitHub release assets. See [Releasing](RELEASING.md) for operation
+and recovery instructions. No candidate or permanent package has been uploaded
+as part of configuring this workflow.
+
+Local verification of the combined change: all 699 Haskell tests pass with
+Blockfrost in the main library; 17 offline release/consumer tests pass; actionlint
+accepts both workflows; strict Sphinx and both Haddock output modes pass. The
+Hackage archive contains both public APIs and its interface; local HTML targets
+were checked. The installed-library CI source-package command now uses `sdist
+all`, avoiding Cabal interpreting the package name as a library component.
