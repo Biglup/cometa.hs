@@ -4,8 +4,8 @@ version: 0.1.0.0
 synopsis: Idiomatic Haskell bindings to cardano-c
 description:
   Haskell-owned Cardano values with transaction construction, signing, script
-  evaluation and provider interfaces backed by cardano-c. Includes an optional
-  Blockfrost provider sublibrary.
+  evaluation and provider interfaces backed by cardano-c. Includes a
+  Blockfrost provider.
 license: Apache-2.0
 license-file: LICENSE
 author: Biglup Labs
@@ -25,6 +25,9 @@ extra-source-files:
   .readthedocs.yaml
   assets/*.png
   native/cardano-c.ref
+  native/NOTICE
+  native/*.json
+  native/licenses/*.txt
   docs/requirements.txt
   docs/userguide/*.md
   docs/userguide/conf.py
@@ -36,10 +39,16 @@ extra-source-files:
   test/package-consumer/*.hs
   test/package-consumer/*.cabal
   test/valgrind/*.supp
+  test/release/*.py
 
 source-repository head
   type: git
   location: https://github.com/Biglup/cometa.hs.git
+
+flag system-cardano-c
+  description: Link an installed cardano-c instead of the bundled source package.
+  default: False
+  manual: True
 
 common language
   default-language: Haskell2010
@@ -89,11 +98,12 @@ library core
     base >=4.18 && <4.22,
     bytestring >=0.11 && <0.13,
     text >=2.0 && <2.2
-  extra-libraries: cardano-c
-  -- The pinned static native archive uses pthread-backed sodium initialization.
-  -- Cabal links the archive directly rather than importing its CMake target.
-  if os(linux) || os(osx)
-    extra-libraries: pthread
+  if flag(system-cardano-c)
+    extra-libraries: cardano-c
+    if os(linux) || os(osx)
+      extra-libraries: m, pthread
+  else
+    build-depends: cardano-c-clib ==0.1.0.0
   c-sources:
     cbits/cometa_provider.c
     cbits/cometa_cbor.c
@@ -124,8 +134,9 @@ library core
 
 library
   import: language
-  hs-source-dirs: src
+  hs-source-dirs: src blockfrost-src
   exposed-modules:
+    Cometa.Provider.Blockfrost
     Cometa
     Cometa.Crypto.Blake2b
     Cometa.Credential
@@ -225,6 +236,12 @@ library
     Cometa.SlotConfig
     Cometa.CoinSelection
   other-modules:
+    Cometa.Provider.Blockfrost.Internal.Config
+    Cometa.Provider.Blockfrost.Internal.Http
+    Cometa.Provider.Blockfrost.Internal.Connection
+    Cometa.Provider.Blockfrost.Internal.Protocol
+    Cometa.Provider.Blockfrost.Internal.Json
+    Cometa.Provider.Blockfrost.Internal.Provider
     Cometa.Internal.Runtime
     Cometa.Internal.Reencode
     Cometa.Internal.ProviderRuntime
@@ -273,7 +290,17 @@ library
     bytestring >=0.11 && <0.13,
     text >=2.0 && <2.2,
     transformers >=0.6 && <0.7,
-    cometa:core
+    cometa:core,
+    network-uri >=2.6.4 && <2.7,
+    http-client >=0.7.19 && <0.8,
+    http-client-tls >=0.3.6 && <0.4,
+    http-types >=0.12.3 && <0.13,
+    async >=2.2 && <2.3,
+    tls >=2.2 && <2.3,
+    crypton-x509-store >=1.8 && <1.9,
+    crypton-x509-system >=1.8 && <1.9,
+    network >=3.2.12 && <3.3,
+    stm >=2.5 && <2.6
 
 executable cometa-hash
   import: language
@@ -893,41 +920,6 @@ executable cometa-subtransaction-building
     transformers >=0.6 && <0.7,
     cometa
 
--- HTTP dependencies are confined to this opt-in library component.
-library blockfrost
-  import: language
-  visibility: public
-  hs-source-dirs: blockfrost-src
-  exposed-modules:
-    Cometa.Provider.Blockfrost
-  other-modules:
-    Cometa.Provider.Blockfrost.Internal.Config
-    Cometa.Provider.Blockfrost.Internal.Http
-    Cometa.Provider.Blockfrost.Internal.Connection
-    Cometa.Provider.Blockfrost.Internal.Protocol
-    Cometa.Provider.Blockfrost.Internal.Json
-    Cometa.Provider.Blockfrost.Internal.Provider
-  build-depends:
-    base >=4.18 && <4.22,
-    cometa,
-    cometa:core,
-    aeson >=2.2 && <2.3,
-    bytestring >=0.11 && <0.13,
-    containers >=0.6.7 && <0.8,
-    text >=2.0 && <2.2,
-    scientific >=0.3.7 && <0.4,
-    transformers >=0.6 && <0.7,
-    network-uri >=2.6.4 && <2.7,
-    http-client >=0.7.19 && <0.8,
-    http-client-tls >=0.3.6 && <0.4,
-    http-types >=0.12.3 && <0.13,
-    async >=2.2 && <2.3,
-    tls >=2.2 && <2.3,
-    crypton-x509-store >=1.8 && <1.9,
-    crypton-x509-system >=1.8 && <1.9,
-    network >=3.2.12 && <3.3,
-    stm >=2.5 && <2.6
-
 test-suite cometa-blockfrost-test
   import: language
   type: exitcode-stdio-1.0
@@ -979,7 +971,6 @@ executable cometa-blockfrost-queries
   build-depends:
     base >=4.18 && <4.22,
     cometa,
-    cometa:blockfrost,
     bytestring >=0.11 && <0.13,
     text >=2.0 && <2.2,
     transformers >=0.6 && <0.7
@@ -993,7 +984,6 @@ executable cometa-blockfrost-payment
   build-depends:
     base >=4.18 && <4.22,
     cometa,
-    cometa:blockfrost,
     bytestring >=0.11 && <0.13,
     text >=2.0 && <2.2,
     transformers >=0.6 && <0.7
@@ -1065,8 +1055,7 @@ common connected-example
     containers >=0.6.7 && <0.8,
     text >=2.0 && <2.2,
     transformers >=0.6 && <0.7,
-    cometa,
-    cometa:blockfrost
+    cometa
 
 executable cometa-send-lovelace
   import: connected-example

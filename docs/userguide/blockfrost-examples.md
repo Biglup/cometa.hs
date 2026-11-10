@@ -1,6 +1,6 @@
 # Run the connected Blockfrost examples
 
-The connected examples use the separate `cometa:blockfrost` component. They read
+The connected examples use the included Blockfrost provider. They read
 configuration from the environment and do no network work when invoked without
 an action argument. The following commands are intended for your own configured
 wallet; ordinary tests use fixtures instead of credentials or funded inputs.

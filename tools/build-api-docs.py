@@ -1,56 +1,97 @@
 #!/usr/bin/env python3
-"""Build a portable Haddock archive containing both public library components."""
+"""Build portable API documentation or a Hackage documentation tarball."""
 
+import argparse
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
+import tarfile
+from urllib.parse import urlsplit
 
 ROOT = Path(__file__).resolve().parents[1]
 OUTPUT = ROOT / "docs" / "_build" / "api"
 
 
+def prepare_links(output, version):
+    # Keep package-local links portable, including links from rendered sources.
+    for path in output.rglob("*"):
+        if path.suffix not in (".html", ".js", ".json"):
+            continue
+        relative = os.path.relpath(output, path.parent).replace(os.sep, "/")
+        content = path.read_text(encoding="utf-8")
+        for prefix in ("https://hackage.haskell.org", ""):
+            content = content.replace(
+                f"{prefix}/package/cometa-{version}/docs", relative)
+        path.write_text(content, encoding="utf-8")
+
+    # Haddock emits instance-location links even when the defining internal
+    # module is hidden. Keep that location text without a dead hyperlink.
+    anchor = re.compile(r'<a\b[^>]*\bhref="([^"]+)"[^>]*>(.*?)</a>', re.DOTALL)
+    for path in output.rglob("*.html"):
+        def replace(match):
+            url = urlsplit(match.group(1))
+            target = path.parent / url.path
+            if (not url.scheme and not url.netloc and not url.path.startswith("/")
+                    and target.name.startswith("Cometa-")
+                    and "-Internal-" in target.name and target.suffix == ".html"
+                    and not target.exists()):
+                return match.group(2)
+            return match.group(0)
+        path.write_text(anchor.sub(replace, path.read_text(encoding="utf-8")),
+                        encoding="utf-8")
+
+
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--hackage", action="store_true",
+                        help="create dist-newstyle/cometa-VERSION-docs.tar.gz for Hackage")
+    args = parser.parse_args()
+    flags = (["--haddock-for-hackage"] if args.hackage else
+             ["--haddock-html-location=https://hackage.haskell.org/package/$pkg-$version/docs"])
     subprocess.run(
-        ["cabal", "haddock", "lib:cometa", "lib:blockfrost",
-         "--haddock-hyperlink-source",
-         "--haddock-html-location=https://hackage.haskell.org/package/$pkg-$version/docs"],
+        ["cabal", "haddock", "lib:cometa", "--haddock-hyperlink-source", *flags],
         cwd=ROOT, check=True,
     )
     plan = json.loads((ROOT / "dist-newstyle/cache/plan.json").read_text())
-    libraries = {entry["component-name"]: entry for entry in plan["install-plan"]
-                 if entry.get("pkg-name") == "cometa"
-                 and entry.get("component-name") in ("lib", "lib:blockfrost")}
-    version = libraries["lib"]["pkg-version"]
+    library = next(entry for entry in plan["install-plan"]
+                   if entry.get("pkg-name") == "cometa"
+                   and entry.get("component-name") == "lib")
+    version = library["pkg-version"]
+    name = f"cometa-{version}-docs"
+    source = Path(library["dist-dir"]) / "doc/html" / (name if args.hackage else "cometa")
     if OUTPUT.exists():
         shutil.rmtree(OUTPUT)
-    for component, directory in (("lib", "core"), ("lib:blockfrost", "blockfrost")):
-        source = Path(libraries[component]["dist-dir"]) / "doc/html/cometa"
-        shutil.copytree(source, OUTPUT / directory)
+    shutil.copytree(source, OUTPUT)
+    if args.hackage:
+        # Cabal delegates the Hackage contents page to the package page. Also
+        # provide a local module index so the downloaded archive is browsable.
+        subprocess.run(
+            ["haddock", "--gen-contents", "--title=Cometa.hs API reference",
+             f"--odir={OUTPUT}", f"--read-interface=.,{OUTPUT / 'cometa.haddock'}"],
+            cwd=ROOT, check=True,
+        )
+    prepare_links(OUTPUT, version)
+    index = (OUTPUT / "index.html").read_text(encoding="utf-8")
+    for module in ("Cometa.html", "Cometa-Provider-Blockfrost.html"):
+        if module not in index or not (OUTPUT / module).is_file():
+            raise RuntimeError(f"API documentation is missing {module}")
+    if not (OUTPUT / "cometa.haddock").is_file():
+        raise RuntimeError("API documentation is missing its Haddock interface")
 
-    # Haddock treats the main library as an external dependency of the public
-    # sublibrary. Keep third-party links on Hackage and link our core API locally.
-    core_url = f"https://hackage.haskell.org/package/cometa-{version}/docs"
-    for path in OUTPUT.rglob("*"):
-        if path.suffix not in (".html", ".js", ".json"):
-            continue
-        content = path.read_text(encoding="utf-8")
-        relative = os.path.relpath(OUTPUT / "core", path.parent).replace(os.sep, "/")
-        path.write_text(content.replace(core_url, relative), encoding="utf-8")
-
-    provider = OUTPUT / "blockfrost/Cometa-Provider-Blockfrost.html"
-    if '../core/Cometa-Provider.html#t:Provider' not in provider.read_text(encoding="utf-8"):
-        raise RuntimeError("Blockfrost documentation is missing its portable Provider link")
-    (OUTPUT / "index.html").write_text(
-        '<!doctype html><html lang="en"><meta charset="utf-8">'
-        '<meta name="viewport" content="width=device-width, initial-scale=1">'
-        '<title>Cometa.hs API reference</title><h1>Cometa.hs API reference</h1>'
-        '<ul><li><a href="core/index.html">Core library</a></li>'
-        '<li><a href="blockfrost/index.html">Blockfrost provider</a></li></ul></html>\n',
-        encoding="utf-8",
-    )
-    print(f"Portable API documentation: {OUTPUT}")
+    if args.hackage:
+        # Hackage expects portable tar entries within PACKAGE-VERSION-docs/.
+        # Repack Cabal's output after removing the dead hidden-module anchors.
+        archive = ROOT / "dist-newstyle" / f"{name}.tar.gz"
+        temporary = archive.with_suffix(".tmp")
+        with tarfile.open(temporary, "w:gz", format=tarfile.USTAR_FORMAT) as tar:
+            tar.add(OUTPUT, arcname=name)
+        temporary.replace(archive)
+        print(f"Hackage API documentation: {archive}")
+    else:
+        print(f"Portable API documentation: {OUTPUT}")
 
 
 if __name__ == "__main__":

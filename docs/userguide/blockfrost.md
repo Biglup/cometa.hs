@@ -1,7 +1,6 @@
 # Query Cardano through Blockfrost
 
-The optional `cometa:blockfrost` library supplies `Cometa.Provider.Blockfrost`.
-HTTP and TLS dependencies stay in that component. The backend implements the
+`cometa` includes `Cometa.Provider.Blockfrost`. The backend implements the
 ordinary `Cometa.Provider` record, so query results can feed the existing
 transaction builder and signer workflows.
 

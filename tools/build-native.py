@@ -46,6 +46,7 @@ def main():
     if args.configure_cabal:
         Path("cabal.project.local").write_text(
             'package cometa\n'
+            '  flags: +system-cardano-c\n'
             f'  extra-include-dirs: "{include_dir.as_posix()}"\n'
             f'  extra-lib-dirs: "{library_dir.as_posix()}"\n'
             '  ghc-options: -Werror\n')

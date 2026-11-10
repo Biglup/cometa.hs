@@ -72,6 +72,6 @@ main = do
     (inspected == object ["inputs" .= ([] :: [Value]), "outputs" .= ([] :: [Value]), "fee" .= ("42" :: String)])
     (die "Native body inspection mismatch")
 
-  -- Compile the opt-in public sublibrary without acquiring an HTTP transport.
+  -- Compile the included Blockfrost provider without acquiring an HTTP transport.
   let config = Blockfrost.defaultConfig Blockfrost.Preview Nothing
   config `seq` putStrLn "Source-package consumer passed (hash, signing, address, transaction, inspection, Blockfrost import)"

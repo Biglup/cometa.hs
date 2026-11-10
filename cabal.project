@@ -1,2 +1,3 @@
 packages: .
+optional-packages: .native/cardano-c-clib
 tests: True

@@ -1,9 +1,9 @@
 # Cometa Haskell binding: design and implementation plan
 
-Status: API coverage, reliability, platform checks and preprod validation complete; publication remains.
+Status: API coverage, reliability and preprod validation complete; native distribution validation and publication remain.
 Created: 2026-11-04.
 Owner: Angel Castillo / Biglup.
-Last updated: 2026-11-09 (final preprod validation).
+Last updated: 2026-11-10 (bundled native source distribution).
 Repository: https://github.com/Biglup/cometa.hs.
 Cabal package: `cometa` (local development name; no Hackage publication yet).
 
@@ -23,6 +23,9 @@ Deferred-redeemer query ergonomics are implemented.
 
 Remaining release work:
 
+- Validate the bundled native source distribution on Linux x64/ARM64, macOS
+  Intel/ARM64, Windows and GHC 9.10; earlier PR31 results cover the installed-library
+  configuration, not this distribution change.
 - Prepare the chosen release version, changelog, Hackage package/docs and GitHub
   artifacts.
 - Validate installation from the published package and update ecosystem links.
@@ -588,8 +591,9 @@ Package/release decisions to prove early:
 - Choose a supported GHC range using CI evidence, not a promise to support every GHC.
 - Package the Haskell source normally; avoid promising portable precompiled Haskell
   libraries across GHC versions. Native C artifacts have a separate compatibility matrix.
-- Decide whether native sources are bundled or a pinned installed cardano-c package
-  is discovered. Prove clean installation from an sdist without an implicit Git clone.
+- Use the pinned native source Cabal package by default (decision below). Prove
+  clean installation from source archives without an implicit Git clone. Retain
+  explicit `system-cardano-c` selection for an installed native library.
 - Audit licensing and notices for bundled native code and dependencies.
 - Test Windows compiler/runtime compatibility and macOS architecture selection.
 - Document static/dynamic selection, library lookup, ABI compatibility and native
@@ -4613,3 +4617,70 @@ with reads, never transaction resubmission.
 Preprod stayed at protocol 11. The 25 offline Dijkstra/subtransaction builder tests,
 signed swap example and zero-submission protocol gate check passed. No live
 Dijkstra transaction was submitted. No binding/native source changes were needed.
+
+
+### Bundled native source distribution (2026-11-10)
+
+The default distribution is a separate `cardano-c-clib` Cabal source package,
+compiled with the consumer's C toolchain and linked through Cabal. This avoids
+requiring an installed cardano-c library for ordinary builds and avoids shipping
+precompiled Haskell or architecture-specific native binaries. The native revision
+remains pinned; this changes packaging, not the production C implementation.
+
+For a Git checkout, `tools/package-native.py /path/to/pinned/cardano-c` generates
+`.native/cardano-c-clib` (package version `0.1.0.0`); the generated native tree is
+not committed. `cabal.project` discovers it through `optional-packages`.
+A checkout therefore requires preparation before its first default build; normal
+`cabal build` and `cabal test` commands then need no native search flags. Release
+artifacts will provide the native source dependency as a Cabal source package;
+`cometa` and `cardano-c-clib` are not yet published on Hackage. Source-archive
+consumer checks must exercise both source packages without borrowing a native
+installation, checkout configuration or build output.
+
+The manual `system-cardano-c` flag retains the installed-library workflow with
+explicit `--extra-include-dirs` and `--extra-lib-dirs` as needed.
+`tools/build-native.py` selects that flag for its installed-library development
+configuration. Runtime loader setup remains relevant for shared system libraries.
+Native source packaging must preserve the pinned source, licensing and notices,
+and validate required platform-specific compiler and linker settings.
+
+The local distribution spike passed all 699 tests (458 public, 183 runtime and
+58 Blockfrost), matched all 3,805 native symbols, and passed a fresh archive-only
+consumer build and GHCi loading. The native source archive was approximately
+3.4 MiB. These are spike results, not verification of every final packaging tool
+or platform. The new distribution still requires
+hosted validation on Linux x64/ARM64, macOS Intel/ARM64, Windows and GHC 9.10;
+the earlier installed-library matrix does not establish those results. Published
+artifact installation and final licensing/package checks remain release gates.
+
+The integrated implementation also passed all 699 tests on Linux x86_64 with
+GHC 9.6.7. The generator checks the native revision and clean tracked source,
+preserves all 366 C compilation units, and includes full dependency license
+notices. `cabal check` passes for Cometa and the native package (the latter reports
+only expected warnings for C-only libraries without exposed Haskell modules).
+The platform matrix and archive consumer validation are tracked in PR #33.
+
+### Release workflow and unified Blockfrost library (2026-11-10)
+
+Blockfrost now belongs to the main `cometa` library. Applications declare only
+`cometa`; there is no public `cometa:blockfrost` component. The HTTP/TLS dependencies
+are part of the main library. Provider injection and the public module names
+remain unchanged. Earlier optional-component descriptions above record the
+previous design and are superseded by this decision.
+
+The manual Release workflow uses the `release` GitHub environment and its
+`HACKAGE_TOKEN` secret. Both candidate and publish modes first run the full reusable
+CI workflow on the selected commit. No release runs on pull requests or pushes.
+Permanent publication requires an existing matching version tag. The workflow
+validates source-archive consumers, builds the unified API docs, records checksums,
+uploads the native dependency before Cometa, and verifies a Hackage-only consumer
+before attaching GitHub release assets. See [Releasing](RELEASING.md) for operation
+and recovery instructions. No candidate or permanent package has been uploaded
+as part of configuring this workflow.
+
+Local verification of the combined change: all 699 Haskell tests pass with
+Blockfrost in the main library; 17 offline release/consumer tests pass; actionlint
+accepts both workflows; strict Sphinx and both Haddock output modes pass. The
+Hackage archive contains both public APIs and its interface; local HTML targets
+were checked. The installed-library CI source-package command now uses `sdist
+all`, avoiding Cabal interpreting the package name as a library component.

@@ -1,0 +1,32 @@
+{
+  "name": "cardano-c-clib",
+  "version": "0.1.0.0",
+  "source_roots": ["include", "src", "external"],
+  "source_extensions": [".c", ".h", ".inl"],
+  "notice_prefixes": ["LICENSE", "COPYING", "NOTICE", "VERSION", "README"],
+  "include_dirs": [
+    "vendor", "vendor/include", "vendor/external/libsodium/include",
+    "vendor/external/libsodium/include/sodium", "vendor/external/gmp",
+    "vendor/external/sha3", "vendor/external/ripemd160",
+    "vendor/external/secp256k1/include", "vendor/external/blst/bindings"
+  ],
+  "cc_options": ["-std=c99", "-DSODIUM_STATIC", "-DJSONC_STATIC"],
+  "config_defaults": {
+    "CARDANO_C_COLLECTION_GROW_FACTOR": "1.5",
+    "CARDANO_C_MAX_JSON_DEPTH": "256"
+  },
+  "libraries": {
+    "sodium": {"sources": ["vendor/external/libsodium/**/*.c"], "cc_options": []},
+    "gmp": {"sources": ["vendor/external/gmp/*.c"], "cc_options": []},
+    "sha3": {"sources": ["vendor/external/sha3/*.c"], "cc_options": []},
+    "ripemd160": {"sources": ["vendor/external/ripemd160/*.c"], "cc_options": []},
+    "secp256k1": {
+      "sources": ["vendor/external/secp256k1/src/secp256k1.c", "vendor/external/secp256k1/src/precomputed_ecmult.c", "vendor/external/secp256k1/src/precomputed_ecmult_gen.c"],
+      "cc_options": ["-DENABLE_MODULE_EXTRAKEYS=1", "-DENABLE_MODULE_SCHNORRSIG=1", "-DECMULT_WINDOW_SIZE=8", "-DSECP256K1_STATIC"]
+    },
+    "blst": {
+      "sources": ["vendor/external/blst/src/server.c"],
+      "cc_options": ["-D__BLST_NO_ASM__", "-D__BLST_PORTABLE__"]
+    }
+  }
+}
