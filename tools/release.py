@@ -14,6 +14,7 @@ import subprocess
 import sys
 import tarfile
 from urllib.error import HTTPError, URLError
+from urllib.parse import quote
 from urllib.request import urlopen
 
 
@@ -175,6 +176,23 @@ def published_hash(name, version):
         raise ReleaseError(f"Hackage lookup failed for {stem}") from None
 
 
+def upload_diagnostics(error, token):
+    """Keep server errors useful without exposing the upload credential."""
+    text = "\n".join(value for value in (error.stdout, error.stderr) if value)
+    text = re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", text)
+    forms = {token, repr(token)[1:-1], json.dumps(token)[1:-1], quote(token, safe="")}
+    for value in sorted(forms, key=len, reverse=True):
+        if value:
+            text = text.replace(value, "[REDACTED]")
+    # Remove terminal control sequences and flatten output so remote diagnostics
+    # cannot introduce GitHub workflow commands on a new line.
+    text = " | ".join(text.splitlines())
+    text = "".join(char for char in text if char.isprintable())
+    if token:
+        text = text.replace(token, "[REDACTED]")
+    return text[:4000] or "No diagnostic output was returned"
+
+
 def cabal_upload(path, mode, token, documentation=False):
     command = ["cabal", "upload", "--token=" + token]
     if mode == "publish":
@@ -182,12 +200,14 @@ def cabal_upload(path, mode, token, documentation=False):
     if documentation:
         command.append("--documentation")
     command.append(str(path))
-    # Capture and discard subprocess diagnostics: Cabal can echo its token-bearing
-    # command line on failure. Never include the command or exception in an error.
+    # Never render the exception or command: both can contain the upload token.
     try:
         subprocess.run(command, check=True, capture_output=True, text=True)
-    except (OSError, subprocess.CalledProcessError):
-        raise ReleaseError(f"Cabal upload failed for {path.name}; command output withheld to protect credentials") from None
+    except subprocess.CalledProcessError as error:
+        diagnostic = upload_diagnostics(error, token)
+        raise ReleaseError(f"Cabal upload failed for {path.name} (exit {error.returncode}): {diagnostic}") from None
+    except OSError:
+        raise ReleaseError(f"Cannot start Cabal upload for {path.name}") from None
 
 
 def upload(directory, mode, env):
