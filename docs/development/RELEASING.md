@@ -4,7 +4,8 @@ The `Release` workflow is manual. It does not publish on a pull request, a push,
 or a tag push. Its `validate` job runs the complete reusable CI workflow at the
 selected commit: Linux x64/ARM64, macOS Intel/ARM64, Windows, the additional GHC
 9.10 build, installed-library compatibility, lint, documentation and Valgrind.
-Every validation job must pass before release preparation or upload.
+Every validation job must pass before release preparation or upload. Merge the
+workflow into the default branch before its first manual invocation.
 
 ## Credentials
 
@@ -20,7 +21,7 @@ Update `cometa.cabal`, the changelog, and the native package metadata when neede
 that exact version. A change to the bundled native payload requires a new native
 package version. Keep `native/cardano-c.ref` synchronized with the intended source.
 
-Open **Actions → Release → Run workflow**, select the branch or tag to test, and
+Open **Actions → Release → Run workflow**, select the branch to test, and
 leave `mode` set to `candidate`. The workflow:
 
 1. Runs the full platform matrix and repository checks.
@@ -38,8 +39,14 @@ Haskell binaries. Blockfrost is included in the main `cometa` library.
 ## Publish
 
 Create and push a signed `vVERSION` tag at the intended release commit, with
-`VERSION` matching `cometa.cabal`. Select that tag in **Run workflow**, choose
-`publish`, and set the GitHub prerelease option as appropriate. Publishing from a
+`VERSION` matching `cometa.cabal`. Dispatch the workflow at that tag with GitHub
+CLI (replace `VERSION`):
+
+```sh
+gh workflow run release.yml --repo Biglup/cometa.hs --ref vVERSION -f mode=publish -f github_prerelease=true
+```
+
+Set `github_prerelease=false` for a regular GitHub release. Publishing from a
 branch or a mismatched version tag is rejected.
 
 The full validation and artifact preparation run again. The upload job consumes
