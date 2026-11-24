@@ -58,10 +58,14 @@ import qualified Data.ByteString as B
 import Data.Either (isLeft)
 import Data.IORef (atomicModifyIORef', modifyIORef', newIORef, readIORef)
 import Data.List (find)
+import qualified DeferredRedeemerBatch as Workflow (runDeferredBatch)
+import qualified DeferredRedeemerSelfIndex as Workflow (runDeferredSelf)
+import qualified Fixtures.Swap as Swap
+import qualified Fixtures.TransactionWorkflows as Workflow hiding (runDeferredBatch, runDeferredSelf, runGuardedSub, runLockSpend, runSignedBatch)
 import qualified Fixtures.Workflow as Fixture
+import qualified PlutusV4GuardedSubTransaction as Workflow (runGuardedSub, runSignedBatch)
+import qualified SpendFromValidator as Workflow (runLockSpend)
 import qualified Support.Scripts as Scripts
-import qualified Support.Swap as Swap
-import qualified Support.Transaction as Workflow
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 

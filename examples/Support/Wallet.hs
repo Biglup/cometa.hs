@@ -16,7 +16,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 -- | Scoped configuration for the explicitly submitted connected examples.
-module Support.Wallet (WalletContext (..), entrypoint, entrypointWithDescription, required, unsigned, resolveReference) where
+module Support.Wallet (WalletContext (..), entrypoint, entrypointWithDescription, withWalletFile, required, unsigned, resolveReference) where
 
 -- IMPORTS --------------------------------------------------------------------
 
@@ -45,11 +45,11 @@ import qualified Data.ByteString as Bytes
 import Data.List.NonEmpty (NonEmpty (..))
 import Data.Text (Text)
 import qualified Data.Text as Text
-import qualified Data.Text.Encoding as Text
 import qualified Data.Text.IO as Text
 import Data.Word (Word64)
 import Numeric (showHex)
 import qualified Support.Configuration as Common
+import qualified Support.Terminal as Terminal
 import qualified Support.Transaction as Native
 import System.Environment (getArgs, lookupEnv)
 import System.Exit (die)
@@ -68,9 +68,7 @@ data WalletContext = WalletContext
 
 -- | Validated environment settings, kept separate from native resources.
 data WalletSettings = WalletSettings
-  { storageFile :: Text,
-    storagePassword :: Text,
-    expirySlot :: Word64,
+  { expirySlot :: Word64,
     reservedCollateral :: [Input.Input],
     protectedInputs :: [Input.Input],
     stakeAuthority :: Path.Index,
@@ -111,14 +109,18 @@ entrypointWithDescription name describe run = do
       liftIO (printWallet wallet)
       extra <- ExceptT (describe wallet)
       liftIO (mapM_ (\(label, value) -> Text.putStrLn (label <> ": " <> value)) extra)
+    [] -> execute $ \wallet -> fmap void (run wallet)
     ["--submit"] -> execute $ \wallet -> fmap void (run wallet)
-    _ -> putStrLn (name <> ": use --describe for public identifiers or --submit to run the complete confirmed workflow; see the connected examples guide.")
+    ["--help"] -> putStrLn (name <> ": run without arguments to unlock the wallet, build, sign, submit and confirm; --describe prints public identifiers; see the connected examples guide.")
+    _ -> die ("Unknown arguments; use " <> name <> " --help")
   where
     execute action = do
       configured <- Common.configuration
       result <- case configured of
         Left failure -> pure (Left failure)
-        Right config -> Blockfrost.withProvider config $ \backend -> withWallet config (journal backend) action
+        Right config -> do
+          file <- required "COMETA_KEY_HANDLER_FILE"
+          either (pure . Left) (\path -> openWallet config (Text.unpack path) action) file
       either (die . show) pure result
 
 printWallet :: WalletContext -> IO ()
@@ -148,18 +150,27 @@ journal backend =
         pure result
     }
 
-withWallet :: Blockfrost.Config -> Provider.Provider -> (WalletContext -> IO (Either Error a)) -> IO (Either Error a)
-withWallet config backend action = do
+-- | Open another encrypted wallet for independently signed batch intents.
+withWalletFile :: FilePath -> (WalletContext -> IO (Either Error a)) -> IO (Either Error a)
+withWalletFile file action = do
+  configured <- Common.configuration
+  either (pure . Left) (\config -> openWallet config file action) configured
+
+openWallet :: Blockfrost.Config -> FilePath -> (WalletContext -> IO (Either Error a)) -> IO (Either Error a)
+openWallet config file action = Blockfrost.withProvider config $ \backend -> withWallet config (journal backend) file action
+
+withWallet :: Blockfrost.Config -> Provider.Provider -> FilePath -> (WalletContext -> IO (Either Error a)) -> IO (Either Error a)
+withWallet config backend file action = do
   settings <- walletSettings
   case settings of
     Left failure -> pure (Left failure)
-    Right WalletSettings {storageFile = file, storagePassword = password, expirySlot = expiry, reservedCollateral = reserved, protectedInputs = protected, stakeAuthority = stakeIndex, drepAuthority = drepIndex} -> do
-      stored <- Bytes.readFile (Text.unpack file)
+    Right WalletSettings {expirySlot = expiry, reservedCollateral = reserved, protectedInputs = protected, stakeAuthority = stakeIndex, drepAuthority = drepIndex} -> do
+      stored <- Bytes.readFile file
       let network = Common.addressNetwork (Blockfrost.network config)
           selectionBackend = backend {Provider.utxosAt = fmap (fmap (filter ((`notElem` protected) . Utxo.input))) . Provider.utxosAt backend}
           makeContext address signer count = Native.Context selectionBackend address signer network (Common.networkSlots (Blockfrost.network config)) expiry reserved count 300000
           finish payment stake drep address signer count signLocal = action (WalletContext (makeContext address signer count) payment stake drep signLocal)
-      Software.withSerialized stored (pure (Text.encodeUtf8 password)) $ \case
+      Software.withSerialized stored (Terminal.password file) $ \case
         Software.Ed25519Handler handler -> runExceptT $ do
           public <- ExceptT (Software.publicKey handler)
           payment <- ExceptT (Credential.fromPublicKey public)
@@ -187,22 +198,18 @@ withWallet config backend action = do
 
 walletSettings :: IO (Either Error WalletSettings)
 walletSettings = do
-  file <- required "COMETA_KEY_HANDLER_FILE"
-  password <- required "COMETA_KEY_PASSWORD"
   expiry <- required "COMETA_INVALID_AFTER_SLOT"
   collateral <- lookupEnv "COMETA_COLLATERAL"
   protected <- lookupEnv "COMETA_RESERVED_INPUTS"
   stakeIndex <- lookupEnv "COMETA_STAKE_INDEX"
   drepIndex <- lookupEnv "COMETA_DREP_INDEX"
   pure $ do
-    path <- file
-    secret <- password
     validity <- expiry >>= unsigned
     reserved <- references collateral
     excluded <- references protected
     stake <- authorityIndex stakeIndex
     drep <- authorityIndex drepIndex
-    pure WalletSettings {storageFile = path, storagePassword = secret, expirySlot = validity, reservedCollateral = reserved, protectedInputs = excluded, stakeAuthority = stake, drepAuthority = drep}
+    pure WalletSettings {expirySlot = validity, reservedCollateral = reserved, protectedInputs = excluded, stakeAuthority = stake, drepAuthority = drep}
   where
     references = traverse reference . maybe [] (Text.splitOn "," . Text.pack)
     authorityIndex Nothing = Path.mkIndex 701

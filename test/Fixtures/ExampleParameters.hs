@@ -14,7 +14,7 @@
 -- limitations under the License.
 
 -- | Synthetic protocol parameters for the offline subtransaction example.
-module Support.Parameters (parameters) where
+module Fixtures.ExampleParameters (parameters) where
 
 -- IMPORTS --------------------------------------------------------------------
 

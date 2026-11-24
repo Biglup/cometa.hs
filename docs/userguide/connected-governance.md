@@ -2,10 +2,10 @@
 
 The nine runners in `examples` port the corresponding Cometa.cpp
 examples. Run a runner
-without arguments for configuration help. `--describe` prints public identities
+with `--help` for configuration help. `--describe` prints public identities
 for chain-state discovery; `--submit` executes the complete workflow on the
-configured preprod wallet. Wallet storage and passwords come from the shared
-connected support configuration and are never embedded in these sources.
+configured preprod wallet. Wallet storage comes from the shared configuration; passwords are requested
+at hidden terminal prompts and are never embedded in these sources.
 
 The shared wallet runner derives payment, stake and DRep authorities inside the
 key-handler scope. Configurable stake and DRep indexes allow separate credentials

@@ -14,15 +14,58 @@
 -- limitations under the License.
 {-# LANGUAGE OverloadedStrings #-}
 
-module Main (main) where
+module RewardAccountPubkey (main, rewardKey) where
 
-import Control.Monad.Trans.Except (ExceptT (..), runExceptT)
-import qualified Support.Governance as Governance
+import qualified Cometa.Address.Reward as Reward
+import qualified Cometa.Certificate as Certificate
+import Cometa.Credential (Credential (..), KeyHash, Stake, StakePool)
+import Cometa.Error (Error (..))
+import qualified Cometa.Governance.DRep as DRep
+import qualified Cometa.Protocol.Parameters as Parameters
+import qualified Cometa.Provider as Provider
+import qualified Cometa.Signer as Signer
+import Cometa.Transaction (Transaction)
+import qualified Cometa.Transaction as Tx
+import qualified Cometa.Transaction.Builder as Builder
+import qualified Cometa.Transaction.Plan as Plan
+import Control.Monad (unless)
+import Control.Monad.Trans.Except (ExceptT (..), except, runExceptT, throwE)
 import qualified Support.Inputs as Inputs
+import qualified Support.Transaction as Workflow
 import qualified Support.Wallet as Support
 
 main :: IO ()
 main = Support.entrypointWithDescription "RewardAccountPubkey" (Inputs.describe Nothing) $ \wallet -> runExceptT $ do
   let context = Support.context wallet
   pool <- ExceptT Inputs.poolId
-  ExceptT (Governance.rewardKey context (Support.stakeCredential wallet) pool)
+  ExceptT (rewardKey context (Support.stakeCredential wallet) pool)
+
+rewardKey :: Workflow.Context -> Credential Stake -> KeyHash StakePool -> IO (Either Error [Transaction])
+rewardKey ctx stake pool = runExceptT $ do
+  let certify = Plan.certificate
+  params <- ExceptT (Provider.protocolParameters (Workflow.provider ctx))
+  let deposit = Parameters.parameterKeyDeposit params
+      account = Reward.fromCredential (Workflow.network ctx) stake
+      registration =
+        certify (Certificate.Registration stake deposit)
+          <> certify (Certificate.StakeDelegation stake pool)
+          <> Plan.certificate (Certificate.VoteDelegation stake DRep.AlwaysAbstain)
+  registered <- ExceptT (submitPlan ctx registration)
+  rewards <- ExceptT (Provider.rewardBalance (Workflow.provider ctx) account)
+  let withdrawal = Plan.withdraw account rewards
+  cleaned <- ExceptT (submitPlan ctx (withdrawal <> certify (Certificate.Unregistration stake deposit)))
+  pure [registered, cleaned]
+
+submitPlan :: Workflow.Context -> Plan.Plan -> IO (Either Error Tx.Transaction)
+submitPlan ctx plan = runExceptT $ do
+  settings <- ExceptT (Workflow.builderConfig ctx)
+  unsigned <- ExceptT (Builder.build settings (plan <> Plan.validUntil (Workflow.invalidAfter ctx)))
+  witnesses <- ExceptT (Signer.signTransaction (Workflow.signer ctx) unsigned)
+  signed <- except (Tx.addWitnesses witnesses unsigned)
+  expected <- ExceptT (Tx.transactionId signed)
+  accepted <- ExceptT (Provider.submitTransaction (Workflow.provider ctx) signed)
+  unless (accepted == expected) (throwE (InvalidProviderResponse "Submitted transaction ID mismatch"))
+  confirmed <- ExceptT (Provider.awaitTransaction (Workflow.provider ctx) accepted (Workflow.confirmationTimeoutMillis ctx))
+  unless confirmed (throwE (InvalidBuildingRequest "Transaction confirmation timed out"))
+  ExceptT (Workflow.awaitWallet ctx signed)
+  pure signed

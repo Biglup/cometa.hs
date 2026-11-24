@@ -16,10 +16,72 @@
 
 module Main (main) where
 
-import qualified Support.Mint as Mint
+import qualified Cometa.Address as Address
+import qualified Cometa.Address.Shelley as Shelley
+import qualified Cometa.Credential as Credential
+import Cometa.Error (Error (..))
+import qualified Cometa.PlutusData as Data
+import qualified Cometa.Provider as Provider
+import Cometa.Script (Script)
+import qualified Cometa.Script as Script
+import qualified Cometa.Script.Native as NativeScript
+import qualified Cometa.Signer as Signer
+import qualified Cometa.Transaction as Tx
+import qualified Cometa.Transaction.Builder as Builder
+import qualified Cometa.Transaction.Datum as Datum
+import qualified Cometa.Transaction.Output as Output
+import qualified Cometa.Transaction.Plan as Plan
+import Cometa.Transaction.Utxo (Utxo)
+import qualified Cometa.Value as Value
+import Control.Monad (unless)
+import Control.Monad.Trans.Except (ExceptT (..), except, runExceptT, throwE)
+import Data.Word (Word64)
 import qualified Support.Transaction as Workflow
 import qualified Support.Wallet as Support
 
 main :: IO ()
 main = Support.entrypoint "SpendFromNativeScript" $ \wallet ->
-  Workflow.runLockSpend (Support.context wallet) Mint.nativeScript 2000000
+  runLockSpend (Support.context wallet) nativeScript 2000000
+
+runLockSpend :: Workflow.Context -> Script -> Word64 -> IO (Either Error [Tx.Transaction])
+runLockSpend context script amount = runExceptT $ do
+  (locked, reference, funded) <- ExceptT (fundScript context script amount)
+  let argument = case script of Script.Native _ -> Nothing; Script.Plutus _ -> Just voidArgument
+      source = maybe (Plan.attachScript script) Plan.referenceInput reference
+  payout <- except (Output.mkOutput (Workflow.wallet context) (Value.lovelace 1000000) Datum.NoDatum Nothing)
+  spent <- ExceptT (submitPlan context (Plan.payTo payout <> Plan.spendWith locked argument Nothing <> source))
+  pure [funded, spent]
+
+fundScript :: Workflow.Context -> Script -> Word64 -> IO (Either Error (Utxo, Maybe Utxo, Tx.Transaction))
+fundScript context script amount = runExceptT $ do
+  digest <- ExceptT (Script.hash script)
+  let destination = Address.ShelleyAddress (Shelley.enterprise (Workflow.network context) (Credential.ScriptCredential digest))
+      datum = case script of Script.Native _ -> Datum.NoDatum; Script.Plutus _ -> Datum.InlineDatum voidArgument
+  output <- except (Output.mkOutput destination (Value.lovelace (toInteger amount)) datum Nothing)
+  reference <- case script of
+    Script.Native _ -> pure Nothing
+    Script.Plutus _ -> Just <$> except (Output.mkOutput (Workflow.wallet context) (Value.lovelace 30000000) Datum.NoDatum (Just script))
+  funded <- ExceptT (submitPlan context (Plan.payTo output <> maybe mempty Plan.payTo reference))
+  locked <- ExceptT (Workflow.outputAt funded 0)
+  referenceUtxo <- traverse (const (ExceptT (Workflow.outputAt funded 1))) reference
+  pure (locked, referenceUtxo, funded)
+
+nativeScript :: Script.Script
+nativeScript = Script.Native (NativeScript.allOf [NativeScript.invalidAfter 1001655683199])
+
+voidArgument :: Data.EncodedPlutusData
+voidArgument = Data.fromData (Data.Constr 0 [])
+
+submitPlan :: Workflow.Context -> Plan.Plan -> IO (Either Error Tx.Transaction)
+submitPlan ctx plan = runExceptT $ do
+  settings <- ExceptT (Workflow.builderConfig ctx)
+  unsigned <- ExceptT (Builder.build settings (plan <> Plan.validUntil (Workflow.invalidAfter ctx)))
+  witnesses <- ExceptT (Signer.signTransaction (Workflow.signer ctx) unsigned)
+  signed <- except (Tx.addWitnesses witnesses unsigned)
+  expected <- ExceptT (Tx.transactionId signed)
+  accepted <- ExceptT (Provider.submitTransaction (Workflow.provider ctx) signed)
+  unless (accepted == expected) (throwE (InvalidProviderResponse "Submitted transaction ID mismatch"))
+  confirmed <- ExceptT (Provider.awaitTransaction (Workflow.provider ctx) accepted (Workflow.confirmationTimeoutMillis ctx))
+  unless confirmed (throwE (InvalidBuildingRequest "Transaction confirmation timed out"))
+  ExceptT (Workflow.awaitWallet ctx signed)
+  pure signed

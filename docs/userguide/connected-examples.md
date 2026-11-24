@@ -2,20 +2,21 @@
 
 The named runners in `examples` build, sign and confirm complete
 transaction workflows using the included Blockfrost provider. They use your
-configured encrypted wallet. Running a runner without arguments prints usage
-without opening the wallet or making a request.
+configured encrypted wallet and prompt for its password with terminal echo disabled.
+Running a transaction example without arguments builds, signs, submits and waits
+for confirmation. Use `--help` to print usage without opening a wallet or making requests.
 
 For example, inspect the configured payment wallet before running the payment
 flow:
 
 ```sh
 cabal run cometa-send-lovelace -- --describe
-cabal run cometa-send-lovelace -- --submit
+cabal run cometa-send-lovelace
 ```
 
 `--describe` prints public payment, selected stake and DRep identities. Relevant
 governance runners also print their script identities. It does not submit a
-transaction. `--submit` runs the entire named workflow, including later dependent
+transaction. The default invocation (or the equivalent `--submit`) runs the entire named workflow, including later dependent
 stages. The [staking and governance guide](connected-governance.md) lists those
 runners, their required state and their cleanup stages.
 
@@ -26,10 +27,24 @@ Use `COMETA_NETWORK=preprod` for these connected test-network flows. Configure
 [provider guide](blockfrost.md). A custom endpoint may omit the project ID when
 that service does not require it.
 
+Create an encrypted wallet file once by importing your recovery phrase. Both the
+phrase and password are entered at hidden terminal prompts:
+
+```sh
+cabal run cometa-secure-key-handler -- wallet.key
+export COMETA_KEY_HANDLER_FILE="$PWD/wallet.key"
+```
+
+The setup example writes encrypted storage, reopens it and derives the account
+public key to verify the password. It refuses to overwrite an existing file.
+Transaction examples load that file and ask for its password when deriving public
+keys and signing. Passwords are not supplied through environment variables.
+The recovery phrase uses the empty BIP39 passphrase; the prompted password protects
+the encrypted storage. Retain your recovery phrase separately.
+
 | Variable | Meaning |
 | --- | --- |
 | `COMETA_KEY_HANDLER_FILE` | Path to your encrypted serialized BIP32 software handler. |
-| `COMETA_KEY_PASSWORD` | Password used by the scoped handler. |
 | `COMETA_INVALID_AFTER_SLOT` | Explicit upper validity slot on the configured network. Allow enough time for every stage's confirmation and indexing. |
 | `COMETA_STAKE_INDEX` | Unhardened stake authority index; default `701`. |
 | `COMETA_DREP_INDEX` | Unhardened DRep authority index; default `701`. |
@@ -51,8 +66,8 @@ choose unused stake and DRep credentials before starting a registration cycle.
 ## Payment and script workflows
 
 `cometa-send-lovelace` also requires `COMETA_RECIPIENT` and `COMETA_LOVELACE`.
-Its complete recipe uses the same build, sign and confirmation helper as the
-other runners:
+Its file includes both the payment plan and the build, sign, submit and
+confirmation steps. Only wallet/provider setup and address-index polling are shared:
 
 ```{literalinclude} ../../examples/SendLovelace.hs
 :language: haskell
@@ -82,7 +97,7 @@ use inline script witnesses, two-ADA locks and explicit payouts matching the C++
 recipes; they do not create reference-script deployments.
 
 The deferred self-index entrypoint uses the compiled source validator and the
-shared deferred-redeemer recipe:
+deferred-redeemer recipe in the same file:
 
 ```{literalinclude} ../../examples/DeferredRedeemerSelfIndex.hs
 :language: haskell
@@ -109,10 +124,21 @@ attempting another submission.
 
 ## Dijkstra workflows
 
-`cometa-sub-transaction-batch` implements the C++ example's offline buyer, seller and batcher
-exchange with independently signed local intents. The connected
-`cometa-plutus-v4-guarded-subtransaction` runner checks for protocol 12 or later
-before creating any funding transaction. Networks running an earlier protocol cannot validate
-these Dijkstra bodies. The offline signed-batch and guarded-subtransaction tests
-exercise their signatures, local indexes and budget checks; they do not establish
-live-network support.
+`cometa-sub-transaction-batch` uses three encrypted wallets: the configured wallet
+pays the batch fee, and `COMETA_BUYER_WALLET` / `COMETA_SELLER_WALLET` identify the
+other two files. All three must have distinct addresses. It resolves real inputs,
+builds and signs each local intent with that party's wallet, then builds, signs,
+submits and confirms the enclosing batch with the batcher's wallet.
+
+Set `COMETA_SWAP_POLICY` and `COMETA_SWAP_ASSET_NAME` to the token's policy ID and
+hexadecimal asset name. `COMETA_BUYER_INPUT` must reference an output containing
+exactly 100 ADA; `COMETA_SELLER_INPUT` must contain exactly 10 ADA and 5,000 units
+of that token. No other assets may be present in those two outputs. The buyer
+receives 50 ADA and 1,000 tokens, the seller receives 60 ADA and 4,000 tokens, and
+the batcher supplies separate ordinary funds for the fee. Inputs must belong to
+their respective wallets. This matches the three-party exchange in the native example.
+
+Both batch and guarded-subtransaction examples check for protocol 12 or later
+before submission. Networks running an earlier protocol cannot validate these
+Dijkstra bodies. The offline tests retain synthetic swap fixtures to verify
+signatures, local indexes and conservation independently of a live network.

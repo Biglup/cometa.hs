@@ -17,10 +17,19 @@
 module Main (main) where
 
 import qualified Cometa.Address as Address
-import Cometa.Error (Error)
+import Cometa.Error (Error (..))
+import qualified Cometa.Provider as Provider
+import qualified Cometa.Signer as Signer
 import qualified Cometa.Transaction as Tx
+import qualified Cometa.Transaction.Builder as Builder
+import qualified Cometa.Transaction.Datum as Datum
+import qualified Cometa.Transaction.Output as Output
+import qualified Cometa.Transaction.Plan as Plan
+import qualified Cometa.Value as Value
+import Control.Monad (unless)
+import Control.Monad.Trans.Except (ExceptT (..), except, runExceptT, throwE)
 import qualified Support.Transaction as Workflow
-import Support.Wallet (WalletContext (..), required, unsigned)
+import Support.Wallet (WalletContext, required, unsigned)
 import qualified Support.Wallet as Support
 
 main :: IO ()
@@ -33,5 +42,21 @@ payment wallet = do
   let settings = (,) <$> (recipient >>= Address.fromText) <*> (lovelace >>= unsigned)
   case settings of
     Left failure -> pure (Left failure)
-    Right (destination, amount) ->
-      fmap (fmap pure) (Workflow.runPayment (context wallet) destination amount)
+    Right (destination, amount) -> runExceptT $ do
+      output <- except (Output.mkOutput destination (Value.lovelace (toInteger amount)) Datum.NoDatum Nothing)
+      confirmed <- ExceptT (submitPlan (Support.context wallet) (Plan.payTo output))
+      pure [confirmed]
+
+submitPlan :: Workflow.Context -> Plan.Plan -> IO (Either Error Tx.Transaction)
+submitPlan ctx plan = runExceptT $ do
+  settings <- ExceptT (Workflow.builderConfig ctx)
+  unsignedTx <- ExceptT (Builder.build settings (plan <> Plan.validUntil (Workflow.invalidAfter ctx)))
+  witnesses <- ExceptT (Signer.signTransaction (Workflow.signer ctx) unsignedTx)
+  signed <- except (Tx.addWitnesses witnesses unsignedTx)
+  expected <- ExceptT (Tx.transactionId signed)
+  accepted <- ExceptT (Provider.submitTransaction (Workflow.provider ctx) signed)
+  unless (accepted == expected) (throwE (InvalidProviderResponse "Submitted transaction ID mismatch"))
+  confirmed <- ExceptT (Provider.awaitTransaction (Workflow.provider ctx) accepted (Workflow.confirmationTimeoutMillis ctx))
+  unless confirmed (throwE (InvalidBuildingRequest "Transaction confirmation timed out"))
+  ExceptT (Workflow.awaitWallet ctx signed)
+  pure signed

@@ -76,27 +76,27 @@ jobs:
       - name: Run examples
         run: |
           cabal run cometa-bip39
-          cabal run cometa-secure-key-handler
+          cabal run cometa-secure-key-handler -- --help
           cabal run cometa-provider
-          cabal run cometa-sub-transaction-batch
+          cabal run cometa-sub-transaction-batch -- --help
           cabal run cometa-sign-data
-          cabal run cometa-send-lovelace
-          cabal run cometa-mint-burn-native-script
-          cabal run cometa-mint-burn-plutus-script
-          cabal run cometa-spend-from-native-script
-          cabal run cometa-spend-from-validator
-          cabal run cometa-deferred-self-index
-          cabal run cometa-deferred-batch
-          cabal run cometa-reward-account-pubkey
-          cabal run cometa-reward-account-script
-          cabal run cometa-drep-pubkey
-          cabal run cometa-drep-script
-          cabal run cometa-vote-for-proposal-pubkey
-          cabal run cometa-vote-for-proposal-script
-          cabal run cometa-donate-to-treasury
-          cabal run cometa-propose-treasury-withdrawal
-          cabal run cometa-deferred-withdraw-zero
-          cabal run cometa-plutus-v4-guarded-subtransaction
+          cabal run cometa-send-lovelace -- --help
+          cabal run cometa-mint-burn-native-script -- --help
+          cabal run cometa-mint-burn-plutus-script -- --help
+          cabal run cometa-spend-from-native-script -- --help
+          cabal run cometa-spend-from-validator -- --help
+          cabal run cometa-deferred-self-index -- --help
+          cabal run cometa-deferred-batch -- --help
+          cabal run cometa-reward-account-pubkey -- --help
+          cabal run cometa-reward-account-script -- --help
+          cabal run cometa-drep-pubkey -- --help
+          cabal run cometa-drep-script -- --help
+          cabal run cometa-vote-for-proposal-pubkey -- --help
+          cabal run cometa-vote-for-proposal-script -- --help
+          cabal run cometa-donate-to-treasury -- --help
+          cabal run cometa-propose-treasury-withdrawal -- --help
+          cabal run cometa-deferred-withdraw-zero -- --help
+          cabal run cometa-plutus-v4-guarded-subtransaction -- --help
           python tools/check-key-handler-roles.py
           python tools/check-credential-roles.py
       - name: Exercise optimized pure crypto evaluation and concurrency
