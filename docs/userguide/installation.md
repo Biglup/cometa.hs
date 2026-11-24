@@ -24,8 +24,9 @@ Cabal project includes automatically. No separate cardano-c installation or
 include/library search flags are needed for this configuration.
 
 The intended Hackage distribution uses a native source package dependency so
-Cabal can build it automatically. Neither package is published yet; use the
-checkout preparation above until release artifacts are available.
+Cabal can build it automatically. Both packages are currently available as Hackage candidates; they are not yet
+in the main package index. The checkout instructions above build the current
+source.
 
 ## Use an installed cardano-c library
 
@@ -58,8 +59,7 @@ Until a release is available, add the checked-out Cometa.hs directory to your
 application's Cabal project alongside its prepared `.native/cardano-c-clib`
 directory, and declare `cometa` in the application's `build-depends`. Use explicit
 source revisions for reproducible builds. See
-[hashes](hashes.md) for the current public interface and
-[API reference](api-reference.md) for local Haddock generation.
+the [API reference](api-reference.md) for declarations and local Haddock generation.
 
 ## Blockfrost
 

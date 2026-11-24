@@ -82,6 +82,6 @@ does not supply remain `Nothing`; the backend does not invent Dijkstra, Leios or
 Peras parameters. The available online schema therefore differs from the full
 offline binding's capabilities.
 
-See [the Blockfrost examples](blockfrost-examples.md) for command-line workflows
+See [the Blockfrost examples](api-reference.md) for command-line workflows
 with explicit query, build and submission choices, and
-[the native workflows](native-workflows.md) for deterministic offline examples.
+[the native workflows](api-reference.md) for deterministic offline examples.

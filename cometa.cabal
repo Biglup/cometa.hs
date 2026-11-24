@@ -16,6 +16,7 @@ bug-reports: https://github.com/Biglup/cometa.hs/issues
 build-type: Simple
 extra-source-files:
   README.md
+  examples/README.md
   CODING_CONVENTIONS.md
   AGENTS.md
   tools/*.py
@@ -33,8 +34,6 @@ extra-source-files:
   docs/userguide/conf.py
   docs/userguide/_static/*.css
   docs/development/*.md
-  docs/development/*.json
-  docs/development/*.csv
   test/Fixtures/*.md
   test/package-consumer/*.hs
   test/package-consumer/*.cabal
@@ -302,45 +301,6 @@ library
     network >=3.2.12 && <3.3,
     stm >=2.5 && <2.6
 
-executable cometa-hash
-  import: language
-  hs-source-dirs: examples
-  main-is: Hash.hs
-  build-depends:
-    base >=4.18 && <4.22,
-    bytestring >=0.11 && <0.13,
-    text >=2.0 && <2.2,
-    cometa
-
-executable cometa-cbor
-  import: language
-  hs-source-dirs: examples
-  main-is: Cbor.hs
-  build-depends:
-    base >=4.18 && <4.22,
-    cometa
-
-executable cometa-signing
-  import: language
-  hs-source-dirs: examples
-  main-is: Signing.hs
-  build-depends:
-    base >=4.18 && <4.22,
-    bytestring >=0.11 && <0.13,
-    text >=2.0 && <2.2,
-    transformers >=0.6 && <0.7,
-    cometa
-
-executable cometa-bip32
-  import: language
-  hs-source-dirs: examples
-  main-is: Bip32.hs
-  build-depends:
-    base >=4.18 && <4.22,
-    bytestring >=0.11 && <0.13,
-    text >=2.0 && <2.2,
-    cometa
-
 executable cometa-bip39
   import: language
   hs-source-dirs: examples
@@ -352,38 +312,10 @@ executable cometa-bip39
     transformers >=0.6 && <0.7,
     cometa
 
-executable cometa-password-crypto
+executable cometa-secure-key-handler
   import: language
   hs-source-dirs: examples
-  main-is: PasswordCrypto.hs
-  build-depends:
-    base >=4.18 && <4.22,
-    bytestring >=0.11 && <0.13,
-    cometa
-
-executable cometa-software-key-handler
-  import: language
-  hs-source-dirs: examples
-  main-is: SoftwareKeyHandler.hs
-  build-depends:
-    base >=4.18 && <4.22,
-    bytestring >=0.11 && <0.13,
-    text >=2.0 && <2.2,
-    transformers >=0.6 && <0.7,
-    cometa
-
-executable cometa-derivation-paths
-  import: language
-  hs-source-dirs: examples
-  main-is: DerivationPaths.hs
-  build-depends:
-    base >=4.18 && <4.22,
-    cometa
-
-executable cometa-addresses
-  import: language
-  hs-source-dirs: examples
-  main-is: Addresses.hs
+  main-is: SecureKeyHandler.hs
   build-depends:
     base >=4.18 && <4.22,
     bytestring >=0.11 && <0.13,
@@ -443,11 +375,12 @@ test-suite cometa-test
     HexEncoding
     NativeWorkflows
     ConnectedGovernance
-    Connected.Governance
-    Workflows.Native
-    Workflows.NativeScripts
-    Workflows.Fixture
-    Workflows.Swap
+    Support.Governance
+    Support.Transaction
+    Support.Scripts
+    Fixtures.Workflow
+    Support.Swap
+    Support.Parameters
     Value
     PlutusData
     Metadata
@@ -504,137 +437,6 @@ test-suite cometa-test
     tasty-hedgehog >=1.4 && <1.5,
     hedgehog >=1.2 && <1.6
 
-executable cometa-assets-values
-  import: language
-  hs-source-dirs: examples
-  main-is: AssetsValues.hs
-  build-depends:
-    base >=4.18 && <4.22,
-    bytestring >=0.11 && <0.13,
-    text >=2.0 && <2.2,
-    transformers >=0.6 && <0.7,
-    cometa
-
-executable cometa-plutus-data
-  import: language
-  hs-source-dirs: examples
-  main-is: PlutusData.hs
-  build-depends:
-    base >=4.18 && <4.22,
-    bytestring >=0.11 && <0.13,
-    cometa
-
-executable cometa-metadata
-  import: language
-  hs-source-dirs: examples
-  main-is: Metadata.hs
-  build-depends:
-    base >=4.18 && <4.22,
-    transformers >=0.6 && <0.7,
-    cometa
-
-executable cometa-scripts
-  import: language
-  hs-source-dirs: examples
-  main-is: Scripts.hs
-  build-depends:
-    base >=4.18 && <4.22,
-    bytestring >=0.11 && <0.13,
-    text >=2.0 && <2.2,
-    transformers >=0.6 && <0.7,
-    cometa
-
-executable cometa-protocol-values
-  import: language
-  hs-source-dirs: examples
-  main-is: ProtocolValues.hs
-  build-depends:
-    base >=4.18 && <4.22,
-    cometa
-
-executable cometa-protocol-parameters
-  import: language
-  hs-source-dirs: examples
-  main-is: ProtocolParameters.hs
-  build-depends:
-    base >=4.18 && <4.22,
-    bytestring >=0.11 && <0.13,
-    transformers >=0.6 && <0.7,
-    cometa
-
-executable cometa-governance
-  import: language
-  hs-source-dirs: examples
-  main-is: Governance.hs
-  build-depends:
-    base >=4.18 && <4.22,
-    bytestring >=0.11 && <0.13,
-    transformers >=0.6 && <0.7,
-    cometa
-
-executable cometa-certificates
-  import: language
-  hs-source-dirs: examples
-  main-is: Certificates.hs
-  build-depends:
-    base >=4.18 && <4.22,
-    bytestring >=0.11 && <0.13,
-    cometa
-
-executable cometa-stake-pools
-  import: language
-  hs-source-dirs: examples
-  main-is: StakePools.hs
-  build-depends:
-    base >=4.18 && <4.22,
-    bytestring >=0.11 && <0.13,
-    containers >=0.6.7 && <0.8,
-    cometa
-
-executable cometa-governance-proposals
-  import: language
-  hs-source-dirs: examples
-  main-is: GovernanceProposals.hs
-  build-depends:
-    base >=4.18 && <4.22,
-    bytestring >=0.11 && <0.13,
-    cometa
-
-executable cometa-transactions
-  import: language
-  hs-source-dirs: examples
-  main-is: Transactions.hs
-  build-depends:
-    base >=4.18 && <4.22,
-    bytestring >=0.11 && <0.13,
-    text >=2.0 && <2.2,
-    transformers >=0.6 && <0.7,
-    cometa
-
-executable cometa-transaction-witnesses
-  import: language
-  hs-source-dirs: examples
-  main-is: TransactionWitnesses.hs
-  build-depends:
-    base >=4.18 && <4.22,
-    bytestring >=0.11 && <0.13,
-    text >=2.0 && <2.2,
-    transformers >=0.6 && <0.7,
-    cometa
-
-executable cometa-transaction-bodies
-  import: language
-  hs-source-dirs: examples
-  main-is: TransactionBodies.hs
-  build-depends:
-    base >=4.18 && <4.22,
-    bytestring >=0.11 && <0.13,
-    text >=2.0 && <2.2,
-    transformers >=0.6 && <0.7,
-    cometa
-
--- Compile private adapters from the same sources without exporting them from
--- the public library. The existing suite and examples test package consumers.
 test-suite cometa-runtime-test
   import: language
   type: exitcode-stdio-1.0
@@ -820,106 +622,6 @@ test-suite cometa-runtime-test
     tasty-hedgehog >=1.4 && <1.5,
     hedgehog >=1.2 && <1.6
 
-executable cometa-providers
-  import: language
-  hs-source-dirs: examples
-  main-is: Providers.hs
-  build-depends:
-    base >=4.18 && <4.22,
-    bytestring >=0.11 && <0.13,
-    containers >=0.6.7 && <0.8,
-    transformers >=0.6 && <0.7,
-    cometa
-
-executable cometa-evaluation
-  import: language
-  hs-source-dirs: examples
-  main-is: Evaluation.hs
-  build-depends:
-    base >=4.18 && <4.22,
-    bytestring >=0.11 && <0.13,
-    containers >=0.6.7 && <0.8,
-    transformers >=0.6 && <0.7,
-    cometa
-
-executable cometa-coin-selection
-  import: language
-  hs-source-dirs: examples test
-  main-is: CoinSelection.hs
-  other-modules: Fixtures.ProtocolParameters
-  build-depends:
-    base >=4.18 && <4.22,
-    bytestring >=0.11 && <0.13,
-    containers >=0.6.7 && <0.8,
-    transformers >=0.6 && <0.7,
-    cometa
-
-executable cometa-building-utilities
-  import: language
-  hs-source-dirs: examples
-  main-is: BuildingUtilities.hs
-  build-depends:
-    base >=4.18 && <4.22,
-    bytestring >=0.11 && <0.13,
-    transformers >=0.6 && <0.7,
-    cometa
-
-executable cometa-transaction-building
-  import: language
-  hs-source-dirs: examples test
-  main-is: TransactionBuilding.hs
-  other-modules: Fixtures.ProtocolParameters
-  build-depends:
-    base >=4.18 && <4.22,
-    bytestring >=0.11 && <0.13,
-    text >=2.0 && <2.2,
-    transformers >=0.6 && <0.7,
-    cometa
-
-executable cometa-native-evaluation
-  import: language
-  hs-source-dirs: examples
-  main-is: NativeEvaluation.hs
-  build-depends:
-    base >=4.18 && <4.22,
-    bytestring >=0.11 && <0.13,
-    transformers >=0.6 && <0.7,
-    cometa
-
-executable cometa-deferred-redeemers
-  import: language
-  hs-source-dirs: examples test
-  main-is: DeferredRedeemers.hs
-  other-modules: Fixtures.ProtocolParameters
-  build-depends:
-    base >=4.18 && <4.22,
-    bytestring >=0.11 && <0.13,
-    transformers >=0.6 && <0.7,
-    cometa
-
-executable cometa-dijkstra-building
-  import: language
-  hs-source-dirs: examples test
-  main-is: DijkstraBuilding.hs
-  other-modules: Fixtures.ProtocolParameters
-  build-depends:
-    base >=4.18 && <4.22,
-    bytestring >=0.11 && <0.13,
-    transformers >=0.6 && <0.7,
-    cometa
-
-executable cometa-subtransaction-building
-  import: language
-  hs-source-dirs: examples test
-  main-is: SubTransactionBuilding.hs
-  other-modules: Fixtures.ProtocolParameters
-  build-depends:
-    base >=4.18 && <4.22,
-    bytestring >=0.11 && <0.13,
-    text >=2.0 && <2.2,
-    transformers >=0.6 && <0.7,
-    cometa
-
 test-suite cometa-blockfrost-test
   import: language
   type: exitcode-stdio-1.0
@@ -962,11 +664,11 @@ test-suite cometa-blockfrost-test
     tasty >=1.5 && <1.6,
     tasty-hunit >=0.10 && <0.11
 
-executable cometa-blockfrost-queries
+executable cometa-provider
   import: language
   hs-source-dirs: examples
-  main-is: BlockfrostQueries.hs
-  other-modules: Blockfrost.Common
+  main-is: Provider.hs
+  other-modules: Support.Configuration
   ghc-options: -threaded -rtsopts
   build-depends:
     base >=4.18 && <4.22,
@@ -975,26 +677,13 @@ executable cometa-blockfrost-queries
     text >=2.0 && <2.2,
     transformers >=0.6 && <0.7
 
-executable cometa-blockfrost-payment
+executable cometa-sub-transaction-batch
   import: language
   hs-source-dirs: examples
-  main-is: BlockfrostPayment.hs
-  other-modules: Blockfrost.Common
-  ghc-options: -threaded -rtsopts
-  build-depends:
-    base >=4.18 && <4.22,
-    cometa,
-    bytestring >=0.11 && <0.13,
-    text >=2.0 && <2.2,
-    transformers >=0.6 && <0.7
-
-executable cometa-native-swap
-  import: language
-  hs-source-dirs: examples test
-  main-is: NativeSwap.hs
+  main-is: SubTransactionBatch.hs
   other-modules:
-    Workflows.Swap
-    Fixtures.ProtocolParameters
+    Support.Swap
+    Support.Parameters
   ghc-options: -threaded -rtsopts
   build-depends:
     base >=4.18 && <4.22,
@@ -1003,36 +692,12 @@ executable cometa-native-swap
     text >=2.0 && <2.2,
     transformers >=0.6 && <0.7
 
-executable cometa-wallet-recovery
-  import: language
-  hs-source-dirs: examples test
-  main-is: WalletRecovery.hs
-  other-modules: Fixtures.ProtocolParameters
-  ghc-options: -threaded -rtsopts
-  build-depends:
-    base >=4.18 && <4.22,
-    cometa,
-    bytestring >=0.11 && <0.13,
-    text >=2.0 && <2.2,
-    transformers >=0.6 && <0.7
-
-executable cometa-message-signing
+executable cometa-sign-data
   import: language
   hs-source-dirs: examples
-  main-is: MessageSigning.hs
+  main-is: SignData.hs
   build-depends:
     base >=4.18 && <4.22,
-    bytestring >=0.11 && <0.13,
-    transformers >=0.6 && <0.7,
-    cometa
-
-executable cometa-transaction-inspection
-  import: language
-  hs-source-dirs: examples
-  main-is: TransactionInspection.hs
-  build-depends:
-    base >=4.18 && <4.22,
-    aeson >=2.2 && <2.3,
     bytestring >=0.11 && <0.13,
     transformers >=0.6 && <0.7,
     cometa
@@ -1042,13 +707,13 @@ common connected-example
   hs-source-dirs: examples
   ghc-options: -threaded -rtsopts
   other-modules:
-    Blockfrost.Common
-    Connected.Support
-    Connected.Transactions
-    Connected.Governance
-    Connected.GovernanceMain
-    Workflows.Native
-    Workflows.NativeScripts
+    Support.Configuration
+    Support.Wallet
+    Support.Mint
+    Support.Governance
+    Support.Inputs
+    Support.Transaction
+    Support.Scripts
   build-depends:
     base >=4.18 && <4.22,
     bytestring >=0.11 && <0.13,
@@ -1059,71 +724,71 @@ common connected-example
 
 executable cometa-send-lovelace
   import: connected-example
-  main-is: Connected/SendLovelace.hs
+  main-is: SendLovelace.hs
 
 executable cometa-mint-burn-native-script
   import: connected-example
-  main-is: Connected/MintBurnNativeScript.hs
+  main-is: MintBurnNativeScript.hs
 
 executable cometa-mint-burn-plutus-script
   import: connected-example
-  main-is: Connected/MintBurnPlutusScript.hs
+  main-is: MintBurnPlutusScript.hs
 
 executable cometa-spend-from-native-script
   import: connected-example
-  main-is: Connected/SpendFromNativeScript.hs
+  main-is: SpendFromNativeScript.hs
 
 executable cometa-spend-from-validator
   import: connected-example
-  main-is: Connected/SpendFromValidator.hs
+  main-is: SpendFromValidator.hs
 
 executable cometa-deferred-self-index
   import: connected-example
-  main-is: Connected/DeferredRedeemerSelfIndex.hs
+  main-is: DeferredRedeemerSelfIndex.hs
 
 executable cometa-deferred-batch
   import: connected-example
-  main-is: Connected/DeferredRedeemerBatch.hs
+  main-is: DeferredRedeemerBatch.hs
 
 executable cometa-reward-account-pubkey
   import: connected-example
-  main-is: Connected/RewardAccountPubkey.hs
+  main-is: RewardAccountPubkey.hs
 
 executable cometa-reward-account-script
   import: connected-example
-  main-is: Connected/RewardAccountScript.hs
+  main-is: RewardAccountScript.hs
 
 executable cometa-drep-pubkey
   import: connected-example
-  main-is: Connected/DRepPubkey.hs
+  main-is: DRepPubkey.hs
 
 executable cometa-drep-script
   import: connected-example
-  main-is: Connected/DRepScript.hs
+  main-is: DRepScript.hs
 
 executable cometa-vote-for-proposal-pubkey
   import: connected-example
-  main-is: Connected/VoteForProposalPubkey.hs
+  main-is: VoteForProposalPubkey.hs
 
 executable cometa-vote-for-proposal-script
   import: connected-example
-  main-is: Connected/VoteForProposalScript.hs
+  main-is: VoteForProposalScript.hs
 
 executable cometa-donate-to-treasury
   import: connected-example
-  main-is: Connected/DonateToTreasury.hs
+  main-is: DonateToTreasury.hs
 
 executable cometa-propose-treasury-withdrawal
   import: connected-example
-  main-is: Connected/ProposeTreasuryWithdrawal.hs
+  main-is: ProposeTreasuryWithdrawal.hs
 
 executable cometa-deferred-withdraw-zero
   import: connected-example
-  main-is: Connected/DeferredWithdrawZero.hs
+  main-is: DeferredWithdrawZero.hs
 
 executable cometa-plutus-v4-guarded-subtransaction
   import: connected-example
-  main-is: Connected/PlutusV4GuardedSubTransaction.hs
+  main-is: PlutusV4GuardedSubTransaction.hs
 
 benchmark cometa-performance
   import: language

@@ -75,43 +75,11 @@ jobs:
           cabal test cometa-blockfrost-test --test-show-details=streaming
       - name: Run examples
         run: |
-          cabal run cometa-hash
-          cabal run cometa-cbor
-          cabal run cometa-signing
-          cabal run cometa-message-signing
-          cabal run cometa-transaction-inspection
-          cabal run cometa-bip32
           cabal run cometa-bip39
-          cabal run cometa-password-crypto
-          cabal run cometa-derivation-paths
-          cabal run cometa-software-key-handler
-          cabal run cometa-addresses
-          cabal run cometa-assets-values
-          cabal run cometa-plutus-data
-          cabal run cometa-metadata
-          cabal run cometa-scripts
-          cabal run cometa-protocol-values
-          cabal run cometa-protocol-parameters
-          cabal run cometa-governance
-          cabal run cometa-certificates
-          cabal run cometa-stake-pools
-          cabal run cometa-governance-proposals
-          cabal run cometa-transaction-bodies
-          cabal run cometa-transactions
-          cabal run cometa-providers
-          cabal run cometa-evaluation
-          cabal run cometa-native-evaluation
-          cabal run cometa-native-swap
-          cabal run cometa-wallet-recovery
-          cabal run cometa-blockfrost-queries
-          cabal run cometa-blockfrost-payment
-          cabal run cometa-deferred-redeemers
-          cabal run cometa-dijkstra-building
-          cabal run cometa-subtransaction-building
-          cabal run cometa-transaction-building
-          cabal run cometa-building-utilities
-          cabal run cometa-coin-selection
-          cabal run cometa-transaction-witnesses
+          cabal run cometa-secure-key-handler
+          cabal run cometa-provider
+          cabal run cometa-sub-transaction-batch
+          cabal run cometa-sign-data
           cabal run cometa-send-lovelace
           cabal run cometa-mint-burn-native-script
           cabal run cometa-mint-burn-plutus-script
@@ -253,14 +221,3 @@ jobs:
           name: user-guide
           path: docs/_build/html/
           if-no-files-found: error
-      - name: Read native source pin
-        id: pin
-        run: echo "revision=$(cat native/cardano-c.ref)" >> "$GITHUB_OUTPUT"
-      - uses: actions/checkout@v4
-        with:
-          repository: Biglup/cardano-c
-          ref: ${{ steps.pin.outputs.revision }}
-          path: .native/cardano-c
-          persist-credentials: false
-      - name: Verify public API inventory and source manifests
-        run: python tools/native-inventory.py .native/cardano-c

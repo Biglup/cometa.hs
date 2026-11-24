@@ -47,7 +47,7 @@ import qualified Cometa.Transaction.Utxo as Utxo
 import qualified Cometa.TransactionId as TxId
 import Control.Exception (bracket)
 import Control.Monad ((>=>))
-import Control.Monad.Trans.Except (ExceptT (..), except, runExceptT)
+import Control.Monad.Trans.Except (ExceptT (..), except, runExceptT, throwE)
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as B
 import Data.Text (Text)
@@ -160,7 +160,7 @@ dispatch provider operation input = runExceptT $ case operation of
     budgets <- ExceptT (evaluateTransaction provider transaction utxos)
     values <- except (Eval.checkedRedeemers Evaluation.TopLevel transaction budgets)
     except (Redeemer.encodeCollectionCbor values)
-  _ -> except (Left (UnsupportedOperation "provider.callback"))
+  _ -> throwE (UnsupportedOperation "provider.callback")
   where
     addressDecoder = D.decodeBytes >>= either (fail . show) pure . Address.fromBytes
     assetDecoder = D.decodeBytes >>= either (fail . show) pure . assetFromBytes

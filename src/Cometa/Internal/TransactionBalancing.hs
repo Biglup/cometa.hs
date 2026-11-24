@@ -64,7 +64,7 @@ import qualified Cometa.Transaction.Utxo as Utxo
 import qualified Cometa.Transaction.Witnesses as Witnesses
 import qualified Cometa.Value as Value
 import Control.Monad (unless)
-import Control.Monad.Trans.Except (ExceptT (..), except, runExceptT)
+import Control.Monad.Trans.Except (ExceptT (..), except, runExceptT, throwE)
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as B
 import Data.Int (Int64)
@@ -117,7 +117,7 @@ balanceWithRedeemers config resolved callbacks original = runExceptT $ do
   let evaluator = evaluatorFor config
   ExceptT (Batch.validateSubBudgets evaluator snapshots result)
   balanced <- ExceptT (Balance.isBalanced (Builder.parameters config) snapshots result)
-  unless balanced (except (Left (NativeContractViolation "balancing.conservation")))
+  unless balanced (throwE (NativeContractViolation "balancing.conservation"))
   pure result
 
 -- | Resolve identities once; duplicates within a supplied snapshot are rejected.

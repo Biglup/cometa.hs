@@ -36,16 +36,16 @@ import qualified Cometa.Transaction.Plan as Plan
 import qualified Cometa.Transaction.Utxo as Utxo
 import qualified Cometa.TransactionId as TransactionId
 import qualified Cometa.Value as Value
-import qualified Connected.Governance as Governance
 import Control.Monad (unless)
 import Control.Monad.Trans.Except (ExceptT (..), except, runExceptT)
 import qualified Data.ByteString as B
 import Data.Either (isLeft)
+import qualified Fixtures.Workflow as Fixture
+import qualified Support.Governance as Governance
+import qualified Support.Scripts as Scripts
+import qualified Support.Transaction as Native
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertBool, assertFailure, testCase)
-import qualified Workflows.Fixture as Fixture
-import qualified Workflows.Native as Native
-import qualified Workflows.NativeScripts as Scripts
 
 -- DEFINITIONS ----------------------------------------------------------------
 

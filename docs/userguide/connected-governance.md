@@ -1,7 +1,7 @@
 # Connected staking and governance examples
 
-The nine runners in `examples/Connected` port the corresponding Cometa.cpp
-examples from revision `824ae8e8ac9adf113d957265532ae7ea37a628a3`. Run a runner
+The nine runners in `examples` port the corresponding Cometa.cpp
+examples. Run a runner
 without arguments for configuration help. `--describe` prints public identities
 for chain-state discovery; `--submit` executes the complete workflow on the
 configured preprod wallet. Wallet storage and passwords come from the shared
@@ -63,5 +63,4 @@ registration or governance ledger state. Live results must be recorded separatel
 
 The two Dijkstra C++ examples use subtransactions and Plutus V4. Those workflows
 are tested offline with the existing signed-batch and guarded-subtransaction
-examples. They require a protocol supporting those ledger features; protocol 11
-preprod results do not establish live Dijkstra support.
+examples. They require a protocol supporting those ledger features; offline tests do not establish live-network support.

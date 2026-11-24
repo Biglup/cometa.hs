@@ -16,28 +16,34 @@
 
 module Main (main) where
 
--- IMPORTS --------------------------------------------------------------------
-
-import qualified Cometa.Crypto.Bip32.PrivateKey as PrivateKey
-import qualified Cometa.Crypto.Bip32.PublicKey as PublicKey
+import qualified Cometa.Address as Address
+import qualified Cometa.Address.Shelley as Shelley
+import qualified Cometa.Credential as Credential
+import qualified Cometa.Crypto.Bip32.PublicKey as Public
 import qualified Cometa.Crypto.Bip39 as Bip39
-import Control.Monad.Trans.Except (ExceptT (..), except, runExceptT)
-import qualified Data.ByteString as ByteString
-import Data.Text (Text)
+import qualified Cometa.Crypto.DerivationPath as Path
+import qualified Cometa.KeyHandler.Software as Software
+import qualified Cometa.NetworkId as Network
+import Control.Monad.Trans.Except (ExceptT (..), runExceptT)
 import qualified Data.Text.IO as Text
 import System.Exit (die)
 
--- DEFINITIONS ----------------------------------------------------------------
-
--- Public deterministic test phrase; never use this wallet for funds.
-testPhrase :: Text
-testPhrase = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
-
+-- Public demonstration material. Never send funds to this address.
 main :: IO ()
 main = do
-  result <- runExceptT $ do
-    mnemonic <- except (Bip39.fromText testPhrase)
-    entropy <- except (Bip39.exportEntropy mnemonic)
-    ExceptT (PrivateKey.withEntropy ByteString.empty entropy PrivateKey.publicKey)
-
-  either (die . show) (Text.putStrLn . PublicKey.toHex) result
+  let phrase = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
+      entropy = Bip39.fromText phrase >>= Bip39.exportEntropy
+      password = "public demonstration password"
+  result <- case entropy of
+    Left failure -> pure (Left failure)
+    Right bytes -> Software.withEntropy bytes password (pure password) $ \handler -> runExceptT $ do
+      let account = Path.standardAccountPath minBound
+          paymentPath = Path.derivationPath account Path.externalRole minBound
+          stakePath = Path.derivationPath account Path.stakingRole minBound
+      public <- ExceptT (Software.accountPublicKey handler account)
+      paymentKey <- ExceptT (Public.derive public (Path.relativeIndices paymentPath))
+      stakeKey <- ExceptT (Public.derive public (Path.relativeIndices stakePath))
+      payment <- ExceptT (Credential.fromPublicKey (Public.toEd25519 paymentKey))
+      stake <- ExceptT (Credential.fromPublicKey (Public.toEd25519 stakeKey))
+      pure (Address.ShelleyAddress (Shelley.base Network.testnet payment stake))
+  either (die . show) (Text.putStrLn . Address.toText) result
