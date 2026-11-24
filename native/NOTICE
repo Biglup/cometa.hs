@@ -27,8 +27,11 @@ vendor/external/secp256k1: MIT (secp256k1/COPYING).
 vendor/external/blst: Apache-2.0 (blst/LICENSE).
 
 vendor/external/ripemd160: public-domain dedication and fallback unrestricted
-license with warranty disclaimer (ripemd160/LICENSE). The Cabal SPDX identifier
-LicenseRef-RIPEMD160-Public-Domain refers to that exact bundled text.
+license with warranty disclaimer (ripemd160/LICENSE). This component imposes no
+additional license conditions, so it adds no term to the package's SPDX license
+expression. Hackage rejects custom LicenseRef identifiers. The original
+dedication, fallback grant and disclaimer remain in the bundled LICENSE and
+source headers; this metadata representation does not change those notices.
 
 All paths above are relative to vendor/external unless given in full. Full
 upstream provenance is retained in vendor/external/README and VERSION files.

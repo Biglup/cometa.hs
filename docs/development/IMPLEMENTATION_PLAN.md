@@ -4699,3 +4699,23 @@ without rendering its token-bearing command or exception. Offline tests cover
 server error preservation, raw and encoded token redaction, terminal controls,
 multiline output and missing executables. Retry the candidate after this
 diagnostic change is merged; permanent publication remains pending.
+
+### Candidate license metadata correction (2026-11-24)
+
+The November 11 retry of Release run `42762172669` passed authentication but
+Hackage rejected the native candidate with HTTP 400 because its SPDX expression
+contained `LicenseRef-RIPEMD160-Public-Domain`. Hackage's
+[upload validator](https://github.com/haskell/hackage-server/blob/master/src/Distribution/Server/Packages/Unpack.hs)
+rejects all custom license references. The bundled RIPEMD-160 dedication and
+unrestricted fallback grant impose no additional license conditions; the package
+expression now lists the licensed components' terms, with RIPEMD-160's status
+documented separately in `native/NOTICE`. Its full original license and source
+headers remain unchanged.
+
+Generation and byte-for-byte regeneration checks pass for all 968 files and 366
+translation units. Comparison against the previously validated source archive
+shows only `NOTICE` and `cardano-c-clib.cabal` differ. All 20 offline release tests
+pass. GHC and Cabal are unavailable in this local environment; the candidate
+workflow must rerun package checks, the platform matrix and archive consumer
+validation before upload. Candidate acceptance and permanent publication remain
+pending.
