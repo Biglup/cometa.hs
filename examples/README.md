@@ -1,7 +1,8 @@
 # Examples
 
-Each file is one runnable workflow. Shared wallet configuration, script programs
-and transaction submission helpers live in `Support/`. The C++ binding has the
+Each file shows a complete runnable workflow: construct the plan, build, sign,
+submit and confirm. Shared wallet/provider setup, compiled script programs and
+address-index polling live in `Support/`. The C++ binding has the
 same workflow set; `SignData.hs` corresponds to the Python/TypeScript CIP-8 example.
 
 | Source | Cabal target |
@@ -29,10 +30,21 @@ same workflow set; `SignData.hs` corresponds to the Python/TypeScript CIP-8 exam
 | [DeferredWithdrawZero.hs](DeferredWithdrawZero.hs) | `cometa-deferred-withdraw-zero` |
 | [PlutusV4GuardedSubTransaction.hs](PlutusV4GuardedSubTransaction.hs) | `cometa-plutus-v4-guarded-subtransaction` |
 
-`Bip39`, `SecureKeyHandler`, `SignData` and `SubTransactionBatch` run offline with
-public demonstration material. Never fund their keys. The other examples print
-usage without making network requests when run without arguments. `Provider`
-uses `--query`; transaction examples use `--describe` or `--submit`.
+Transaction examples load an encrypted wallet, prompt for its password, build,
+sign, submit and await confirmation when run without arguments. Use `--help` for
+offline usage, or `--describe` to inspect public wallet/script identities.
+
+```sh
+cabal run cometa-secure-key-handler -- wallet.key
+export COMETA_KEY_HANDLER_FILE="$PWD/wallet.key"
+# Configure the provider, validity slot and workflow inputs as described below.
+cabal run cometa-send-lovelace
+```
+
+`SecureKeyHandler` imports a recovery phrase into encrypted storage and reopens it.
+`Bip39` and `SignData` are offline cryptography demonstrations using public material;
+never fund their keys. `Provider --query` makes read-only chain queries. The
+Dijkstra batch example uses three encrypted wallets and requires protocol 12+.
 
 See [connected examples](../docs/userguide/connected-examples.md) for provider,
 wallet and collateral configuration, and [governance examples](../docs/userguide/connected-governance.md)

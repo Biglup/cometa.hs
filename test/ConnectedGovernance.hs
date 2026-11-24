@@ -38,14 +38,23 @@ import qualified Cometa.TransactionId as TransactionId
 import qualified Cometa.Value as Value
 import Control.Monad (unless)
 import Control.Monad.Trans.Except (ExceptT (..), except, runExceptT)
+import qualified DRepPubkey as Governance (drepKey)
+import qualified DRepScript as Governance (drepScript)
 import qualified Data.ByteString as B
 import Data.Either (isLeft)
+import qualified DeferredWithdrawZero as Governance (withdrawZero)
+import qualified DonateToTreasury as Governance (donate)
+import qualified Fixtures.TransactionWorkflows as Native
 import qualified Fixtures.Workflow as Fixture
+import qualified ProposeTreasuryWithdrawal as Governance (treasury)
+import qualified RewardAccountPubkey as Governance (rewardKey)
+import qualified RewardAccountScript as Governance (rewardScript)
 import qualified Support.Governance as Governance
 import qualified Support.Scripts as Scripts
-import qualified Support.Transaction as Native
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertBool, assertFailure, testCase)
+import qualified VoteForProposalPubkey as Governance (voteKey)
+import qualified VoteForProposalScript as Governance (voteScript)
 
 -- DEFINITIONS ----------------------------------------------------------------
 

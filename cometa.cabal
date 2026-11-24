@@ -316,7 +316,9 @@ executable cometa-secure-key-handler
   import: language
   hs-source-dirs: examples
   main-is: SecureKeyHandler.hs
+  other-modules: Support.Terminal
   build-depends:
+    directory >=1.3 && <1.4,
     base >=4.18 && <4.22,
     bytestring >=0.11 && <0.13,
     text >=2.0 && <2.2,
@@ -375,12 +377,30 @@ test-suite cometa-test
     HexEncoding
     NativeWorkflows
     ConnectedGovernance
+    RewardAccountPubkey
+    RewardAccountScript
+    DeferredWithdrawZero
+    DRepPubkey
+    DRepScript
+    VoteForProposalPubkey
+    VoteForProposalScript
+    DonateToTreasury
+    ProposeTreasuryWithdrawal
+    Fixtures.TransactionWorkflows
+    SpendFromValidator
+    DeferredRedeemerSelfIndex
+    DeferredRedeemerBatch
+    PlutusV4GuardedSubTransaction
+    Support.Inputs
+    Support.Wallet
+    Support.Terminal
+    Support.Configuration
     Support.Governance
     Support.Transaction
     Support.Scripts
     Fixtures.Workflow
-    Support.Swap
-    Support.Parameters
+    Fixtures.Swap
+    Fixtures.ExampleParameters
     Value
     PlutusData
     Metadata
@@ -677,21 +697,6 @@ executable cometa-provider
     text >=2.0 && <2.2,
     transformers >=0.6 && <0.7
 
-executable cometa-sub-transaction-batch
-  import: language
-  hs-source-dirs: examples
-  main-is: SubTransactionBatch.hs
-  other-modules:
-    Support.Swap
-    Support.Parameters
-  ghc-options: -threaded -rtsopts
-  build-depends:
-    base >=4.18 && <4.22,
-    cometa,
-    bytestring >=0.11 && <0.13,
-    text >=2.0 && <2.2,
-    transformers >=0.6 && <0.7
-
 executable cometa-sign-data
   import: language
   hs-source-dirs: examples
@@ -709,7 +714,7 @@ common connected-example
   other-modules:
     Support.Configuration
     Support.Wallet
-    Support.Mint
+    Support.Terminal
     Support.Governance
     Support.Inputs
     Support.Transaction
@@ -721,6 +726,10 @@ common connected-example
     text >=2.0 && <2.2,
     transformers >=0.6 && <0.7,
     cometa
+
+executable cometa-sub-transaction-batch
+  import: connected-example
+  main-is: SubTransactionBatch.hs
 
 executable cometa-send-lovelace
   import: connected-example
@@ -741,54 +750,67 @@ executable cometa-spend-from-native-script
 executable cometa-spend-from-validator
   import: connected-example
   main-is: SpendFromValidator.hs
+  ghc-options: -main-is SpendFromValidator
 
 executable cometa-deferred-self-index
   import: connected-example
   main-is: DeferredRedeemerSelfIndex.hs
+  ghc-options: -main-is DeferredRedeemerSelfIndex
 
 executable cometa-deferred-batch
   import: connected-example
   main-is: DeferredRedeemerBatch.hs
+  ghc-options: -main-is DeferredRedeemerBatch
 
 executable cometa-reward-account-pubkey
   import: connected-example
   main-is: RewardAccountPubkey.hs
+  ghc-options: -main-is RewardAccountPubkey
 
 executable cometa-reward-account-script
   import: connected-example
   main-is: RewardAccountScript.hs
+  ghc-options: -main-is RewardAccountScript
 
 executable cometa-drep-pubkey
   import: connected-example
   main-is: DRepPubkey.hs
+  ghc-options: -main-is DRepPubkey
 
 executable cometa-drep-script
   import: connected-example
   main-is: DRepScript.hs
+  ghc-options: -main-is DRepScript
 
 executable cometa-vote-for-proposal-pubkey
   import: connected-example
   main-is: VoteForProposalPubkey.hs
+  ghc-options: -main-is VoteForProposalPubkey
 
 executable cometa-vote-for-proposal-script
   import: connected-example
   main-is: VoteForProposalScript.hs
+  ghc-options: -main-is VoteForProposalScript
 
 executable cometa-donate-to-treasury
   import: connected-example
   main-is: DonateToTreasury.hs
+  ghc-options: -main-is DonateToTreasury
 
 executable cometa-propose-treasury-withdrawal
   import: connected-example
   main-is: ProposeTreasuryWithdrawal.hs
+  ghc-options: -main-is ProposeTreasuryWithdrawal
 
 executable cometa-deferred-withdraw-zero
   import: connected-example
   main-is: DeferredWithdrawZero.hs
+  ghc-options: -main-is DeferredWithdrawZero
 
 executable cometa-plutus-v4-guarded-subtransaction
   import: connected-example
   main-is: PlutusV4GuardedSubTransaction.hs
+  ghc-options: -main-is PlutusV4GuardedSubTransaction
 
 benchmark cometa-performance
   import: language

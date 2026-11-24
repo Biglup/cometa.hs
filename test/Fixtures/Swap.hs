@@ -17,7 +17,7 @@
 -- | Port of cardano-c examples/src/sub_transaction_batch_example.c at
 -- eadb95cd3ca7f711c203d7f2f4ee21c150d4d7f1 (Apache-2.0): buyer and seller sign
 -- independent token/coin intents; a third party funds and signs their batch.
-module Support.Swap (Swap (..), runSwap) where
+module Fixtures.Swap (Swap (..), runSwap) where
 
 -- IMPORTS --------------------------------------------------------------------
 
@@ -56,7 +56,7 @@ import Control.Monad (unless)
 import Control.Monad.Trans.Except (ExceptT (..), except, runExceptT, throwE)
 import qualified Data.ByteString as B
 import Data.Word (Word8)
-import qualified Support.Parameters as Sample
+import qualified Fixtures.ExampleParameters as Sample
 
 -- TYPES ----------------------------------------------------------------------
 

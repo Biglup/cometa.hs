@@ -12,43 +12,50 @@
 -- WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 
+-- | Import a recovery phrase into encrypted storage, then reopen it.
 module Main (main) where
 
--- IMPORTS --------------------------------------------------------------------
-
 import qualified Cometa.Crypto.Bip32.PublicKey as Public
+import qualified Cometa.Crypto.Bip39 as Bip39
 import qualified Cometa.Crypto.DerivationPath as Path
-import qualified Cometa.Crypto.Ed25519.PublicKey as Ed25519
-import Cometa.Error (Error)
+import Cometa.Error (Error (..))
 import qualified Cometa.KeyHandler.Software as Software
-import Control.Monad.Trans.Except (ExceptT (..), runExceptT)
-import qualified Data.ByteString as ByteString
-import Data.Text (Text)
+import Control.Monad (unless, when)
+import Control.Monad.IO.Class (liftIO)
+import Control.Monad.Trans.Except (ExceptT (..), except, runExceptT)
+import qualified Data.ByteString as Bytes
+import qualified Data.Text.Encoding as Text
 import qualified Data.Text.IO as Text
+import Support.Terminal (password, secret)
+import System.Directory (doesPathExist)
+import System.Environment (getArgs)
 import System.Exit (die)
 
--- DEFINITIONS ----------------------------------------------------------------
-
--- Public deterministic demonstration material only; never use it for a wallet.
 main :: IO ()
 main = do
-  let entropy = ByteString.replicate 16 0
-      password = "public demonstration password"
-      requestPassword = pure password
-      path = Path.standardAccountPath minBound
+  arguments <- getArgs
+  case arguments of
+    ["--help"] -> putStrLn "SecureKeyHandler: cabal run cometa-secure-key-handler -- WALLET_FILE; imports a recovery phrase into a new encrypted wallet."
+    [file] -> createWallet file
+    _ -> die "Supply a new wallet file path; use --help for usage."
 
+createWallet :: FilePath -> IO ()
+createWallet file = do
+  exists <- doesPathExist file
+  when exists (die "Wallet file already exists; choose a new path.")
+  phrase <- secret "Recovery phrase: "
+  encryptionPassword <- password file
+  repeated <- secret "Repeat password: "
+  unless (encryptionPassword == Text.encodeUtf8 repeated) (die "Passwords do not match.")
   result <- runExceptT $ do
-    stored <- ExceptT (Software.withEntropy entropy password requestPassword Software.serialize)
-    ExceptT (Software.withSerialized stored requestPassword (loadedPublicKeyHex path))
-
-  case result of
-    Left err -> die (show err)
-    Right keyHex -> Text.putStrLn keyHex
-
--- The storage format identifies the public-key capability when reloaded.
-loadedPublicKeyHex :: Path.AccountPath -> Software.LoadedHandler -> IO (Either Error Text)
-loadedPublicKeyHex path loaded = case loaded of
-  Software.Bip32Handler handler -> fmap Public.toHex <$> Software.accountPublicKey handler path
-  Software.Ed25519Handler handler -> fmap Ed25519.toHex <$> Software.publicKey handler
+    entropy <- except (Bip39.fromText phrase >>= Bip39.exportEntropy)
+    stored <- ExceptT (Software.withEntropy entropy encryptionPassword (password file) Software.serialize)
+    liftIO (Bytes.writeFile file stored)
+    reloaded <- liftIO (Bytes.readFile file)
+    ExceptT $ Software.withSerialized reloaded (password file) $ \case
+      Software.Bip32Handler handler -> fmap Public.toHex <$> Software.accountPublicKey handler (Path.standardAccountPath minBound)
+      Software.Ed25519Handler _ -> pure (Left (InvalidBuildingRequest "Expected a BIP32 wallet"))
+  either (die . show) (\public -> Text.putStrLn ("Account public key: " <> public)) result
