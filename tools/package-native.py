@@ -117,7 +117,7 @@ description:
   Compiles pinned cardano-c and its six bundled C dependencies with Cabal.
   Installs the public native headers for Haskell FFI consumers. No CMake,
   Git checkout or installed cardano-c is required when building this package.
-license: Apache-2.0 AND ISC AND BSD-2-Clause AND CC0-1.0 AND MIT AND (LGPL-3.0-or-later OR GPL-2.0-or-later) AND LicenseRef-RIPEMD160-Public-Domain
+license: Apache-2.0 AND ISC AND BSD-2-Clause AND CC0-1.0 AND MIT AND (LGPL-3.0-or-later OR GPL-2.0-or-later)
 author: Biglup Labs and bundled dependency authors
 maintainer: angel.castillob@protonmail.com
 category: Blockchain
