@@ -47,7 +47,7 @@ import qualified Cometa.TransactionId as TxId
 import qualified Cometa.Value as Amount
 import Control.Concurrent (threadDelay)
 import Control.Monad (foldM, unless, when)
-import Control.Monad.Trans.Except (ExceptT (..), except, runExceptT)
+import Control.Monad.Trans.Except (ExceptT (..), except, runExceptT, throwE)
 import Data.Aeson (Value (..), encode, (.:))
 import Data.Aeson.Types (Parser, withObject, withText)
 import Data.ByteString (ByteString)
@@ -113,7 +113,7 @@ getJSON transport operation path query missing = do
 requiredJSON :: Http.Transport -> Text -> [Text] -> [(Text, Text)] -> ExceptT Error IO Value
 requiredJSON transport operation path query = do
   value <- ExceptT (getJSON transport operation path query False)
-  maybe (except (Left (InvalidProviderResponse operation))) pure value
+  maybe (throwE (InvalidProviderResponse operation)) pure value
 
 -- Reject repeated identities rather than quietly truncate or retain conflicting
 -- snapshots across pages. A fixed request bound prevents endless distinct pages.
@@ -121,11 +121,11 @@ pages :: Http.Transport -> Text -> [Text] -> IO (Either Error [Json.Row])
 pages transport operation path = runExceptT (go 1 Set.empty [])
   where
     go page seen chunks = do
-      when (page > 10000) (except (Left (InvalidProviderResponse operation)))
+      when (page > 10000) (throwE (InvalidProviderResponse operation))
       response <- ExceptT (getJSON transport operation path [("count", "100"), ("page", Text.pack (show page)), ("order", "asc")] (page == (1 :: Int)))
       current <- maybe (pure []) (except . Json.parseValue operation Json.rows) response
       let identities = map Json.rowInput current
-      unless (length current <= 100 && Set.size (Set.fromList identities) == length identities && all (`Set.notMember` seen) identities) (except (Left (InvalidProviderResponse operation)))
+      unless (length current <= 100 && Set.size (Set.fromList identities) == length identities && all (`Set.notMember` seen) identities) (throwE (InvalidProviderResponse operation))
       let completed = current : chunks
       if length current < 100
         then pure (concat (reverse completed))
@@ -135,7 +135,7 @@ atAddress :: Http.Transport -> Text -> Address.Address -> Maybe AssetId -> IO (E
 atAddress transport operation address asset = runExceptT $ do
   let suffix = case asset of Just value@Native {} -> [Json.assetText value]; _ -> []
   found <- ExceptT (pages transport operation (["addresses", Address.toText address, "utxos"] <> suffix))
-  unless (all ((== address) . Json.rowAddress) found) (except (Left (InvalidProviderResponse operation)))
+  unless (all ((== address) . Json.rowAddress) found) (throwE (InvalidProviderResponse operation))
   values <- ExceptT (materialize transport operation found)
   pure $ case asset of Nothing -> values; Just value -> filter ((> 0) . Amount.quantity value . Output.value . Utxo.output) values
 
@@ -147,7 +147,7 @@ uniqueAsset transport asset = runExceptT $ do
   case values of
     [] -> pure Nothing
     [value] | Amount.quantity asset (Output.value (Utxo.output value)) == 1 -> pure (Just value)
-    _ -> except (Left (InvalidProviderResponse operation))
+    _ -> throwE (InvalidProviderResponse operation)
   where
     operation = "blockfrost.utxoWithAsset"
 
@@ -176,7 +176,7 @@ fetchScript transport operation expected = do
   let path = ["scripts", Hex.encodeHex (Credential.scriptHashBytes expected)]
   metadata <- requiredJSON transport operation path []
   (hash, kind) <- except (Json.parseValue operation (withObject "script metadata" (\entry -> (,) <$> (entry .: "script_hash" >>= Json.parseHex) <*> entry .: "type")) metadata)
-  unless (hash == Credential.scriptHashBytes expected) (except (Left (InvalidProviderResponse operation)))
+  unless (hash == Credential.scriptHashBytes expected) (throwE (InvalidProviderResponse operation))
   script <- case kind :: Text of
     "timelock" -> do
       payload <- requiredJSON transport operation (path <> ["json"]) []
@@ -191,7 +191,7 @@ fetchScript transport operation expected = do
       bytes <- except (Json.parseValue operation cborField payload)
       Script.Plutus <$> except (mapResponse operation (Plutus.fromBytes version bytes))
   actual <- ExceptT (Script.hash script)
-  unless (actual == expected) (except (Left (InvalidProviderResponse operation)))
+  unless (actual == expected) (throwE (InvalidProviderResponse operation))
   pure script
 
 cborField :: Value -> Parser ByteString
@@ -200,7 +200,7 @@ cborField = withObject "CBOR response" (\entry -> entry .: "cbor" >>= Json.parse
 verifyDatum :: Text -> Datum.Hash32 -> Data.EncodedPlutusData -> ExceptT Error IO ()
 verifyDatum operation expected encoded = do
   actual <- ExceptT (Data.hash encoded)
-  unless (Blake2b.toBytes actual == Datum.hashBytes expected) (except (Left (InvalidProviderResponse operation)))
+  unless (Blake2b.toBytes actual == Datum.hashBytes expected) (throwE (InvalidProviderResponse operation))
 
 datum :: Http.Transport -> Datum.Hash32 -> IO (Either Error (Maybe Data.EncodedPlutusData))
 datum transport hash = runExceptT $ do
@@ -259,10 +259,10 @@ submit :: Http.Transport -> Tx.Transaction -> IO (Either Error TxId.TransactionI
 submit transport transaction = runExceptT $ do
   expected <- ExceptT (Tx.transactionId transaction)
   response <- ExceptT (send transport operation (Http.Request Http.Post ["tx", "submit"] [] (Tx.encodeCbor transaction) "application/cbor" Nothing))
-  unless (Http.status response == 200) (except (Left (ProviderHttpError operation (Http.status response))))
+  unless (Http.status response == 200) (throwE (ProviderHttpError operation (Http.status response)))
   value <- except (Json.decodeValue operation (Http.bodyBytes response))
   identifier <- except (Json.parseValue operation (withText "transaction hash" (either (const (fail "Invalid transaction hash")) pure . TxId.fromHex)) value)
-  unless (identifier == expected) (except (Left (InvalidProviderResponse operation)))
+  unless (identifier == expected) (throwE (InvalidProviderResponse operation))
   pure identifier
   where
     operation = "blockfrost.submitTransaction"
@@ -271,7 +271,7 @@ evaluate :: Http.Transport -> Tx.Transaction -> [Utxo.Utxo] -> IO (Either Error 
 evaluate transport transaction inputs = runExceptT $ do
   payload <- except (Json.evaluationPayload transaction inputs)
   response <- ExceptT (send transport operation (Http.Request Http.Post ["utils", "txs", "evaluate", "utxos"] [("version", "5")] (Lazy.toStrict (encode payload)) "application/json" Nothing))
-  unless (Http.status response == 200) (except (Left (ProviderHttpError operation (Http.status response))))
+  unless (Http.status response == 200) (throwE (ProviderHttpError operation (Http.status response)))
   value <- except (Json.decodeValue operation (Http.bodyBytes response))
   except (Json.decodeBudgets transaction value)
   where

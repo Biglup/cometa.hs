@@ -3,7 +3,7 @@
 project = "Cometa.hs"
 author = "Biglup Labs"
 copyright = "2026, Biglup Labs"
-release = "0.1.0.0-dev"
+release = "0.1.0.0"
 version = release
 extensions = ["myst_parser", "sphinx_immaterial"]
 source_suffix = {".md": "markdown"}

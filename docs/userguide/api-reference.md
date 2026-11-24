@@ -1,33 +1,17 @@
 # API reference
 
-Haddock is the authoritative declaration reference. It describes the modules,
-types, arguments, return values, and errors implemented by a particular source
-revision. The narrative guide explains how to use those declarations.
+The [Haddock reference on Hackage](https://hackage.haskell.org/package/cometa-0.1.0.0/candidate/docs/index.html)
+is the primary API documentation. It includes the Blockfrost provider and describes
+arguments, units, bounds and errors for each operation. Version 0.1.0.0 is currently
+a package candidate; it has not been published in the main package index.
 
-## Download a build
+## Build locally
 
-Open a successful [CI run](https://github.com/Biglup/cometa.hs/actions/workflows/ci.yml)
-for your source revision and download a `haddock-` artifact. Extract the archive
-and open `index.html`. GitHub requires sign-in to download artifacts.
-
-## Generate locally
-
-With the native dependency configured as for a normal build, run:
+To browse documentation matching your checkout:
 
 ```sh
 python3 tools/build-api-docs.py
 ```
 
-Open `docs/_build/api/index.html`. The reference includes the Blockfrost provider.
-The archive can be moved or shared; third-party API links point to Hackage.
-
-Keep the native include and library directories in `cabal.project.local` when
-the native library is installed outside the default search paths. For ordinary
-local browsing, `cabal haddock all` is also available.
-
-## Availability
-
-The library is unpublished, so there is no released online API reference yet.
-Use the Haddock generated from the same source revision as your application.
-A narrative guide build alone does not verify the Haskell package or its native
-dependency.
+Open `docs/_build/api/index.html`. Configure the native dependency as for a normal
+build first. `cabal haddock all` also generates local documentation.

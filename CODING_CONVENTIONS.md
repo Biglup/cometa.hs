@@ -1,7 +1,6 @@
 # Haskell coding conventions
 
-These rules apply to Cometa.hs. They turn the engineering requirements in
-`docs/development/IMPLEMENTATION_PLAN.md`, section 19, into review criteria.
+These rules apply to Cometa.hs.
 Use the checked-in formatter and HLint settings as the mechanical source of truth.
 Before editing, inspect nearby modules and match their organization and vocabulary.
 
@@ -35,7 +34,7 @@ without a repository-wide decision and compiler-matrix evidence.
 Before designing or extending a public API, review how relevant established
 Haskell libraries solve the same task. Read their actual documentation, source
 and usage examples, including the complete caller workflow and error handling.
-Record links and the reviewed version or commit in the implementation plan,
+Record links and the reviewed version or commit in the change description,
 explain which contracts inform Cometa, and justify material differences. This
 review is required before choosing the API; familiar names or remembered
 signatures are insufficient evidence. Adopt patterns that fit the domain and
@@ -62,9 +61,10 @@ private scopes internally while lower-level scoped operations remain available
 for several related operations. Convenience must preserve cancellation, cleanup,
 and error behavior.
 
-Expose expected errors once at the caller's natural boundary. Compose standard
-`Either` or optional `ExceptT`; use `except` for pure validation within an
-`ExceptT` sequence. Avoid nested error matches and mandatory custom monads or
+Group pure input validation in small `Either` functions before running effects.
+Use ordinary `do` notation or applicative composition inside `Either`; lift a
+validated group once when combining it with `ExceptT`. Use `ExceptT` for a
+sequence of fallible effects, and handle the result at the caller's boundary. Avoid nested error matches and mandatory custom monads or
 effects frameworks. A single fallible operation needs no transformer. Helpers
 should name actual workflow steps rather than disguise errors or ownership.
 
@@ -72,7 +72,7 @@ Review signatures for ambiguous same-typed arguments, especially password,
 entropy, and storage `ByteString` values. Use descriptive argument documentation
 and examples; introduce an options record or another abstraction only when a
 complete workflow demonstrates its benefit. Compare the relevant contracts of
-idiomatic libraries in implementation-plan section 19; do not copy historical
+idiomatic libraries; do not copy historical
 partial conveniences or claim one universal Haskell style.
 
 ## Naming
@@ -167,7 +167,7 @@ and evaluation before adding specialization or unsafe optimization.
 
 Separate raw declarations, marshaling, ownership scopes, and callbacks. Audit the
 current native headers and implementation rather than assuming that all getters
-borrow or all outputs transfer ownership. Record contracts in the API ledger.
+borrow or all outputs transfer ownership. Document contracts beside the FFI boundary.
 
 - Copy borrowed bytes/strings or retain an immutable owner for their entire use.
   Retaining a reference is not cloning; native reference counts are not atomic.
@@ -268,10 +268,9 @@ first release, seek experienced Haskell/FFI maintainer review when available and
 record its outcome. Passing automated checks does not prove exception safety or
 API quality.
 
-The reference set and rationale are maintained in implementation-plan section 19:
-containers, text, async, Hasql, Megaparsec, optics, Hedgehog, the Kowainik naming
-guide, Google Haskell style guide, and the Haskell PVP. Adopt the specific contracts
-that fit this library rather than copying historical partial APIs or dependencies.
+Use current primary documentation when comparing established library APIs.
+Adopt contracts that fit this library rather than copying partial APIs or adding
+dependencies solely for stylistic similarity.
 
 ## API review checklist
 
@@ -279,7 +278,7 @@ Before accepting a public API change, review concrete caller code:
 
 - Have relevant established libraries' documentation, source and real usage been
   reviewed before design, with links, version or commit, workflow and justified
-  differences recorded in the implementation plan?
+  differences recorded in the change description?
 - Can the common task run from input to result with one clear error boundary?
   Are runtime inputs validated once and valid values assembled without spurious
   failure branches?
@@ -293,7 +292,7 @@ Before accepting a public API change, review concrete caller code:
   Is each new abstraction justified by an actual caller workflow?
 - Do compiled examples show real derivation, signing, or storage/reload work,
   with explicit imports, logical spacing, total matches, and one failure boundary?
-  Are the guide, Haddock, tests, and native ledger consistent?
+  Are the guide, Haddock, tests, and native contracts consistent?
 
 ## File headers, sections, and function size
 

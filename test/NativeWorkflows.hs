@@ -58,12 +58,12 @@ import qualified Data.ByteString as B
 import Data.Either (isLeft)
 import Data.IORef (atomicModifyIORef', modifyIORef', newIORef, readIORef)
 import Data.List (find)
+import qualified Fixtures.Workflow as Fixture
+import qualified Support.Scripts as Scripts
+import qualified Support.Swap as Swap
+import qualified Support.Transaction as Workflow
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
-import qualified Workflows.Fixture as Fixture
-import qualified Workflows.Native as Workflow
-import qualified Workflows.NativeScripts as Scripts
-import qualified Workflows.Swap as Swap
 
 -- DEFINITIONS ----------------------------------------------------------------
 

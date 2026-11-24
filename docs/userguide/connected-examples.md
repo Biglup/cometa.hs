@@ -1,6 +1,6 @@
 # Run connected examples
 
-The named runners in `examples/Connected` build, sign and confirm complete
+The named runners in `examples` build, sign and confirm complete
 transaction workflows using the included Blockfrost provider. They use your
 configured encrypted wallet. Running a runner without arguments prints usage
 without opening the wallet or making a request.
@@ -54,10 +54,9 @@ choose unused stake and DRep credentials before starting a registration cycle.
 Its complete recipe uses the same build, sign and confirmation helper as the
 other runners:
 
-```{literalinclude} ../../examples/Connected/Transactions.hs
+```{literalinclude} ../../examples/SendLovelace.hs
 :language: haskell
-:start-at: payment ::
-:end-before: nativeScript ::
+:start-at: main ::
 ```
 
 | Executable | Complete flow |
@@ -85,10 +84,9 @@ recipes; they do not create reference-script deployments.
 The deferred self-index entrypoint uses the compiled source validator and the
 shared deferred-redeemer recipe:
 
-```{literalinclude} ../../examples/Connected/Transactions.hs
+```{literalinclude} ../../examples/DeferredRedeemerSelfIndex.hs
 :language: haskell
-:start-at: deferredSelf ::
-:end-before: deferredBatch ::
+:start-at: main ::
 ```
 
 Reference-script outputs can remain after their spending workflow finishes.
@@ -111,10 +109,10 @@ attempting another submission.
 
 ## Dijkstra workflows
 
-`cometa-native-swap` implements the C++ example's offline buyer, seller and batcher
+`cometa-sub-transaction-batch` implements the C++ example's offline buyer, seller and batcher
 exchange with independently signed local intents. The connected
 `cometa-plutus-v4-guarded-subtransaction` runner checks for protocol 12 or later
-before creating any funding transaction. Protocol 11 preprod cannot validate
+before creating any funding transaction. Networks running an earlier protocol cannot validate
 these Dijkstra bodies. The offline signed-batch and guarded-subtransaction tests
 exercise their signatures, local indexes and budget checks; they do not establish
 live-network support.

@@ -104,9 +104,6 @@ a scheduling smoke test: these bounded C calls are too short to guarantee an
 exception arrives during native execution. The CI matrix runs the BIP39 group
 at `-O2` with two capabilities, in addition to the ordinary complete suite.
 
-Local production validation and runtime findings are recorded in the
-implementation plan. The earlier spike's `-N4` Valgrind loss was independently
-reproduced by an empty threaded GHC 9.6.7 executable (16 bytes/four blocks in
-`initCapabilityIOManager`); this must not be called a clean Valgrind run or used
-to dismiss unrelated findings. An earlier unreproduced 288-byte possible loss
-without a captured allocation stack remains unclassified.
+The Valgrind configuration suppresses only the known GHC 9.6.7 scheduler
+shutdown allocation reproduced by an empty threaded executable. See
+`test/valgrind/ghc-9.6.7.supp`; other allocation errors remain checked.

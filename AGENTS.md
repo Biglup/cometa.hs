@@ -1,17 +1,15 @@
 # Repository instructions
 
-Cometa.hs is an unpublished Haskell binding to cardano-c. Read
-`CODING_CONVENTIONS.md` and `docs/development/IMPLEMENTATION_PLAN.md` before making
-changes. Inspect neighboring modules, package metadata, native dependency pins,
-and test provenance. The implementation plan contains proposed APIs; only code
-and passing tests establish implemented behavior.
+Cometa.hs is a Haskell binding to cardano-c. Read `CODING_CONVENTIONS.md`
+before making changes. Inspect neighboring modules, package metadata, native dependency pins,
+and test provenance. Only code and passing tests establish implemented behavior.
 
 ## Scope and workflow
 
 - Make focused, reviewable changes. Do not generate broad FFI wrappers before
   auditing the native declarations, ownership contract, and public Haskell API.
-- Keep implementation tracking in developer documents, not the user-facing README.
-  Update the implementation plan when decisions, evidence, or milestones change.
+- Keep historical plans, progress logs and generated coverage inventories out of
+  the repository. Document current contracts and maintenance procedures.
 - Do not advertise incomplete domains, untested platform/compiler combinations,
   unpublished packages, or unconfigured hosted documentation.
 - Preserve the maintainer's configured signing identity. Use Conventional Commit
@@ -25,7 +23,7 @@ and passing tests establish implemented behavior.
 - Before designing or extending a public API, inspect relevant established Haskell
   libraries' actual documentation, source and usage examples. Record the reviewed
   links, version or commit, caller workflow and justified differences in the
-  implementation plan. Use that evidence to inform the design; do not copy an API
+  change description. Use that evidence to inform the design; do not copy an API
   without checking its contracts and fit for Cometa.
 - Start public API design with a complete caller workflow. Validate external inputs
   once, use lawful defaults and total assembly, and keep one clear error boundary.
@@ -43,9 +41,8 @@ and passing tests establish implemented behavior.
   acquired, borrowed, retained, and transferred native reference.
 - Never hide arbitrary native calls with `unsafePerformIO`. Never derive printable
   secret representations or expose constructors that bypass invariants.
-- Record every mapped C symbol, ownership rule, status, test, and justified omission
-  in the API ledger as coverage expands. Reference-count plumbing is internal;
-  domain functionality must not disappear under that label.
+- Document ownership contracts beside the native boundary and cover them with
+  tests. Reference-count plumbing stays internal.
 
 ## Verification
 
