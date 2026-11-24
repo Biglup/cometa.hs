@@ -25,6 +25,7 @@ import qualified Cometa.NetworkId as Network
 import qualified Cometa.Provider.Blockfrost as Blockfrost
 import Cometa.SlotConfig (SlotConfig)
 import qualified Cometa.SlotConfig as Slots
+-- Standard library and error handling.
 import Data.Text (Text)
 import qualified Data.Text as Text
 import System.Environment (lookupEnv)
@@ -52,6 +53,7 @@ configuration = do
       "preview" -> Right Blockfrost.Preview
       _ -> Left (InvalidProviderConfiguration "COMETA_NETWORK must be mainnet, preprod or preview")
     project <- traverse (Blockfrost.mkProjectId . Text.pack) projectText
+
     let defaults = Blockfrost.defaultConfig network project
     pure (maybe defaults (\url -> defaults {Blockfrost.endpoint = Text.pack url}) endpoint)
 

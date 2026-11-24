@@ -23,12 +23,14 @@ import qualified Cometa.Crypto.Bip39 as Bip39
 import qualified Cometa.Crypto.DerivationPath as Path
 import Cometa.Error (Error (..))
 import qualified Cometa.KeyHandler.Software as Software
+-- Standard library and error handling.
 import Control.Monad (unless, when)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Trans.Except (ExceptT (..), except, runExceptT)
 import qualified Data.ByteString as Bytes
 import qualified Data.Text.Encoding as Text
 import qualified Data.Text.IO as Text
+-- Shared example setup.
 import Support.Terminal (password, secret)
 import System.Directory (doesPathExist)
 import System.Environment (getArgs)
@@ -38,10 +40,13 @@ main :: IO ()
 main = do
   arguments <- getArgs
   case arguments of
-    ["--help"] -> putStrLn "SecureKeyHandler: cabal run cometa-secure-key-handler -- WALLET_FILE; imports a recovery phrase into a new encrypted wallet."
+    ["--help"] -> do
+      putStrLn "Usage: cabal run cometa-secure-key-handler -- WALLET_FILE"
+      putStrLn "Imports a recovery phrase into a new encrypted wallet."
     [file] -> createWallet file
     _ -> die "Supply a new wallet file path; use --help for usage."
 
+-- | Encrypt a recovery phrase into a new file, then reopen it to verify the password.
 createWallet :: FilePath -> IO ()
 createWallet file = do
   exists <- doesPathExist file

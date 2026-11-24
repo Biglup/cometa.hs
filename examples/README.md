@@ -5,6 +5,11 @@ submit and confirm. Shared wallet/provider setup, compiled script programs and
 address-index polling live in `Support/`. The C++ binding has the
 same workflow set; `SignData.hs` corresponds to the Python/TypeScript CIP-8 example.
 
+Local functions separate input validation, plan construction, building, signing,
+submission and confirmation. They use standard `ExceptT` composition; the runner
+reports errors at the outer boundary. These functions are repeated in each file
+so the complete program can be read without following another example.
+
 | Source | Cabal target |
 | --- | --- |
 | [Bip39.hs](Bip39.hs) | `cometa-bip39` |

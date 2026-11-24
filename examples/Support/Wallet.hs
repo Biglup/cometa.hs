@@ -33,11 +33,11 @@ import qualified Cometa.Provider as Provider
 import qualified Cometa.Provider.Blockfrost as Blockfrost
 import qualified Cometa.Signer as Signer
 import qualified Cometa.SubTransaction as Sub
-import qualified Cometa.Transaction as Tx
 import qualified Cometa.Transaction.Input as Input
 import Cometa.Transaction.Utxo (Utxo)
 import qualified Cometa.Transaction.Utxo as Utxo
 import qualified Cometa.TransactionId as Id
+-- Standard library and error handling.
 import Control.Monad (void)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Trans.Except (ExceptT (..), except, runExceptT)
@@ -48,6 +48,7 @@ import qualified Data.Text as Text
 import qualified Data.Text.IO as Text
 import Data.Word (Word64)
 import Numeric (showHex)
+-- Shared example setup.
 import qualified Support.Configuration as Common
 import qualified Support.Terminal as Terminal
 import qualified Support.Transaction as Native
@@ -98,10 +99,15 @@ resolveReference ctx variable = runExceptT $ do
     [value] -> Right value
     _ -> Left (InvalidBuildingRequest "Configured reference output is absent or spent")
 
-entrypoint :: String -> (WalletContext -> IO (Either Error [Tx.Transaction])) -> IO ()
+-- | Open the wallet, run the example and report its error once. Results may have any shape.
+entrypoint :: String -> (WalletContext -> IO (Either Error a)) -> IO ()
 entrypoint name = entrypointWithDescription name (const (pure (Right [])))
 
-entrypointWithDescription :: String -> (WalletContext -> IO (Either Error [(Text, Text)])) -> (WalletContext -> IO (Either Error [Tx.Transaction])) -> IO ()
+entrypointWithDescription ::
+  String ->
+  (WalletContext -> IO (Either Error [(Text, Text)])) ->
+  (WalletContext -> IO (Either Error a)) ->
+  IO ()
 entrypointWithDescription name describe run = do
   arguments <- getArgs
   case arguments of
@@ -111,7 +117,10 @@ entrypointWithDescription name describe run = do
       liftIO (mapM_ (\(label, value) -> Text.putStrLn (label <> ": " <> value)) extra)
     [] -> execute $ \wallet -> fmap void (run wallet)
     ["--submit"] -> execute $ \wallet -> fmap void (run wallet)
-    ["--help"] -> putStrLn (name <> ": run without arguments to unlock the wallet, build, sign, submit and confirm; --describe prints public identifiers; see the connected examples guide.")
+    ["--help"] -> do
+      putStrLn (name <> ": unlock the wallet, build, sign, submit and confirm.")
+      putStrLn "Run without arguments for the complete flow, or --describe for public identifiers."
+      putStrLn "See the connected examples guide for configuration."
     _ -> die ("Unknown arguments; use " <> name <> " --help")
   where
     execute action = do
@@ -127,6 +136,7 @@ printWallet :: WalletContext -> IO ()
 printWallet wallet = do
   Text.putStrLn ("Wallet: " <> Address.toText (Native.wallet (context wallet)))
   Text.putStrLn ("Stake account: " <> Reward.toText (Reward.fromCredential (Native.network (context wallet)) (stakeCredential wallet)))
+
   let bytes = case drepCredential wallet of
         Credential.KeyCredential hash -> Credential.keyHashBytes hash
         Credential.ScriptCredential hash -> Credential.scriptHashBytes hash
@@ -156,45 +166,76 @@ withWalletFile file action = do
   configured <- Common.configuration
   either (pure . Left) (\config -> openWallet config file action) configured
 
-openWallet :: Blockfrost.Config -> FilePath -> (WalletContext -> IO (Either Error a)) -> IO (Either Error a)
+openWallet ::
+  Blockfrost.Config ->
+  FilePath ->
+  (WalletContext -> IO (Either Error a)) ->
+  IO (Either Error a)
 openWallet config file action = Blockfrost.withProvider config $ \backend -> withWallet config (journal backend) file action
 
-withWallet :: Blockfrost.Config -> Provider.Provider -> FilePath -> (WalletContext -> IO (Either Error a)) -> IO (Either Error a)
+withWallet ::
+  Blockfrost.Config ->
+  Provider.Provider ->
+  FilePath ->
+  (WalletContext -> IO (Either Error a)) ->
+  IO (Either Error a)
 withWallet config backend file action = do
   settings <- walletSettings
   case settings of
     Left failure -> pure (Left failure)
-    Right WalletSettings {expirySlot = expiry, reservedCollateral = reserved, protectedInputs = protected, stakeAuthority = stakeIndex, drepAuthority = drepIndex} -> do
-      stored <- Bytes.readFile file
-      let network = Common.addressNetwork (Blockfrost.network config)
-          selectionBackend = backend {Provider.utxosAt = fmap (fmap (filter ((`notElem` protected) . Utxo.input))) . Provider.utxosAt backend}
-          makeContext address signer count = Native.Context selectionBackend address signer network (Common.networkSlots (Blockfrost.network config)) expiry reserved count 300000
-          finish payment stake drep address signer count signLocal = action (WalletContext (makeContext address signer count) payment stake drep signLocal)
-      Software.withSerialized stored (Terminal.password file) $ \case
-        Software.Ed25519Handler handler -> runExceptT $ do
-          public <- ExceptT (Software.publicKey handler)
-          payment <- ExceptT (Credential.fromPublicKey public)
-          stake <- ExceptT (Credential.fromPublicKey public)
-          drep <- ExceptT (Credential.fromPublicKey public)
-          let address = Address.ShelleyAddress (Shelley.enterprise network payment)
-              signLocal sub = fmap (>>= (`Sub.addWitnesses` sub)) (Software.signSubTransaction handler sub)
-          ExceptT (finish payment stake drep address (Signer.software handler) 0 signLocal)
-        Software.Bip32Handler handler -> runExceptT $ do
-          let account = Path.standardAccountPath minBound
-              paymentPath = Path.derivationPath account Path.externalRole minBound
-              addressStakePath = Path.derivationPath account Path.stakingRole minBound
-              stakePath = Path.derivationPath account Path.stakingRole stakeIndex
-              drepPath = Path.derivationPath account Path.drepRole drepIndex
-              paths = paymentPath :| [stakePath, drepPath]
-          accountKey <- ExceptT (Software.accountPublicKey handler account)
-          let credential path = ExceptT (Public.derive accountKey (Path.relativeIndices path)) >>= ExceptT . Credential.fromPublicKey . Public.toEd25519
-          payment <- credential paymentPath
-          addressStake <- credential addressStakePath
-          stake <- credential stakePath
-          drep <- credential drepPath
-          let address = Address.ShelleyAddress (Shelley.base network payment addressStake)
-              signLocal sub = fmap (>>= (`Sub.addWitnesses` sub)) (Software.signSubTransactionAt handler paths sub)
-          ExceptT (finish payment stake drep address (Signer.bip32 handler paths) 2 signLocal)
+    Right
+      WalletSettings
+        { expirySlot = expiry,
+          reservedCollateral = reserved,
+          protectedInputs = protected,
+          stakeAuthority = stakeIndex,
+          drepAuthority = drepIndex
+        } -> do
+        stored <- Bytes.readFile file
+
+        let network = Common.addressNetwork (Blockfrost.network config)
+            selectionBackend = backend {Provider.utxosAt = fmap (fmap (filter ((`notElem` protected) . Utxo.input))) . Provider.utxosAt backend}
+            makeContext address signer count =
+              Native.Context
+                { Native.provider = selectionBackend,
+                  Native.wallet = address,
+                  Native.signer = signer,
+                  Native.network = network,
+                  Native.slots = Common.networkSlots (Blockfrost.network config),
+                  Native.invalidAfter = expiry,
+                  Native.collateral = reserved,
+                  Native.extraSigners = count,
+                  Native.confirmationTimeoutMillis = 300000
+                }
+            finish payment stake drep address signer count signLocal = action (WalletContext (makeContext address signer count) payment stake drep signLocal)
+        Software.withSerialized stored (Terminal.password file) $ \case
+          Software.Ed25519Handler handler -> runExceptT $ do
+            public <- ExceptT (Software.publicKey handler)
+            payment <- ExceptT (Credential.fromPublicKey public)
+            stake <- ExceptT (Credential.fromPublicKey public)
+            drep <- ExceptT (Credential.fromPublicKey public)
+
+            let address = Address.ShelleyAddress (Shelley.enterprise network payment)
+                signLocal sub = fmap (>>= (`Sub.addWitnesses` sub)) (Software.signSubTransaction handler sub)
+            ExceptT (finish payment stake drep address (Signer.software handler) 0 signLocal)
+          Software.Bip32Handler handler -> runExceptT $ do
+            let account = Path.standardAccountPath minBound
+                paymentPath = Path.derivationPath account Path.externalRole minBound
+                addressStakePath = Path.derivationPath account Path.stakingRole minBound
+                stakePath = Path.derivationPath account Path.stakingRole stakeIndex
+                drepPath = Path.derivationPath account Path.drepRole drepIndex
+                paths = paymentPath :| [stakePath, drepPath]
+            accountKey <- ExceptT (Software.accountPublicKey handler account)
+
+            let credential path = ExceptT (Public.derive accountKey (Path.relativeIndices path)) >>= ExceptT . Credential.fromPublicKey . Public.toEd25519
+            payment <- credential paymentPath
+            addressStake <- credential addressStakePath
+            stake <- credential stakePath
+            drep <- credential drepPath
+
+            let address = Address.ShelleyAddress (Shelley.base network payment addressStake)
+                signLocal sub = fmap (>>= (`Sub.addWitnesses` sub)) (Software.signSubTransactionAt handler paths sub)
+            ExceptT (finish payment stake drep address (Signer.bip32 handler paths) 2 signLocal)
 
 walletSettings :: IO (Either Error WalletSettings)
 walletSettings = do

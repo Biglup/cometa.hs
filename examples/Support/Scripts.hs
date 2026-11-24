@@ -23,6 +23,7 @@ module Support.Scripts (alwaysSucceedsV2, alwaysSucceedsV3, selfIndex, orderPair
 import qualified Cometa.Encoding.Cbor as Cbor
 import Cometa.Error (Error)
 import qualified Cometa.Script.Plutus as Plutus
+-- Standard library and error handling.
 import Data.Text (Text)
 
 -- DEFINITIONS ----------------------------------------------------------------

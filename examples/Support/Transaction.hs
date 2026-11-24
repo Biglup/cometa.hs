@@ -32,6 +32,7 @@ import qualified Cometa.Transaction.Input as Input
 import qualified Cometa.Transaction.Output as Output
 import Cometa.Transaction.Utxo (Utxo)
 import qualified Cometa.Transaction.Utxo as Utxo
+-- Standard library and error handling.
 import Control.Concurrent (threadDelay)
 import Control.Monad (unless)
 import Control.Monad.IO.Class (liftIO)
@@ -58,7 +59,9 @@ builderConfig context = runExceptT $ do
   params <- ExceptT (Provider.protocolParameters backend)
   funds <- ExceptT (Provider.utxosAt backend (wallet context))
   reserved <- ExceptT (Provider.resolveInputs backend (collateral context))
-  unless (sort (map Utxo.input reserved) == sort (collateral context)) (throwE (InvalidBuildingRequest "Every configured collateral input must resolve exactly once"))
+  unless (sort (map Utxo.input reserved) == sort (collateral context)) $
+    throwE (InvalidBuildingRequest "Every configured collateral input must resolve exactly once")
+
   let settings =
         (Builder.defaultConfig params (slots context) (wallet context))
           { Builder.availableUtxos = filter (\value -> Utxo.input value `notElem` collateral context) funds,
@@ -73,10 +76,16 @@ awaitWallet = awaitWalletSnapshot getMonotonicTimeNSec (threadDelay 1000000)
 awaitWalletSnapshot :: IO Word64 -> IO () -> Context -> Tx.Transaction -> IO (Either Error ())
 awaitWalletSnapshot clock pause context transaction = runExceptT $ do
   identifier <- ExceptT (Tx.transactionId transaction)
+
   let fields = Body.bodyFields (Body.toBody (Tx.body transaction))
-      expected = [Utxo.utxo (Input.input identifier index) output | (index, output) <- zip [0 ..] (Fields.fieldOutputs fields), Output.address output == wallet context]
+      expected =
+        [ Utxo.utxo (Input.input identifier index) output
+        | (index, output) <- zip [0 ..] (Fields.fieldOutputs fields),
+          Output.address output == wallet context
+        ]
       consumed = Fields.fieldInputs fields
   started <- liftIO clock
+
   let deadline = toInteger started + toInteger (confirmationTimeoutMillis context) * 1000000
       poll = runExceptT $ do
         current <- ExceptT (Provider.utxosAt (provider context) (wallet context))
@@ -92,6 +101,7 @@ awaitWalletSnapshot clock pause context transaction = runExceptT $ do
 outputAt :: Tx.Transaction -> Word64 -> IO (Either Error Utxo)
 outputAt transaction index = runExceptT $ do
   identifier <- ExceptT (Tx.transactionId transaction)
+
   let outputs = Fields.fieldOutputs (Body.bodyFields (Body.toBody (Tx.body transaction)))
   output <- except (at index outputs)
   pure (Utxo.utxo (Input.input identifier index) output)

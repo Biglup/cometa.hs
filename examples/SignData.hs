@@ -25,6 +25,7 @@ import qualified Cometa.Credential as Credential
 import qualified Cometa.Crypto.Ed25519.SigningKey as Key
 import qualified Cometa.Message.Cip8 as Cip8
 import qualified Cometa.NetworkId as Network
+-- Standard library and error handling.
 import Control.Monad.Trans.Except (ExceptT (..), runExceptT)
 import qualified Data.ByteString as ByteString
 import System.Exit (die)
@@ -36,6 +37,7 @@ main = do
   result <- Key.withNormalKey (ByteString.replicate 32 7) $ \key -> runExceptT $ do
     public <- ExceptT (Key.publicKey key)
     payment <- ExceptT (Credential.fromPublicKey public)
+
     let address = Address.ShelleyAddress (Shelley.enterprise Network.testnet payment)
     ExceptT (Cip8.sign key (Cip8.addressBinding address) "Example authorization message")
 
