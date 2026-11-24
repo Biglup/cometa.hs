@@ -34,10 +34,13 @@ import qualified Cometa.Transaction.Datum as Datum
 import qualified Cometa.Transaction.Output as Output
 import qualified Cometa.Transaction.Plan as Plan
 import qualified Cometa.Transaction.Utxo as Utxo
+import qualified Cometa.TransactionId as Id
 import qualified Cometa.Value as Value
+-- Standard library and error handling.
 import Control.Monad (unless)
 import Control.Monad.Trans.Except (ExceptT (..), except, runExceptT, throwE)
 import Data.Text (Text)
+-- Shared example setup.
 import qualified Support.Transaction as Workflow
 import Support.Wallet (WalletContext)
 import qualified Support.Wallet as Support
@@ -46,18 +49,35 @@ main :: IO ()
 main = Support.entrypoint "MintBurnNativeScript" $ \wallet ->
   mintBerries wallet nativeScript Nothing ""
 
-mintBerries :: WalletContext -> Script.Script -> Maybe Utxo.Utxo -> Text -> IO (Either Error [Tx.Transaction])
+-- | Mint both named assets with CIP-25 metadata, confirm, then burn Onyx.
+mintBerries ::
+  WalletContext ->
+  Script.Script ->
+  Maybe Utxo.Utxo ->
+  Text ->
+  IO (Either Error [Tx.Transaction])
 mintBerries wallet script reference prefix = runExceptT $ do
   digest <- ExceptT (Script.hash script)
   (mintPlan, burnPlan) <- except (berryPlans (Workflow.wallet (Support.context wallet)) script reference prefix digest)
-  minted <- ExceptT (submitPlan (Support.context wallet) mintPlan)
-  burned <- ExceptT (submitPlan (Support.context wallet) burnPlan)
+
+  minted <- submitPlan (Support.context wallet) mintPlan
+
+  burned <- submitPlan (Support.context wallet) burnPlan
+
   pure [minted, burned]
 
-berryPlans :: Address -> Script.Script -> Maybe Utxo.Utxo -> Text -> ScriptHash -> Either Error (Plan.Plan, Plan.Plan)
+-- | Construct mint and burn plans using the actual policy hash in the metadata.
+berryPlans ::
+  Address ->
+  Script.Script ->
+  Maybe Utxo.Utxo ->
+  Text ->
+  ScriptHash ->
+  Either Error (Plan.Plan, Plan.Plan)
 berryPlans recipient script reference prefix digest = do
   onyxName <- AssetName.fromText (prefix <> "BerryOnyx")
   raspberryName <- AssetName.fromText (prefix <> "BerryRaspberry")
+
   let policy = Policy.fromScriptHash digest
       onyx = Native policy onyxName
       raspberry = Native policy raspberryName
@@ -73,8 +93,10 @@ berryPlans recipient script reference prefix digest = do
   policyKey <- text (Policy.toHex policy)
   onyxKey <- text (prefix <> "BerryOnyx")
   raspberryKey <- text (prefix <> "BerryRaspberry")
+
   let value = Value.lovelace 2000000 <> Value.fromList [(onyx, 1), (raspberry, 1)]
   output <- Output.mkOutput recipient value Datum.NoDatum Nothing
+
   let metadata = Metadata.map [(policyKey, Metadata.map [(onyxKey, onyxMetadata), (raspberryKey, raspberryMetadata)])]
   pure
     ( source <> mint onyx 1 <> mint raspberry 1 <> Plan.payTo output <> Plan.metadata 721 metadata,
@@ -87,16 +109,53 @@ nativeScript = Script.Native (NativeScript.allOf [NativeScript.invalidAfter 1001
 voidArgument :: Data.EncodedPlutusData
 voidArgument = Data.fromData (Data.Constr 0 [])
 
-submitPlan :: Workflow.Context -> Plan.Plan -> IO (Either Error Tx.Transaction)
-submitPlan ctx plan = runExceptT $ do
+-- | Run one stage; dependent stages start only after confirmation and indexing.
+submitPlan :: Workflow.Context -> Plan.Plan -> ExceptT Error IO Tx.Transaction
+submitPlan ctx plan = do
+  unsignedTx <- buildTransaction ctx plan
+  signedTx <- signTransaction ctx unsignedTx
+
+  txId <- submitTransaction ctx signedTx
+  awaitConfirmation ctx signedTx txId
+
+  pure signedTx
+
+-- | Fetch current wallet inputs and parameters, then apply the configured expiry.
+buildTransaction :: Workflow.Context -> Plan.Plan -> ExceptT Error IO Tx.Transaction
+buildTransaction ctx plan = do
   settings <- ExceptT (Workflow.builderConfig ctx)
-  unsigned <- ExceptT (Builder.build settings (plan <> Plan.validUntil (Workflow.invalidAfter ctx)))
-  witnesses <- ExceptT (Signer.signTransaction (Workflow.signer ctx) unsigned)
-  signed <- except (Tx.addWitnesses witnesses unsigned)
-  expected <- ExceptT (Tx.transactionId signed)
-  accepted <- ExceptT (Provider.submitTransaction (Workflow.provider ctx) signed)
-  unless (accepted == expected) (throwE (InvalidProviderResponse "Submitted transaction ID mismatch"))
-  confirmed <- ExceptT (Provider.awaitTransaction (Workflow.provider ctx) accepted (Workflow.confirmationTimeoutMillis ctx))
-  unless confirmed (throwE (InvalidBuildingRequest "Transaction confirmation timed out"))
-  ExceptT (Workflow.awaitWallet ctx signed)
-  pure signed
+  ExceptT $
+    Builder.build settings (plan <> Plan.validUntil (Workflow.invalidAfter ctx))
+
+-- | The scoped wallet requests its password and supplies the required witnesses.
+signTransaction :: Workflow.Context -> Tx.Transaction -> ExceptT Error IO Tx.Transaction
+signTransaction ctx unsignedTx = do
+  witnesses <-
+    ExceptT (Signer.signTransaction (Workflow.signer ctx) unsignedTx)
+  except (Tx.addWitnesses witnesses unsignedTx)
+
+-- | Submit once and verify the provider accepted this exact transaction body.
+submitTransaction :: Workflow.Context -> Tx.Transaction -> ExceptT Error IO Id.TransactionId
+submitTransaction ctx signedTx = do
+  expected <- ExceptT (Tx.transactionId signedTx)
+  accepted <- ExceptT (Provider.submitTransaction (Workflow.provider ctx) signedTx)
+
+  unless (accepted == expected) $
+    throwE (InvalidProviderResponse "Submitted transaction ID mismatch")
+
+  pure accepted
+
+-- | Stop on timeout; wait for the wallet index before spending dependent outputs.
+awaitConfirmation :: Workflow.Context -> Tx.Transaction -> Id.TransactionId -> ExceptT Error IO ()
+awaitConfirmation ctx signedTx txId = do
+  confirmed <-
+    ExceptT $
+      Provider.awaitTransaction
+        (Workflow.provider ctx)
+        txId
+        (Workflow.confirmationTimeoutMillis ctx)
+
+  unless confirmed $
+    throwE (InvalidBuildingRequest "Transaction confirmation timed out")
+
+  ExceptT (Workflow.awaitWallet ctx signedTx)

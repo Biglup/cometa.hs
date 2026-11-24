@@ -29,8 +29,10 @@ import qualified Cometa.Script.Plutus as Plutus
 import qualified Cometa.Transaction.Output as Output
 import Cometa.Transaction.Utxo (Utxo)
 import qualified Cometa.Transaction.Utxo as Utxo
+-- Standard library and error handling.
 import Control.Monad.Trans.Except (ExceptT (..), except, runExceptT)
 import Data.Text (Text)
+-- Shared example setup.
 import qualified Support.Scripts as Scripts
 
 governanceScript :: Utxo -> Either Error Script
@@ -44,11 +46,16 @@ describeScripts network = runExceptT $ do
   zero <- ExceptT (fmap (fmap Script.Plutus) Scripts.withdrawZero)
   rewardHash <- ExceptT (Script.hash reward)
   zeroHash <- ExceptT (Script.hash zero)
-  pure [("reward-script", Reward.toText (Reward.fromCredential network (ScriptCredential rewardHash))), ("withdraw-zero-script", Reward.toText (Reward.fromCredential network (ScriptCredential zeroHash)))]
+
+  pure
+    [ ("reward-script", Reward.toText (Reward.fromCredential network (ScriptCredential rewardHash))),
+      ("withdraw-zero-script", Reward.toText (Reward.fromCredential network (ScriptCredential zeroHash)))
+    ]
 
 describeReference :: Utxo -> IO (Either Error [(Text, Text)])
 describeReference reference = runExceptT $ do
   script <- except (governanceScript reference)
   hash <- ExceptT (Script.hash script)
   digest <- except (Blake2b.fromBytes (Credential.scriptHashBytes hash))
+
   pure [("drep-script-hash", Blake2b.toHex digest)]

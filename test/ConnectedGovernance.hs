@@ -92,7 +92,7 @@ reference context = do
   identifier <- must (TransactionId.fromBytes (B.replicate 32 12))
   pure (Utxo.utxo (Input.input identifier 0) output)
 
-execute :: Int -> (Native.Context -> Fixture.Fixture -> IO (Either Error [Transaction.Transaction])) -> IO ()
+execute :: Int -> (Native.Context -> Fixture.Fixture -> IO (Either Error a)) -> IO ()
 execute expected operation = do
   result <- Fixture.withFixture $ \context fixture -> runExceptT $ do
     _ <- ExceptT (operation context fixture)
@@ -110,11 +110,12 @@ treasury = execute 2 $ \context fixture -> runExceptT $ do
       account = Reward.fromCredential Network.testnet (Fixture.stakeCredential fixture)
   script <- except (maybe (Left (InvalidBuildingRequest "Missing reference script")) Right (Output.referenceScript (Utxo.output actual)))
   hash <- ExceptT (Script.hash script)
-  submitted <- ExceptT (Governance.treasury context account actual hash 1000)
-  except $ case submitted of
-    [transaction] -> unless (Fields.fieldReferenceInputs (Body.bodyFields (Body.toBody (Transaction.body transaction))) == Just [Utxo.input actual]) (Left (InvalidBuildingRequest "Constitution reference input was not preserved"))
-    _ -> Left (InvalidBuildingRequest "Expected exactly one proposal")
-  pure submitted
+  transaction <- ExceptT (Governance.treasury context account actual hash 1000)
+
+  let references = Fields.fieldReferenceInputs (Body.bodyFields (Body.toBody (Transaction.body transaction)))
+  except $
+    unless (references == Just [Utxo.input actual]) $
+      Left (InvalidBuildingRequest "Constitution reference input was not preserved")
 
 wrongHash :: IO ()
 wrongHash = do

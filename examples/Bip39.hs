@@ -24,6 +24,7 @@ import qualified Cometa.Crypto.Bip39 as Bip39
 import qualified Cometa.Crypto.DerivationPath as Path
 import qualified Cometa.KeyHandler.Software as Software
 import qualified Cometa.NetworkId as Network
+-- Standard library and error handling.
 import Control.Monad.Trans.Except (ExceptT (..), runExceptT)
 import qualified Data.Text.IO as Text
 import System.Exit (die)

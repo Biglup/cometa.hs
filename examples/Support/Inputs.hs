@@ -22,10 +22,12 @@ import qualified Cometa.Crypto.Blake2b as Blake2b
 import Cometa.Error (Error (..))
 import qualified Cometa.Governance.ActionId as ActionId
 import qualified Cometa.TransactionId as TransactionId
+-- Standard library and error handling.
 import Control.Monad.Trans.Except (ExceptT (..), runExceptT)
 import Data.Text (Text)
 import qualified Data.Text as Text
 import Data.Word (Word64)
+-- Shared example setup.
 import qualified Support.Governance as Governance
 import qualified Support.Transaction as Native
 import qualified Support.Wallet as Support

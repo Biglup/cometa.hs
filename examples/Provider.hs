@@ -29,8 +29,10 @@ import qualified Cometa.Provider.Blockfrost as Blockfrost
 import qualified Cometa.Transaction.Output as Output
 import qualified Cometa.Transaction.Utxo as Utxo
 import qualified Cometa.Value as Value
+-- Standard library and error handling.
 import Control.Monad.Trans.Except (ExceptT (..), runExceptT)
 import qualified Data.Text as Text
+-- Shared example setup.
 import qualified Support.Configuration as Common
 import System.Environment (getArgs, lookupEnv)
 import System.Exit (die)
@@ -54,7 +56,10 @@ query = do
       params <- ExceptT (Provider.protocolParameters provider)
       outputs <- ExceptT (Provider.utxosAt provider address)
       rewards <- traverse (ExceptT . Provider.rewardBalance provider) reward
-      pure (Parameters.parameterProtocolVersion params, length outputs, sum [Value.quantity Asset.Ada (Output.value (Utxo.output output)) | output <- outputs], rewards)
+      let totalLovelace =
+            sum [Value.quantity Asset.Ada (Output.value (Utxo.output output)) | output <- outputs]
+
+      pure (Parameters.parameterProtocolVersion params, length outputs, totalLovelace, rewards)
   case result of
     Left failure -> die (show failure)
     Right (version, count, lovelace, rewards) -> do
