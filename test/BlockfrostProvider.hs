@@ -86,7 +86,7 @@ tests =
       testCase "datum lookup verifies exact CBOR against its hash" datums,
       testCase "reference scripts are cached per query and their hashes verified" scripts,
       testCase "submission sends exact CBOR once and validates the accepted hash" submission,
-      testCase "remote evaluation sends v5 additional inputs and exact budgets" evaluation,
+      testCase "remote evaluation sends v6 additional inputs and exact budgets" evaluation,
       testCase "confirmation uses identities, monotonic deadlines and cancellation" confirmation,
       testCase "escaped providers reject even empty operations" closed
     ]
@@ -303,7 +303,7 @@ evaluation = do
       response = object ["result" .= object ["EvaluationResult" .= object ["mint:0" .= object ["memory" .= (10 :: Int), "steps" .= (20 :: Int)]]]]
       check request = do
         Http.method request @?= Http.Post
-        Http.query request @?= [("version", Just "5")]
+        Http.query request @?= [("version", Just "6")]
         Http.contentType request @?= "application/json"
   expected <- must (Evaluation.mkBudgets [(Evaluation.RedeemerId Redeemer.Minting 0, ExUnits 10 20)])
   scripted [Step check (reply 200 response)] $ \provider -> Provider.evaluateTransaction provider tx [] >>= (@?= Right expected)

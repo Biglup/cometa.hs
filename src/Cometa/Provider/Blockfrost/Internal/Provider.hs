@@ -270,7 +270,7 @@ submit transport transaction = runExceptT $ do
 evaluate :: Http.Transport -> Tx.Transaction -> [Utxo.Utxo] -> IO (Either Error Evaluation.Budgets)
 evaluate transport transaction inputs = runExceptT $ do
   payload <- except (Json.evaluationPayload transaction inputs)
-  response <- ExceptT (send transport operation (Http.Request Http.Post ["utils", "txs", "evaluate", "utxos"] [("version", Just "5")] (Lazy.toStrict (encode payload)) "application/json" Nothing))
+  response <- ExceptT (send transport operation (Http.Request Http.Post ["utils", "txs", "evaluate", "utxos"] [("version", Just "6")] (Lazy.toStrict (encode payload)) "application/json" Nothing))
   unless (Http.status response == 200) (throwE (ProviderHttpError operation (Http.status response)))
   value <- except (Json.decodeValue operation (Http.bodyBytes response))
   except (Json.decodeBudgets transaction value)

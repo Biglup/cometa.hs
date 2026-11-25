@@ -67,14 +67,14 @@ Confirmation polls the on-chain transaction endpoint until its identifier matche
 or the supplied millisecond timeout expires. Zero timeout returns `False` without
 an HTTP request. Confirmation establishes block inclusion, not finality.
 
-Remote evaluation uses the documented Blockfrost Ogmios v5 request dialect,
-including all supplied additional UTxOs. It supports Plutus V1/V2 and spending,
-minting, certificate and withdrawal redeemer purposes. Unsupported scripts,
-governance or Dijkstra body features, subtransactions, and unrepresentable
-additional inputs return `UnsupportedOperation` before the request. Evaluation
-budgets must cover exactly the existing redeemer identities; partial successes
-are rejected. `Cometa.Evaluation.Native` remains available for the newer features
-supported by the pinned local native VM.
+Remote evaluation uses the Blockfrost Ogmios v6 request dialect, including
+inline datums and reference scripts in all supplied additional UTxOs. It encodes
+Plutus V1–V4 scripts and all six redeemer purposes; execution support depends on
+the hosted evaluator's active ledger era. Nested transactions and guarded account
+features return `UnsupportedOperation` before the request. Evaluation budgets
+must cover exactly the existing redeemer identities; partial successes are
+rejected. `Cometa.Evaluation.Native` remains available for features supported by
+the pinned local native VM.
 
 Protocol snapshots decode the documented fields exactly, including decimal
 execution prices without floating-point rounding. Optional fields that Blockfrost
