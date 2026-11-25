@@ -56,7 +56,7 @@ data Method = Get | Post deriving (Eq, Show)
 data Request = Request
   { method :: !Method,
     path :: ![Text],
-    query :: ![(Text, Text)],
+    query :: ![(Text, Maybe Text)],
     body :: !ByteString,
     contentType :: !ByteString,
     requestTimeoutMillis :: !(Maybe Int)
@@ -155,7 +155,7 @@ sendOnce config authentication template manager request = do
     requestPath = case path request of
       [] -> prefix
       segments -> prefix <> separator <> B.intercalate "/" (map (URI.urlEncode False . Text.encodeUtf8) segments)
-    operationQuery = [(Text.encodeUtf8 key, Just (Text.encodeUtf8 value)) | (key, value) <- query request]
+    operationQuery = [(Text.encodeUtf8 key, Text.encodeUtf8 <$> value) | (key, value) <- query request]
     baseQuery = filter (\(key, _) -> key `notElem` map fst operationQuery) (HTTP.parseQuery (Http.queryString template))
     headers =
       [("Accept", "application/json")]

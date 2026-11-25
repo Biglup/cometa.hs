@@ -95,7 +95,7 @@ transportError operation failure = case failure of
   Http.ResponseTooLarge -> ProviderTransportError operation "response too large"
 
 getRequest :: [Text] -> [(Text, Text)] -> Http.Request
-getRequest path query = Http.Request Http.Get path query "" "" Nothing
+getRequest path query = Http.Request Http.Get path [(key, Just value) | (key, value) <- query] "" "" Nothing
 
 send :: Http.Transport -> Text -> Http.Request -> IO (Either Error Http.Response)
 send transport operation request = either (Left . transportError operation) Right <$> Http.send transport request
@@ -270,7 +270,7 @@ submit transport transaction = runExceptT $ do
 evaluate :: Http.Transport -> Tx.Transaction -> [Utxo.Utxo] -> IO (Either Error Evaluation.Budgets)
 evaluate transport transaction inputs = runExceptT $ do
   payload <- except (Json.evaluationPayload transaction inputs)
-  response <- ExceptT (send transport operation (Http.Request Http.Post ["utils", "txs", "evaluate", "utxos"] [("version", "5")] (Lazy.toStrict (encode payload)) "application/json" Nothing))
+  response <- ExceptT (send transport operation (Http.Request Http.Post ["utils", "txs", "evaluate", "utxos"] [("version", Just "5")] (Lazy.toStrict (encode payload)) "application/json" Nothing))
   unless (Http.status response == 200) (throwE (ProviderHttpError operation (Http.status response)))
   value <- except (Json.decodeValue operation (Http.bodyBytes response))
   except (Json.decodeBudgets transaction value)

@@ -107,7 +107,7 @@ transportError failure = case failure of
 request :: Http.Transport -> Http.Request -> ExceptT Error IO Http.Response
 request transport value = ExceptT (fmap (either (Left . transportError) Right) (Http.send transport value))
 
-jsonRequest :: Http.Method -> [Text] -> [(Text, Text)] -> Maybe Value -> Http.Request
+jsonRequest :: Http.Method -> [Text] -> [(Text, Maybe Text)] -> Maybe Value -> Http.Request
 jsonRequest method path query payload = Http.Request method path query (maybe B.empty (Lazy.toStrict . encode) payload) (maybe B.empty (const "application/json") payload) Nothing
 
 json :: Http.Transport -> Http.Request -> Bool -> ExceptT Error IO (Maybe Value)
@@ -118,10 +118,10 @@ json transport req missing = do
     404 | missing -> pure Nothing
     code -> throwE (ProviderHttpError "provider.request" code)
 
-get :: Service -> [Text] -> [(Text, Text)] -> ExceptT Error IO Value
+get :: Service -> [Text] -> [(Text, Maybe Text)] -> ExceptT Error IO Value
 get (Service _ _ transport _) path query = json transport (jsonRequest Http.Get path query Nothing) False >>= maybe invalid pure
 
-post :: Service -> [Text] -> [(Text, Text)] -> Value -> ExceptT Error IO Value
+post :: Service -> [Text] -> [(Text, Maybe Text)] -> Value -> ExceptT Error IO Value
 post (Service _ _ transport _) path query payload = json transport (jsonRequest Http.Post path query (Just payload)) False >>= maybe invalid pure
 
 rpc :: Service -> Text -> Value -> ExceptT Error IO Value
@@ -140,19 +140,19 @@ rpc (Service backend _ _ node) method params = do
     response
 
 -- Offset iteration has a finite page bound; output identities are checked below.
-pages :: Service -> [Text] -> [(Text, Text)] -> Maybe Value -> ExceptT Error IO [Value]
+pages :: Service -> [Text] -> [(Text, Maybe Text)] -> Maybe Value -> ExceptT Error IO [Value]
 pages service path query payload = go 0 []
   where
     go count chunks = do
       when (count >= (10000 :: Int)) invalid
-      let pagination = [("limit", "100"), ("offset", Text.pack (show (count * 100))), ("order", "tx_hash.asc,tx_index.asc")]
+      let pagination = [("limit", Just "100"), ("offset", Just (Text.pack (show (count * 100)))), ("order", Just "tx_hash.asc,tx_index.asc")]
       response <- maybe (get service path (query <> pagination)) (post service path (query <> pagination)) payload
       rows <- parse C.list response
       when (length rows > 100) invalid
       let completed = rows : chunks
       if length rows < 100 then pure (concat (reverse completed)) else go (count + 1) completed
 
-outputs :: Service -> [Text] -> [(Text, Text)] -> Maybe Value -> ExceptT Error IO [Utxo.Utxo]
+outputs :: Service -> [Text] -> [(Text, Maybe Text)] -> Maybe Value -> ExceptT Error IO [Utxo.Utxo]
 outputs service@(Service backend _ _ _) path query payload = do
   rows <- if backend == Kupmios then get service path query >>= parse C.list else pages service path query payload
   live <- if backend == Koios then filterMUnspent rows else pure rows
@@ -171,7 +171,7 @@ atAddress :: Service -> Address.Address -> ExceptT Error IO [Utxo.Utxo]
 atAddress service@(Service backend _ _ _) address = do
   values <- case backend of
     Koios -> outputs service ["address_utxos"] [] (Just (object ["_addresses" .= [text], "_extended" .= True]))
-    Kupmios -> outputs service ["matches", text] [("unspent", "")] Nothing
+    Kupmios -> outputs service ["matches", text] [("unspent", Nothing)] Nothing
   unless (all ((== address) . Output.address . Utxo.output) values) invalid
   pure values
   where
@@ -182,7 +182,7 @@ nft _ Ada = throwE (UnsupportedOperation "NFT lookup requires a native asset")
 nft service@(Service backend _ _ _) asset = do
   values <- case backend of
     Koios -> outputs service ["asset_utxos"] [] (Just (object ["_asset_list" .= [[policy, name]], "_extended" .= True]))
-    Kupmios -> outputs service ["matches", "*"] [("unspent", ""), ("policy_id", policy), ("asset_name", name)] Nothing
+    Kupmios -> outputs service ["matches", "*"] [("unspent", Nothing), ("policy_id", Just policy), ("asset_name", Just name)] Nothing
   case values of
     [] -> pure Nothing
     [value] | Amount.quantity asset (Output.value (Utxo.output value)) == 1 -> pure (Just value)
@@ -201,7 +201,7 @@ resolve service@(Service backend _ _ _) requested = do
   where
     batch references = case backend of
       Koios -> outputs service ["utxo_info"] [] (Just (object ["_utxo_refs" .= map C.inputText references, "_extended" .= True]))
-      Kupmios -> concat <$> traverse (\ref -> outputs service ["matches", Text.pack (show (Input.index ref)) <> "@" <> TxId.toHex (Input.transactionId ref)] [("unspent", "")] Nothing) references
+      Kupmios -> concat <$> traverse (\ref -> outputs service ["matches", Text.pack (show (Input.index ref)) <> "@" <> TxId.toHex (Input.transactionId ref)] [("unspent", Nothing)] Nothing) references
     chunks [] = []
     chunks values = take 100 values : chunks (drop 100 values)
 
