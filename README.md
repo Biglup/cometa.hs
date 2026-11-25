@@ -16,6 +16,9 @@ provider or supply your own backend.
 Pure validation returns `Either Error`; native operations and network requests
 return `IO (Either Error a)`. Private keys stay inside explicit resource scopes.
 
+[Build](#build) · [Send a payment](#build-sign-and-submit-a-payment) ·
+[Explore the API](#explore-the-api) · [Run the examples](#run-the-examples)
+
 ## Build
 
 Version 0.1.0.0 is available as a [Hackage candidate](https://hackage.haskell.org/package/cometa-0.1.0.0/candidate).
@@ -35,36 +38,333 @@ is part of the same library.
 
 ## Build, sign and submit a payment
 
-Validate an output, build a transaction, sign it with the wallet and submit it:
+The [payment example](examples/SendLovelace.hs) reads a recipient and amount,
+unlocks the encrypted wallet, and runs the complete transaction lifecycle.
+Its local functions keep validation and wallet plumbing out of the main flow:
 
 ```haskell
-import Cometa.Address (Address)
-import Cometa.Error (Error)
-import qualified Cometa.Provider as Provider
-import qualified Cometa.Signer as Signer
-import qualified Cometa.Transaction as Tx
-import qualified Cometa.Transaction.Builder as Builder
-import qualified Cometa.Transaction.Datum as Datum
-import qualified Cometa.Transaction.Output as Output
-import qualified Cometa.Transaction.Plan as Plan
-import qualified Cometa.Value as Value
-import Control.Monad.Trans.Except (ExceptT (..), except, runExceptT)
+main :: IO ()
+main = Support.entrypoint "SendLovelace" (runExceptT . payment)
 
-sendPayment :: Builder.Config -> Signer.Signer -> Provider.Provider -> Address -> IO (Either Error Bool)
-sendPayment config signer provider recipient = runExceptT $ do
-  output <- except (Output.mkOutput recipient (Value.lovelace 2000000) Datum.NoDatum Nothing)
-  unsigned <- ExceptT (Builder.build config (Plan.payTo output))
-  witnesses <- ExceptT (Signer.signTransaction signer unsigned)
-  signed <- except (Tx.addWitnesses witnesses unsigned)
-  txId <- ExceptT (Provider.submitTransaction provider signed)
-  ExceptT (Provider.awaitTransaction provider txId 300000)
+payment :: WalletContext -> ExceptT Error IO Tx.Transaction
+payment wallet = do
+  output <- readPaymentOutput
+
+  submitPlan (Support.context wallet) (Plan.payTo output)
+
+submitPlan :: Workflow.Context -> Plan.Plan -> ExceptT Error IO Tx.Transaction
+submitPlan ctx plan = do
+  unsignedTx <- buildTransaction ctx plan
+  signedTx <- signTransaction ctx unsignedTx
+
+  txId <- submitTransaction ctx signedTx
+  awaitConfirmation ctx signedTx txId
+
+  pure signedTx
 ```
 
-Configure the builder with current protocol parameters, matching network slots,
-wallet UTxOs and a change address. Amounts use integer lovelace: one ADA is
-1,000,000 lovelace. Plans compose with `(<>)` for multiple outputs, minting,
-certificates, withdrawals and governance actions. The signer comes from the scoped encrypted wallet; the full
-[payment example](examples/SendLovelace.hs) loads it and prompts for its password.
+These are local example functions, not an additional library API. Their
+[implementations are in the same file](examples/SendLovelace.hs): fetch current
+parameters and wallet inputs, build with `Builder.build`, sign with the scoped
+wallet, submit once, and wait for confirmation and wallet indexing. The wallet
+prompts for its password; `runExceptT` hands any failure to the runner once.
+
+## Explore the API
+
+A `Plan` describes what a transaction should do. Compose requirements with
+`(<>)`, then pass the whole plan to `Builder.build`. Output order is preserved;
+conflicting requirements and protocol constraints are checked when building.
+
+The functions below use typed inputs: addresses parsed with `Address.fromText`,
+credentials derived from the wallet, and UTxOs resolved through a provider. The
+transaction recipes return plans; the payment workflow above shows how to build,
+sign and submit them. The final example inspects an existing transaction.
+Amounts are integer lovelace: **1 ADA = 1,000,000 lovelace**.
+
+<details>
+<summary>Imports for the API examples</summary>
+
+```haskell
+{-# LANGUAGE OverloadedStrings #-}
+
+import qualified Cometa.Address as Address
+import qualified Cometa.Address.Reward as Reward
+import qualified Cometa.AssetId as Asset
+import qualified Cometa.AssetName as AssetName
+import qualified Cometa.Certificate as Certificate
+import qualified Cometa.Credential as Credential
+import Cometa.Error (Error (..))
+import qualified Cometa.Governance.Action as Action
+import qualified Cometa.Governance.ActionId as ActionId
+import qualified Cometa.Governance.Anchor as Anchor
+import qualified Cometa.Governance.DRep as DRep
+import qualified Cometa.Governance.Voting as Voting
+import qualified Cometa.Inspection as Inspection
+import qualified Cometa.Metadata as Metadata
+import qualified Cometa.PlutusData as Data
+import qualified Cometa.PolicyId as Policy
+import qualified Cometa.Script as Script
+import qualified Cometa.Script.Native as Native
+import qualified Cometa.SubTransaction as Sub
+import qualified Cometa.Transaction as Tx
+import qualified Cometa.Transaction.Datum as Datum
+import qualified Cometa.Transaction.Indices as Indices
+import qualified Cometa.Transaction.Output as Output
+import qualified Cometa.Transaction.Plan as Plan
+import qualified Cometa.Transaction.Utxo as Utxo
+import qualified Cometa.Value as Value
+import Control.Monad.Trans.Except (ExceptT (..), except, runExceptT)
+import qualified Data.Aeson as Aeson
+import Data.ByteString (ByteString)
+import Data.Word (Word64)
+```
+
+</details>
+
+### Send ADA and native assets together
+
+Pay two recipients, send tokens alongside ADA, and set an expiry slot. Output
+construction is pure; the builder checks minimum ADA and selects wallet inputs.
+
+```haskell
+payments ::
+  Address.Address ->
+  Address.Address ->
+  Asset.AssetId ->
+  Word64 ->
+  Either Error Plan.Plan
+payments alice bob token expiry = do
+  adaOutput <- Output.mkOutput alice (Value.lovelace 5000000) Datum.NoDatum Nothing
+
+  let tokenValue = Value.lovelace 2000000 <> Value.singleton token 25
+  tokenOutput <- Output.mkOutput bob tokenValue Datum.NoDatum Nothing
+
+  pure $
+    Plan.payTo adaOutput
+      <> Plan.payTo tokenOutput
+      <> Plan.validUntil expiry
+```
+
+### Mint tokens and attach metadata
+
+Build a native policy requiring the wallet's signature, derive its policy ID,
+mint 100 tokens and attach a text message under metadata label 674. Minted tokens
+can go to the builder's change output or an explicit `Plan.payTo` output.
+
+```haskell
+mintTokens :: Credential.KeyHash Credential.Payment -> IO (Either Error Plan.Plan)
+mintTokens paymentKey = runExceptT $ do
+  let script = Script.Native (Native.signature paymentKey)
+  scriptHash <- ExceptT (Script.hash script)
+
+  name <- except (AssetName.fromText "CometaToken")
+  message <- except (Metadata.mkText "Minted with Cometa.hs")
+  messageKey <- except (Metadata.mkText "msg")
+
+  let token = Asset.Native (Policy.fromScriptHash scriptHash) name
+      metadata = Metadata.map [(messageKey, Metadata.list [message])]
+
+  pure $
+    Plan.attachScript script
+      <> Plan.mint token 100
+      <> Plan.metadata 674 metadata
+```
+
+A negative mint quantity burns tokens: `Plan.mint token (-50)`. Plutus policies
+use `Plan.mintWithRedeemer token quantity redeemer`, together with an attached
+script or a reference input. See the complete
+[native mint/burn](examples/MintBurnNativeScript.hs) and
+[Plutus mint/burn](examples/MintBurnPlutusScript.hs) examples for CIP-25 metadata
+and the confirmed mint → burn sequence.
+
+### Lock funds with an inline datum
+
+Construct Plutus data in Haskell and attach it directly to a script output. Here,
+the datum is a constructor containing an order number and an amount; its shape
+must match the validator's schema.
+
+```haskell
+lockFunds :: Address.Address -> Either Error Plan.Plan
+lockFunds scriptAddress = do
+  let order = Data.fromData (Data.Constr 0 [Data.Integer 42, Data.Integer 100])
+
+  output <-
+    Output.mkOutput
+      scriptAddress
+      (Value.lovelace 10000000)
+      (Datum.InlineDatum order)
+      Nothing
+
+  pure (Plan.payTo output)
+```
+
+### Spend through a reference script
+
+Supply the resolved locked output, a UTxO carrying its validator, and the
+validator's expected redeemer. The plan references the deployed script instead
+of including another copy in its witnesses.
+
+```haskell
+spendLocked ::
+  Utxo.Utxo ->
+  Utxo.Utxo ->
+  Data.EncodedPlutusData ->
+  Output.Output ->
+  Plan.Plan
+spendLocked locked validatorReference redeemer payout =
+  Plan.referenceInput validatorReference
+    <> Plan.spendWith locked (Just redeemer) Nothing
+    <> Plan.payTo payout
+```
+
+Plutus builds need compatible protocol parameters, an evaluator and collateral
+in `Builder.Config`. The [validator example](examples/SpendFromValidator.hs)
+shows the complete lock, confirm and spend workflow.
+
+### Compute a redeemer after balancing
+
+Input ordering can change while the builder balances a transaction. A deferred
+redeemer receives the current draft and computes its argument from the final
+input position rather than guessing an index in advance.
+
+```haskell
+spendWithOwnIndex :: Utxo.Utxo -> Script.Script -> Plan.Plan
+spendWithOwnIndex locked validator =
+  Plan.attachScript validator
+    <> Plan.spendWithDeferredRedeemer locked ownIndex Nothing
+  where
+    ownIndex draft _ = do
+      index <- case Indices.findInput (Utxo.input locked) draft of
+        Nothing -> Left (InvalidBuildingRequest "Locked input is missing")
+        Just position -> Right position
+
+      pure (Data.fromData (Data.Constr 0 [Data.Integer (toInteger index)]))
+```
+
+Callbacks may run repeatedly during balancing and should remain pure. The
+[self-index](examples/DeferredRedeemerSelfIndex.hs) and
+[order settlement](examples/DeferredRedeemerBatch.hs) examples provide matching
+validators and complete transactions. Deferred arguments also support minting,
+certificates, withdrawals, votes and proposals.
+
+### Register and delegate a stake credential
+
+Combine registration, pool delegation and voting-power delegation in one plan.
+Supply the current key deposit from protocol parameters and a fresh,
+key-controlled stake credential.
+
+```haskell
+registerStake ::
+  Credential.Credential Credential.Stake ->
+  Credential.KeyHash Credential.StakePool ->
+  Word64 ->
+  Plan.Plan
+registerStake stake pool deposit =
+  Plan.certificate (Certificate.Registration stake deposit)
+    <> Plan.certificate (Certificate.StakeDelegation stake pool)
+    <> Plan.certificate (Certificate.VoteDelegation stake DRep.AlwaysAbstain)
+```
+
+Later, withdraw the available rewards and reclaim the registration deposit. Use
+the reward account derived from the same stake credential, and supply the deposit
+recorded for its registration.
+
+```haskell
+closeStake ::
+  Reward.RewardAddress ->
+  Credential.Credential Credential.Stake ->
+  Word64 ->
+  Word64 ->
+  Plan.Plan
+closeStake account stake rewards refund =
+  Plan.withdraw account rewards
+    <> Plan.certificate (Certificate.Unregistration stake refund)
+```
+
+See the [key](examples/RewardAccountPubkey.hs) and
+[script](examples/RewardAccountScript.hs) versions for querying rewards,
+supplying witnesses and confirming each stage.
+
+### Vote, donate and propose treasury withdrawals
+
+A registered, key-controlled DRep can vote on an existing governance action and
+include a treasury donation in the same transaction.
+
+```haskell
+voteAndDonate ::
+  Credential.Credential Credential.DRep ->
+  ActionId.ActionId ->
+  Plan.Plan
+voteAndDonate representative action =
+  Plan.vote
+    (Voting.DRepVoter representative)
+    action
+    (Voting.VotingProcedure Voting.Yes Nothing)
+    <> Plan.donate 2000000
+```
+
+A treasury withdrawal is a **proposal**, not an immediate transfer. Its deposit
+comes from protocol parameters; the supplied anchor identifies the proposal's
+metadata. This version targets a constitution without a guardrails policy.
+
+```haskell
+proposeWithdrawal ::
+  Reward.RewardAddress ->
+  Word64 ->
+  Anchor.Anchor ->
+  Either Error Plan.Plan
+proposeWithdrawal returnAccount amount anchor = do
+  withdrawals <- Action.withdrawalsFromList [(returnAccount, amount)]
+
+  pure $
+    Plan.propose
+      returnAccount
+      (Action.TreasuryWithdrawals withdrawals Nothing)
+      anchor
+```
+
+The executable [proposal example](examples/ProposeTreasuryWithdrawal.hs) covers
+a constitution guardrails policy using a reference script. There are also
+complete [DRep registration](examples/DRepPubkey.hs) and
+[script-authorized voting](examples/VoteForProposalScript.hs) flows.
+
+### Batch independently signed subtransactions
+
+Attach signed intents without changing their bytes or signatures. Each intent
+comes with its resolved spending and reference inputs; the outer transaction
+supplies the fee and any net funding deficit.
+
+```haskell
+batchIntents ::
+  Credential.Credential Credential.Guard ->
+  [(Sub.SubTransaction, [Utxo.Utxo])] ->
+  Plan.Plan
+batchIntents batcher intents =
+  foldMap (uncurry Plan.attachSubTransaction) intents
+    <> Plan.requireGuard batcher
+```
+
+This requires a protocol-12+ network. The
+[three-wallet exchange](examples/SubTransactionBatch.hs) builds and signs the
+buyer and seller intents before the batcher submits them; the
+[V4 example](examples/PlutusV4GuardedSubTransaction.hs) adds a script guard.
+
+### Decode and inspect transaction CBOR
+
+Read an existing transaction and inspect its body, witnesses and other fields as
+JSON. Inspection does not sign, submit or establish ledger validity.
+
+```haskell
+inspectTransaction :: ByteString -> IO (Either Error Aeson.Value)
+inspectTransaction cbor = runExceptT $ do
+  transaction <- except (Tx.decodeCbor cbor)
+  ExceptT (Inspection.transaction transaction)
+```
+
+The API also exposes typed addresses, BIP39/BIP32 derivation, encrypted software
+key handlers, CIP-8 message signatures, CBOR codecs, transaction balancing and
+provider callbacks. Browse the [API reference](https://hackage.haskell.org/package/cometa-0.1.0.0/candidate/docs/index.html)
+for their contracts and the runnable examples below for complete applications.
 
 ## Run the examples
 
@@ -89,8 +389,8 @@ cabal run cometa-send-lovelace
 
 Each transaction example shows its plan, build, sign, submit and confirmation
 steps in one file. Shared helpers handle wallet/provider setup. The examples
-prompt for the encrypted wallet password and submit on chain. Multi-stage examples confirm each
-transaction before continuing. `--help` prints usage without network requests.
+prompt for the encrypted wallet password and submit on chain. Multi-stage
+examples confirm each transaction before continuing. `--help` prints usage without network requests.
 
 | Example | What it demonstrates |
 | --- | --- |
@@ -118,55 +418,6 @@ See the [example index](examples/README.md) for Cabal commands and
 [governance setup](docs/userguide/connected-governance.md) for required chain state.
 The batch and V4 examples require a network supporting protocol 12 or later.
 BIP39 and data-signing demos use public demonstration keys; never fund them.
-
-## Transaction plan examples
-
-Plans compose with `(<>)`. These fragments use validated addresses, outputs,
-assets, scripts and credentials; the linked executable examples include their
-construction and the complete wallet/provider flow. Pass the resulting plan to
-`Builder.build`, sign with `Signer.signTransaction`, attach the witnesses with
-`Tx.addWitnesses`, then call `Provider.submitTransaction` and
-`Provider.awaitTransaction`.
-
-### Multiple outputs
-
-```haskell
-Plan.payTo firstOutput <> Plan.payTo secondOutput
-```
-
-### Mint and burn tokens
-
-```haskell
-Plan.attachScript nativePolicy <> Plan.mint asset 100
-Plan.attachScript nativePolicy <> Plan.mint asset (-50)
-```
-
-Use a Plutus redeemer when the policy requires one:
-
-```haskell
-Plan.attachScript plutusPolicy <> Plan.mintWithRedeemer asset 100 redeemer
-```
-
-### Spend a script output
-
-```haskell
-Plan.attachScript validator
-  <> Plan.spendWith lockedOutput (Just redeemer) Nothing
-  <> Plan.payTo payout
-```
-
-### Withdraw rewards and vote
-
-```haskell
-Plan.withdraw rewardAccount rewardLovelace
-Plan.vote voter actionId votingProcedure
-```
-
-### Donate to the treasury
-
-```haskell
-Plan.donate 2000000
-```
 
 ## Contributing
 
