@@ -10,8 +10,7 @@
 
 Haskell bindings to [cardano-c](https://github.com/Biglup/cardano-c) for building,
 signing and inspecting Cardano transactions. Compose immutable transaction plans,
-work with typed addresses, assets and credentials, and use the included Blockfrost
-provider or supply your own backend.
+work with typed addresses, assets and credentials, and use Blockfrost, Koios, Kupmios or Hydra, or supply your own backend.
 
 Pure validation returns `Either Error`; native operations and network requests
 return `IO (Either Error a)`. Private keys stay inside explicit resource scopes.
@@ -365,6 +364,24 @@ The API also exposes typed addresses, BIP39/BIP32 derivation, encrypted software
 key handlers, CIP-8 message signatures, CBOR codecs, transaction balancing and
 provider callbacks. Browse the [API reference](https://hackage.haskell.org/package/cometa-0.1.0.0/candidate/docs/index.html)
 for their contracts and the runnable examples below for complete applications.
+
+## Providers
+
+Use the same `Cometa.Provider` workflow with Blockfrost, Koios, Kupmios (Kupo +
+Ogmios), or an existing Hydra Head:
+
+```haskell
+import qualified Cometa.Provider as Provider
+import qualified Cometa.Provider.Koios as Koios
+
+parameters <- Koios.withProvider (Koios.defaultConfig Koios.Preprod Nothing) $
+  Provider.protocolParameters
+```
+
+[Provider configuration and contracts](docs/userguide/providers.md) cover
+credentials, explicit networks, bounded HTTP requests, and Hydra's L2 snapshot
+confirmation. Hydra has no remote evaluator or staking rewards; use a local
+evaluator for script transactions inside a Head.
 
 ## Run the examples
 

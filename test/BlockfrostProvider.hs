@@ -86,7 +86,7 @@ tests =
       testCase "datum lookup verifies exact CBOR against its hash" datums,
       testCase "reference scripts are cached per query and their hashes verified" scripts,
       testCase "submission sends exact CBOR once and validates the accepted hash" submission,
-      testCase "remote evaluation sends v5 additional inputs and exact budgets" evaluation,
+      testCase "remote evaluation sends v6 additional inputs and exact budgets" evaluation,
       testCase "confirmation uses identities, monotonic deadlines and cancellation" confirmation,
       testCase "escaped providers reject even empty operations" closed
     ]
@@ -152,7 +152,7 @@ pagination = do
   let path = ["addresses", Address.toText destination, "utxos"]
       check page request = do
         get path request
-        Http.query request @?= [("count", "100"), ("page", page), ("order", "asc")]
+        Http.query request @?= [("count", Just "100"), ("page", Just page), ("order", Just "asc")]
   scripted [Step (check "1") (reply 200 (toJSONRows [row destination tx index | index <- [0 .. 99]])), Step (check "2") (reply 200 (toJSONRows [row destination tx 100]))] $ \provider -> do
     found <- Provider.utxosAt provider destination >>= must
     map (Input.index . Utxo.input) found @?= [0 .. 100]
@@ -303,7 +303,7 @@ evaluation = do
       response = object ["result" .= object ["EvaluationResult" .= object ["mint:0" .= object ["memory" .= (10 :: Int), "steps" .= (20 :: Int)]]]]
       check request = do
         Http.method request @?= Http.Post
-        Http.query request @?= [("version", "5")]
+        Http.query request @?= [("version", Just "6")]
         Http.contentType request @?= "application/json"
   expected <- must (Evaluation.mkBudgets [(Evaluation.RedeemerId Redeemer.Minting 0, ExUnits 10 20)])
   scripted [Step check (reply 200 response)] $ \provider -> Provider.evaluateTransaction provider tx [] >>= (@?= Right expected)

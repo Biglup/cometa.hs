@@ -23,6 +23,7 @@ module Cometa.Provider.Blockfrost.Internal.Http
     HttpFailure (..),
     Transport (..),
     withTransport,
+    withHeaders,
     withEndpoint,
     withEndpointSettings,
     maximumResponseBytes,
@@ -55,7 +56,7 @@ data Method = Get | Post deriving (Eq, Show)
 data Request = Request
   { method :: !Method,
     path :: ![Text],
-    query :: ![(Text, Text)],
+    query :: ![(Text, Maybe Text)],
     body :: !ByteString,
     contentType :: !ByteString,
     requestTimeoutMillis :: !(Maybe Int)
@@ -95,7 +96,15 @@ withEndpoint = withEndpointSettings Connection.managerSettings
 
 -- Private settings injection keeps fixture trust roots separate from system roots.
 withEndpointSettings :: IO Http.ManagerSettings -> Config.Config -> String -> (Transport -> IO a) -> IO a
-withEndpointSettings acquireSettings config endpoint action =
+withEndpointSettings acquireSettings config endpoint =
+  withHeadersSettings acquireSettings config endpoint [("project_id", Config.projectIdBytes credential) | Just credential <- [Config.projectId config]]
+
+-- | Scoped transport with explicitly supplied authentication headers.
+withHeaders :: Config.Config -> HTTP.RequestHeaders -> (Transport -> IO a) -> IO a
+withHeaders config = withHeadersSettings Connection.managerSettings config (TextValue.unpack (Config.endpoint config))
+
+withHeadersSettings :: IO Http.ManagerSettings -> Config.Config -> String -> HTTP.RequestHeaders -> (Transport -> IO a) -> IO a
+withHeadersSettings acquireSettings config endpoint authentication action =
   either
     (const (ioError (userError "Invalid Blockfrost transport configuration")))
     acquire
@@ -106,7 +115,7 @@ withEndpointSettings acquireSettings config endpoint action =
       manager <- Http.newManager settings
       drained <- newEmptyMVar
       bracket (newMVar (Just manager, 0)) (closeScope drained) $ \scope ->
-        action (Transport (sendScoped scope drained config template) (scopeOpen scope))
+        action (Transport (sendScoped scope drained config authentication template) (scopeOpen scope))
 
 -- | Check scope liveness without opening a connection or performing HTTP.
 scopeOpen :: Scope -> IO (Either HttpFailure ())
@@ -117,21 +126,21 @@ closeScope drained scope = uninterruptibleMask_ $ do
   active <- modifyMVar scope $ \(_, count) -> pure ((Nothing, count), count)
   when (active /= 0) (takeMVar drained)
 
-sendScoped :: Scope -> MVar () -> Config.Config -> Http.Request -> Request -> IO (Either HttpFailure Response)
-sendScoped scope drained config template request = mask $ \restore -> do
+sendScoped :: Scope -> MVar () -> Config.Config -> HTTP.RequestHeaders -> Http.Request -> Request -> IO (Either HttpFailure Response)
+sendScoped scope drained config authentication template request = mask $ \restore -> do
   acquired <- modifyMVar scope $ \(manager, count) ->
     pure ((manager, maybe count (const (count + 1)) manager), manager)
   case acquired of
     Nothing -> pure (Left Closed)
     Just manager ->
-      restore (sendOnce config template manager request) `finally` release
+      restore (sendOnce config authentication template manager request) `finally` release
   where
     release = modifyMVar scope $ \(manager, count) -> do
       when (count == 1 && isNothing manager) (putMVar drained ())
       pure ((manager, count - 1), ())
 
-sendOnce :: Config.Config -> Http.Request -> Http.Manager -> Request -> IO (Either HttpFailure Response)
-sendOnce config template manager request = do
+sendOnce :: Config.Config -> HTTP.RequestHeaders -> Http.Request -> Http.Manager -> Request -> IO (Either HttpFailure Response)
+sendOnce config authentication template manager request = do
   -- The outer deadline also covers connection acquisition, DNS and body reads;
   -- responseTimeout alone resets around individual network reads.
   result <- timeout (milliseconds * 1000) (tryHttp perform)
@@ -146,11 +155,11 @@ sendOnce config template manager request = do
     requestPath = case path request of
       [] -> prefix
       segments -> prefix <> separator <> B.intercalate "/" (map (URI.urlEncode False . Text.encodeUtf8) segments)
-    operationQuery = [(Text.encodeUtf8 key, Just (Text.encodeUtf8 value)) | (key, value) <- query request]
+    operationQuery = [(Text.encodeUtf8 key, Text.encodeUtf8 <$> value) | (key, value) <- query request]
     baseQuery = filter (\(key, _) -> key `notElem` map fst operationQuery) (HTTP.parseQuery (Http.queryString template))
     headers =
       [("Accept", "application/json")]
-        <> [("project_id", Config.projectIdBytes credential) | Just credential <- [Config.projectId config]]
+        <> authentication
         <> [("Content-Type", contentType request) | not (B.null (contentType request))]
     prepared =
       Http.setQueryString (baseQuery <> operationQuery) $

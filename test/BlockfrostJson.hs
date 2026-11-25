@@ -69,8 +69,8 @@ tests =
       testCase "native JSON timelocks and threshold children map precisely" nativeScripts,
       testCase "historical output addresses require identity and unique indices" historical,
       testCase "evaluation budgets cover exactly four supported purposes" budgets,
-      testCase "Ogmios v5 payload retains CBOR, datum choice and reference script" payload,
-      testCase "Ada-only supplemental evaluation values omit the empty assets field" adaOnlyPayload
+      testCase "Ogmios v6 payload retains CBOR, datum choice and reference script" payload,
+      testCase "Ada-only supplemental evaluation values retain the v6 structure" adaOnlyPayload
     ]
 
 parse :: (Value -> Data.Aeson.Types.Parser a) -> Value -> Either Error a
@@ -179,11 +179,11 @@ transaction purposes = do
 
 budgets :: IO ()
 budgets = do
-  tx <- transaction [Redeemer.Spending, Redeemer.Minting, Redeemer.Certifying, Redeemer.Rewarding]
-  let result = object [key .= object ["memory" .= (100 + n :: Int), "steps" .= (1000 + n :: Int)] | (key, n) <- zip ["spend:0", "mint:0", "certificate:0", "withdrawal:0"] [0 ..]]
+  tx <- transaction [Redeemer.Spending, Redeemer.Minting, Redeemer.Certifying, Redeemer.Rewarding, Redeemer.Voting, Redeemer.Proposing]
+  let result = object [key .= object ["memory" .= (100 + n :: Int), "steps" .= (1000 + n :: Int)] | (key, n) <- zip ["spend:0", "mint:0", "certificate:0", "withdrawal:0", "vote:0", "propose:0"] [0 ..]]
       envelope entries = object ["result" .= object ["EvaluationResult" .= entries]]
   decoded <- require (Json.decodeBudgets tx (envelope result))
-  map snd (Evaluation.budgets decoded) @?= [ExUnits 100 1000, ExUnits 101 1001, ExUnits 102 1002, ExUnits 103 1003]
+  map snd (Evaluation.budgets decoded) @?= [ExUnits 100 1000, ExUnits 101 1001, ExUnits 102 1002, ExUnits 103 1003, ExUnits 104 1004, ExUnits 105 1005]
   forM_ [object [], object ["spend:4294967296" .= object ["memory" .= (1 :: Int), "steps" .= (1 :: Int)]], object ["vote:0" .= object ["memory" .= (1 :: Int), "steps" .= (1 :: Int)]]] $ \value ->
     assertBool "incomplete/unsupported budget set" (isLeft (Json.decodeBudgets tx (envelope value)))
 
@@ -202,29 +202,27 @@ payload = do
   hashedOutput <- require (Output.mkOutput address (Amount.lovelace 9) (Datum.DatumHash hashed) Nothing)
   let resolved = [Utxo.utxo (Input.input txId 1) output, Utxo.utxo (Input.input txId 2) hashedOutput]
       reference =
-        [ object ["txId" .= TxId.toHex txId, "index" .= (1 :: Int)],
-          object ["address" .= Address.toText address, "value" .= object ["coins" .= (42 :: Int), "assets" .= object [Data.Aeson.Key.fromText (Policy.toHex policy <> ".ff") .= (7 :: Int)]], "datumHash" .= Null, "datum" .= Hex.encodeHex (Data.toCbor inline), "script" .= object ["plutus:v2" .= String "450100002499"]]
+        [ object ["id" .= TxId.toHex txId, "index" .= (1 :: Int)],
+          object ["address" .= Address.toText address, "value" .= object ["ada" .= object ["lovelace" .= (42 :: Int)], Data.Aeson.Key.fromText (Policy.toHex policy) .= object ["ff" .= (7 :: Int)]], "datum" .= Hex.encodeHex (Data.toCbor inline), "script" .= object ["language" .= String "plutus:v2", "cbor" .= String "450100002499"]]
         ]
       hashReference =
-        [ object ["txId" .= TxId.toHex txId, "index" .= (2 :: Int)],
-          object ["address" .= Address.toText address, "value" .= object ["coins" .= (9 :: Int)], "datumHash" .= Hex.encodeHex (B.replicate 32 2), "datum" .= Null, "script" .= Null]
+        [ object ["id" .= TxId.toHex txId, "index" .= (2 :: Int)],
+          object ["address" .= Address.toText address, "value" .= object ["ada" .= object ["lovelace" .= (9 :: Int)]], "datumHash" .= Hex.encodeHex (B.replicate 32 2)]
         ]
-  Json.evaluationPayload tx resolved @?= Right (object ["cbor" .= Hex.encodeHex (Tx.encodeCbor tx), "additionalUtxoSet" .= [reference, hashReference]])
+  Json.evaluationPayload tx resolved @?= Right (object ["cbor" .= Hex.encodeHex (Tx.encodeCbor tx), "additionalUtxo" .= (reference <> hashReference)])
   assertBool "duplicate resolution" (isLeft (Json.evaluationPayload tx (resolved ++ resolved)))
-  unsupportedTx <- transaction [Redeemer.Voting]
-  assertBool "unsupported v5 purpose" (isLeft (Json.evaluationPayload unsupportedTx []))
+  governanceTx <- transaction [Redeemer.Voting]
+  _ <- require (Json.evaluationPayload governanceTx [])
   forM_ [Plutus.V3, Plutus.V4] $ \version -> do
     newer <- require (Plutus.fromBytes version (Plutus.toBytes script))
     witnesses <- require (Witnesses.mkWitnesses [] [] [Script.Plutus newer] [] [])
-    assertBool "unsupported v5 script" (isLeft (Json.evaluationPayload (Tx.setWitnesses (Witnesses.fromWitnesses witnesses) tx) []))
+    _ <- require (Json.evaluationPayload (Tx.setWitnesses (Witnesses.fromWitnesses witnesses) tx) [])
+    pure ()
 
 require :: (Show failure) => Either failure value -> IO value
 require = either (\failure -> assertFailure (show failure) >> fail "invalid JSON fixture") pure
 
--- Regression from a hosted preprod evaluation: the identical signed V2 mint
--- failed with value={coins:10000000,assets:{}} and succeeded after omitting only
--- assets. Absence retains the exact Ada-only value; payload above separately
--- checks that a nonempty policy/name map remains unchanged.
+-- Ada-only supplemental values retain the v6 ada/lovelace structure.
 adaOnlyPayload :: IO ()
 adaOnlyPayload = do
   tx <- transaction []
@@ -233,7 +231,7 @@ adaOnlyPayload = do
   output <- require (Output.mkOutput address (Amount.lovelace 10000000) Datum.NoDatum Nothing)
   let supplemental = Utxo.utxo (Input.input identifier 0) output
       expected =
-        [ object ["txId" .= TxId.toHex identifier, "index" .= (0 :: Int)],
-          object ["address" .= Address.toText address, "value" .= object ["coins" .= (10000000 :: Int)], "datumHash" .= Null, "datum" .= Null, "script" .= Null]
+        [ object ["id" .= TxId.toHex identifier, "index" .= (0 :: Int)],
+          object ["address" .= Address.toText address, "value" .= object ["ada" .= object ["lovelace" .= (10000000 :: Int)]]]
         ]
-  Json.evaluationPayload tx [supplemental] @?= Right (object ["cbor" .= Hex.encodeHex (Tx.encodeCbor tx), "additionalUtxoSet" .= [expected]])
+  Json.evaluationPayload tx [supplemental] @?= Right (object ["cbor" .= Hex.encodeHex (Tx.encodeCbor tx), "additionalUtxo" .= expected])

@@ -15,7 +15,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# OPTIONS_HADDOCK hide #-}
 
--- | Strict owned response values and the explicitly selected Ogmios v5 dialect.
+-- | Strict owned response values and the Ogmios v6 evaluation dialect.
 module Cometa.Provider.Blockfrost.Internal.Json
   ( Row (..),
     decodeValue,
@@ -67,6 +67,7 @@ import Data.Aeson.Types (Parser, parseEither, withArray, withObject, withScienti
 import Data.ByteString (ByteString)
 import Data.Char (isDigit)
 import Data.Foldable (toList, traverse_)
+import qualified Data.Map.Strict as Map
 import Data.Maybe (fromMaybe, isJust)
 import Data.Scientific (base10Exponent, toBoundedInteger)
 import qualified Data.Set as Set
@@ -201,6 +202,10 @@ decodeBudgets transaction value = do
           "mint" -> pure Redeemer.Minting
           "certificate" -> pure Redeemer.Certifying
           "withdrawal" -> pure Redeemer.Rewarding
+          "publish" -> pure Redeemer.Certifying
+          "withdraw" -> pure Redeemer.Rewarding
+          "vote" -> pure Redeemer.Voting
+          "propose" -> pure Redeemer.Proposing
           _ -> fail "Unsupported redeemer purpose"
         number <- parseQuantity index
         when (number > fromIntegral (maxBound :: Word32)) (fail "Redeemer index overflow")
@@ -209,50 +214,40 @@ decodeBudgets transaction value = do
 
 evaluationPayload :: Tx.Transaction -> [Utxo.Utxo] -> Either Error Value
 evaluationPayload transaction resolved = do
-  let redeemers = Witnesses.redeemers (Witnesses.toWitnesses (Tx.witnesses transaction))
-      body = Body.toBody (Tx.body transaction)
+  let body = Body.toBody (Tx.body transaction)
       fields = Body.bodyFields body
       subs = fromMaybe [] (Body.bodySubTransactions body)
-      unsupportedFields = [isJust (Fields.fieldDirectDeposits fields), isJust (Fields.fieldAccountBalanceIntervals fields), isJust (Fields.fieldRequiredTopLevelGuards fields), isJust (Body.bodyStartingAccountBalanceIntervals body), isJust (Fields.fieldVotingProcedures fields), isJust (Fields.fieldProposalProcedures fields), isJust (Fields.fieldTreasuryValue fields), isJust (Fields.fieldDonation fields)]
+      unsupportedFields = [isJust (Fields.fieldDirectDeposits fields), isJust (Fields.fieldAccountBalanceIntervals fields), isJust (Fields.fieldRequiredTopLevelGuards fields), isJust (Body.bodyStartingAccountBalanceIntervals body)]
       hasScriptGuard = any isScriptGuard (fromMaybe [] (Fields.fieldGuards fields))
-  unless (null subs && not (or unsupportedFields) && not hasScriptGuard && all ((<= Redeemer.Rewarding) . Redeemer.purpose) redeemers) unsupported
+  unless (null subs && not (or unsupportedFields) && not hasScriptGuard) unsupported
   unless (Set.size (Set.fromList (map Utxo.input resolved)) == length resolved) (Left (InvalidEvaluationRequest "Duplicate resolved input reference"))
   traverse_ scriptValue (Witnesses.scripts (Witnesses.toWitnesses (Tx.witnesses transaction)))
   additional <- traverse utxoValue resolved
-  pure (object ["cbor" .= Hex.encodeHex (Tx.encodeCbor transaction), "additionalUtxoSet" .= additional])
+  pure (object ["cbor" .= Hex.encodeHex (Tx.encodeCbor transaction), "additionalUtxo" .= concat additional])
   where
     isScriptGuard (Credential.ScriptCredential _) = True
     isScriptGuard _ = False
-    unsupported = Left (UnsupportedOperation "Blockfrost Ogmios v5 cannot represent this evaluation feature")
+    unsupported = Left (UnsupportedOperation "Blockfrost cannot evaluate nested transactions or guarded account features")
     utxoValue utxo = do
       let input = Utxo.input utxo
           output = Utxo.output utxo
       unless (Input.index input <= fromIntegral (maxBound :: Word32)) unsupported
       reference <- traverse scriptValue (Output.referenceScript output)
       let value = Output.value output
-          assets = KeyMap.fromList [(Key.fromText (Policy.toHex policy <> if AssetName.toHex name == "" then "" else "." <> AssetName.toHex name), toJSONInteger quantity) | (Native policy name, quantity) <- Amount.toList value]
-          -- The hosted evaluator rejects a present empty assets map. Omit the
-          -- optional field for Ada-only values; nonempty maps retain their keys.
-          valueFields = ["coins" .= Amount.quantity Ada value] <> ["assets" .= Object assets | not (KeyMap.null assets)]
-          (datumHash, datum) = case Output.datum output of
-            Datum.NoDatum -> (Null, Null)
-            Datum.DatumHash hash -> (String (Hex.encodeHex (Datum.hashBytes hash)), Null)
-            Datum.InlineDatum encoded -> (Null, String (Hex.encodeHex (Data.toCbor encoded)))
+          policies = Map.fromListWith (<>) [(Policy.toHex policy, [(Key.fromText (AssetName.toHex name), Number (fromInteger quantity))]) | (Native policy name, quantity) <- Amount.toList value]
+          valueFields = ("ada", object ["lovelace" .= Amount.quantity Ada value]) : [(Key.fromText policy, Object (KeyMap.fromList entries)) | (policy, entries) <- Map.toList policies]
+          datumFields = case Output.datum output of
+            Datum.NoDatum -> []
+            Datum.DatumHash hash -> ["datumHash" .= Hex.encodeHex (Datum.hashBytes hash)]
+            Datum.InlineDatum encoded -> ["datum" .= Hex.encodeHex (Data.toCbor encoded)]
       pure
-        [ object ["txId" .= TxId.toHex (Input.transactionId input), "index" .= Input.index input],
-          object ["address" .= Address.toText (Output.address output), "value" .= object valueFields, "datumHash" .= datumHash, "datum" .= datum, "script" .= fromMaybe Null reference]
+        [ object ["id" .= TxId.toHex (Input.transactionId input), "index" .= Input.index input],
+          object (["address" .= Address.toText (Output.address output), "value" .= Object (KeyMap.fromList valueFields)] <> datumFields <> maybe [] (pure . ("script" .=)) reference)
         ]
-    scriptValue (Script.Native script) = object . pure . ("native" .=) <$> nativeValue script
-    scriptValue (Script.Plutus script) = case Plutus.version script of
-      Plutus.V1 -> Right (object ["plutus:v1" .= Hex.encodeHex (Plutus.toBytes script)])
-      Plutus.V2 -> Right (object ["plutus:v2" .= Hex.encodeHex (Plutus.toBytes script)])
-      _ -> unsupported
-    nativeValue script = case Native.view script of
-      Native.RequireSignature key -> Right (String (Hex.encodeHex (Credential.keyHashBytes key)))
-      Native.RequireAll children -> object . pure . ("all" .=) <$> traverse nativeValue children
-      Native.RequireAny children -> object . pure . ("any" .=) <$> traverse nativeValue children
-      Native.RequireAtLeast count children -> object . pure . (Key.fromText (Text.pack (show count)) .=) <$> traverse nativeValue children
-      Native.InvalidBefore slot -> Right (object ["startsAt" .= slot])
-      Native.InvalidAfter slot -> Right (object ["expiresAt" .= slot])
-      Native.RequireGuard _ -> unsupported
-    toJSONInteger = Number . fromInteger
+    scriptValue (Script.Native script) = Right (object ["language" .= ("native" :: Text), "cbor" .= Hex.encodeHex (Native.encodeCbor script)])
+    scriptValue (Script.Plutus script) = Right (object ["language" .= language (Plutus.version script), "cbor" .= Hex.encodeHex (Plutus.toBytes script)])
+    language version = case version of
+      Plutus.V1 -> "plutus:v1" :: Text
+      Plutus.V2 -> "plutus:v2"
+      Plutus.V3 -> "plutus:v3"
+      Plutus.V4 -> "plutus:v4"

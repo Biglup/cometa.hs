@@ -25,6 +25,7 @@ import qualified Cometa.Provider.Blockfrost as Blockfrost
 import qualified Cometa.Provider.Blockfrost.Internal.Config as Config
 import qualified Cometa.Provider.Blockfrost.Internal.Connection as Connection
 import qualified Cometa.Provider.Blockfrost.Internal.Http as Http
+import qualified Cometa.Provider.Kupmios as Kupmios
 import Control.Concurrent (forkFinally, killThread, threadDelay, yield)
 import Control.Concurrent.MVar (modifyMVar_, newEmptyMVar, newMVar, putMVar, readMVar, takeMVar, tryPutMVar, tryTakeMVar)
 import Control.Concurrent.STM (STM, atomically, check, newTVarIO, readTVar, readTVarIO, writeTVar)
@@ -80,6 +81,7 @@ tests =
       testCase "invalid URLs fail before callback without echoing secrets" invalidEndpoints,
       testCase "IPv6 and explicit ports validate without live requests" endpointSyntax,
       testCase "path/query encoding, credential header and exact CBOR body" wire,
+      testCase "Kupmios sends bare status flags over HTTP" kupmiosFlags,
       testCase "HTTP failures retain status without redirects or retries" statuses,
       testCase "whole-request timeout and body-size limits release response scope" limits,
       testCase "asynchronous cancellation propagates and later requests recover" cancellation,
@@ -202,13 +204,25 @@ wire = do
   configured <- config
   withServer (\incoming -> putMVar received incoming >> pure (response 200 "ok" [])) $ \endpoint ->
     Http.withTransport configured {Config.endpoint = Text.pack endpoint} $ \transport -> do
-      result <- Http.send transport request {Http.method = Http.Post, Http.path = ["tx", "part/with ?"], Http.query = [("page", "2"), ("asset", "space value")], Http.body = B.pack [0, 255, 128], Http.contentType = "application/cbor"}
+      result <- Http.send transport request {Http.method = Http.Post, Http.path = ["tx", "part/with ?"], Http.query = [("page", Just "2"), ("asset", Just "space value"), ("unspent", Nothing), ("asset_name", Just "")], Http.body = B.pack [0, 255, 128], Http.contentType = "application/cbor"}
       fmap Http.status result @?= Right 200
       actual <- takeMVar received
-      requestLine actual @?= "POST /api/v0/tx/part%2Fwith%20%3F?page=2&asset=space%20value HTTP/1.1"
+      requestLine actual @?= "POST /api/v0/tx/part%2Fwith%20%3F?page=2&asset=space%20value&unspent&asset_name= HTTP/1.1"
       assertBool "project credential sent only as header" ("project_id: fixture-project-id" `elem` requestHeaders actual)
       assertBool "content type" ("Content-Type: application/cbor" `elem` requestHeaders actual)
       requestBody actual @?= B.pack [0, 255, 128]
+
+kupmiosFlags :: IO ()
+kupmiosFlags = do
+  received <- newEmptyMVar
+  let addressText = "addr_test1qrwyxh7zvw8kdp9ar70klytasryj4ejz5j3n5sfw29j8nejzg53k4wq9vaswlnhthl6har9tygqc9037xepeu5s2v32qn6lwrx"
+  address <- either (fail . show) pure (Address.fromText addressText)
+  withServer (\incoming -> putMVar received incoming >> pure (response 200 "[]" [])) $ \endpoint -> do
+    let settings = Kupmios.defaultConfig Kupmios.Preprod (Text.pack endpoint <> "?unspent=wrong&tenant=fixture") "http://localhost:1"
+    result <- Kupmios.withProvider settings (\provider -> fmap (fmap length) (Provider.utxosAt provider address))
+    result @?= Right 0
+    actual <- takeMVar received
+    requestLine actual @?= "GET /api/v0/matches/" <> Text.encodeUtf8 addressText <> "?tenant=fixture&unspent HTTP/1.1"
 
 statuses :: IO ()
 statuses = do

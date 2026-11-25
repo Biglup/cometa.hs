@@ -12,6 +12,7 @@ installation
 transaction-building
 error-handling
 blockfrost
+providers
 connected-examples
 connected-governance
 api-reference

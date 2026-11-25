@@ -20,9 +20,10 @@
 --
 -- Submission is explicit and never retried automatically. Confirmation means
 -- the transaction appears in a block; it does not establish finality. Remote
--- evaluation uses the documented Ogmios v5 dialect: V1/V2 scripts and spending,
--- minting, certificate and withdrawal purposes. Unsupported newer features fail
--- explicitly; local "Cometa.Evaluation.Native" supports the binding's native VM.
+-- evaluation uses the Ogmios v6 dialect, preserving inline data and reference
+-- scripts in additional inputs and covering all six redeemer purposes. Nested
+-- transactions and guarded account features fail explicitly; local
+-- "Cometa.Evaluation.Native" supports the binding's native VM.
 --
 -- @
 -- withProvider (defaultConfig Preview (Just project)) $ \provider ->
