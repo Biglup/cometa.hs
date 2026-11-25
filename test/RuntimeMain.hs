@@ -18,6 +18,10 @@ module Main (main) where
 -- IMPORTS --------------------------------------------------------------------
 
 import qualified BalancingScriptLanguages
+import qualified BlockfrostHttp
+import qualified BlockfrostJson
+import qualified BlockfrostProtocol
+import qualified BlockfrostProvider
 import qualified CoinSelection
 import qualified ContextualTransaction
 import qualified DeferredRedeemer
@@ -46,7 +50,8 @@ main =
     localOption (NumThreads 1) $
       testGroup
         "Runtime extension points"
-        [ EncodingNormalization.tests,
+        [ testGroup "Blockfrost" [BlockfrostProtocol.tests, BlockfrostHttp.tests, BlockfrostJson.tests, BlockfrostProvider.tests],
+          EncodingNormalization.tests,
           TransactionInspection.tests,
           Runtime.tests,
           Provider.tests,

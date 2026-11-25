@@ -133,7 +133,7 @@ library core
 
 library
   import: language
-  hs-source-dirs: src blockfrost-src
+  hs-source-dirs: src
   exposed-modules:
     Cometa.Provider.Blockfrost
     Cometa
@@ -472,6 +472,17 @@ test-suite cometa-runtime-test
   cc-options: -std=c11 -Wall -Wextra
   ghc-options: -threaded -rtsopts
   other-modules:
+    BlockfrostProtocol
+    BlockfrostJson
+    BlockfrostProvider
+    Cometa.Provider.Blockfrost
+    BlockfrostHttp
+    Cometa.Provider.Blockfrost.Internal.Config
+    Cometa.Provider.Blockfrost.Internal.Http
+    Cometa.Provider.Blockfrost.Internal.Connection
+    Cometa.Provider.Blockfrost.Internal.Protocol
+    Cometa.Provider.Blockfrost.Internal.Json
+    Cometa.Provider.Blockfrost.Internal.Provider
     TransactionInspection
     EncodingNormalization
     Fixtures.Inspection
@@ -637,39 +648,10 @@ test-suite cometa-runtime-test
     text >=2.0 && <2.2,
     transformers >=0.6 && <0.7,
     cometa:core,
-    tasty >=1.4 && <1.6,
+    tasty >=1.5 && <1.6,
     tasty-hunit >=0.10 && <0.11,
     tasty-hedgehog >=1.4 && <1.5,
-    hedgehog >=1.2 && <1.6
-
-test-suite cometa-blockfrost-test
-  import: language
-  type: exitcode-stdio-1.0
-  hs-source-dirs: blockfrost-test blockfrost-src
-  main-is: Main.hs
-  other-modules:
-    BlockfrostProtocol
-    BlockfrostJson
-    BlockfrostProvider
-    Cometa.Provider.Blockfrost
-    BlockfrostHttp
-    Cometa.Provider.Blockfrost.Internal.Config
-    Cometa.Provider.Blockfrost.Internal.Http
-    Cometa.Provider.Blockfrost.Internal.Connection
-    Cometa.Provider.Blockfrost.Internal.Protocol
-    Cometa.Provider.Blockfrost.Internal.Json
-    Cometa.Provider.Blockfrost.Internal.Provider
-  ghc-options: -threaded -rtsopts
-  build-depends:
-    base >=4.18 && <4.22,
-    cometa,
-    cometa:core,
-    aeson >=2.2 && <2.3,
-    bytestring >=0.11 && <0.13,
-    containers >=0.6.7 && <0.8,
-    text >=2.0 && <2.2,
-    scientific >=0.3.7 && <0.4,
-    transformers >=0.6 && <0.7,
+    hedgehog >=1.2 && <1.6,
     network-uri >=2.6.4 && <2.7,
     http-client >=0.7.19 && <0.8,
     http-client-tls >=0.3.6 && <0.4,
@@ -680,9 +662,7 @@ test-suite cometa-blockfrost-test
     crypton-x509-system >=1.8 && <1.9,
     network >=3.2.12 && <3.3,
     stm >=2.5 && <2.6,
-    crypton-x509 >=1.8 && <1.9,
-    tasty >=1.5 && <1.6,
-    tasty-hunit >=0.10 && <0.11
+    crypton-x509 >=1.8 && <1.9
 
 executable cometa-provider
   import: language

@@ -72,7 +72,6 @@ jobs:
         run: |
           cabal test cometa-test --test-show-details=streaming
           cabal test cometa-runtime-test --test-show-details=streaming
-          cabal test cometa-blockfrost-test --test-show-details=streaming
       - name: Run examples
         run: |
           cabal run cometa-bip39
@@ -137,7 +136,6 @@ jobs:
           # Suppress only the documented GHC 9.6.7 scheduler shutdown allocation.
           timeout 600s valgrind --suppressions=test/valgrind/ghc-9.6.7.supp --fair-sched=yes --leak-check=full --show-leak-kinds=definite,indirect --errors-for-leak-kinds=definite,indirect --error-exitcode=1 "$(cabal list-bin cometa-test)" --num-threads=1 +RTS -N2 -RTS
           timeout 600s valgrind --suppressions=test/valgrind/ghc-9.6.7.supp --fair-sched=yes --leak-check=full --show-leak-kinds=definite,indirect --errors-for-leak-kinds=definite,indirect --error-exitcode=1 "$(cabal list-bin cometa-runtime-test)" --num-threads=1 +RTS -N2 -RTS
-          timeout 600s valgrind --suppressions=test/valgrind/ghc-9.6.7.supp --fair-sched=yes --leak-check=full --show-leak-kinds=definite,indirect --errors-for-leak-kinds=definite,indirect --error-exitcode=1 "$(cabal list-bin cometa-blockfrost-test)" --num-threads=1 +RTS -N2 -RTS
 
   system-library:
     name: Installed native library / Linux
@@ -198,8 +196,8 @@ jobs:
         run: python3 -m unittest discover -s test/release -v
       - name: Check formatting and lint
         run: |
-          find src internal test examples benchmark blockfrost-src blockfrost-test \( -name '*.hs' -o -name '*.hsc' \) -print0 | xargs -0 "$RUNNER_TEMP/style-bin/ormolu" --mode check
-          "$RUNNER_TEMP/style-bin/hlint" src internal test examples benchmark blockfrost-src blockfrost-test
+          find src internal test examples benchmark \( -name '*.hs' -o -name '*.hsc' \) -print0 | xargs -0 "$RUNNER_TEMP/style-bin/ormolu" --mode check
+          "$RUNNER_TEMP/style-bin/hlint" src internal test examples benchmark
 
   documentation:
     runs-on: ubuntu-24.04
