@@ -160,7 +160,9 @@ outputs service@(Service backend _ _ _) path query payload = do
   except (C.unique (map Utxo.input values))
   pure values
   where
-    convert value = case backend of Koios -> C.koiosOutput value; Kupmios -> kupoOutput service value
+    convert value = case backend of
+      Koios -> C.koiosOutput value
+      Kupmios -> kupoOutput service value
     filterMUnspent rows = do
       pairs <- traverse (\row -> (,) row <$> parse (withObject "UTxO" (.: "is_spent")) row) rows
       pure [row | (row, False) <- pairs]
@@ -207,7 +209,10 @@ resolve service@(Service backend _ _ _) requested = do
 distinct :: (Ord a) => [a] -> [a]
 distinct = go Set.empty
   where
-    go _ [] = []; go seen (x : xs) | Set.member x seen = go seen xs | otherwise = x : go (Set.insert x seen) xs
+    go _ [] = []
+    go seen (x : xs)
+      | Set.member x seen = go seen xs
+      | otherwise = x : go (Set.insert x seen) xs
 
 resolveDatum :: Service -> Datum.Hash32 -> ExceptT Error IO (Maybe Data.EncodedPlutusData)
 resolveDatum service@(Service backend _ transport _) hash = do
@@ -216,11 +221,25 @@ resolveDatum service@(Service backend _ transport _) hash = do
       response <- post service ["datum_info"] [] (object ["_datum_hashes" .= [text]]) >>= parse C.list
       case response of
         [] -> pure Nothing
-        [row] -> Just <$> parse (withObject "datum" (\o -> do actual <- o .: "datum_hash"; unless (actual == text) (fail "Datum mismatch"); o .: "bytes")) row
+        [row] ->
+          Just
+            <$> parse
+              ( withObject
+                  "datum"
+                  ( \o -> do
+                      actual <- o .: "datum_hash"
+                      unless (actual == text) (fail "Datum mismatch")
+                      o .: "bytes"
+                  )
+              )
+              row
         _ -> invalid
     Kupmios -> do
       response <- json transport (jsonRequest Http.Get ["datums", text] [] Nothing) True
-      case response of Nothing -> pure Nothing; Just Null -> pure Nothing; Just row -> Just <$> parse (withObject "datum" (.: "datum")) row
+      case response of
+        Nothing -> pure Nothing
+        Just Null -> pure Nothing
+        Just row -> Just <$> parse (withObject "datum" (.: "datum")) row
   traverse (C.datum hash) bytes
   where
     text = Hex.encodeHex (Datum.hashBytes hash)
@@ -259,7 +278,10 @@ kupoOutput service row = do
     asset (key, value) = do
       let text = Key.toText key
           (policy, suffix) = Text.splitAt 56 text
-      name <- case Text.uncons suffix of Nothing -> pure ""; Just ('.', rest) -> pure rest; _ -> fail "Invalid Kupo asset"
+      name <- case Text.uncons suffix of
+        Nothing -> pure ""
+        Just ('.', rest) -> pure rest
+        _ -> fail "Invalid Kupo asset"
       identifier <- Json.parseAsset (policy <> name)
       quantity <- C.natural value
       when (quantity == 0) (fail "Zero asset quantity")
@@ -273,7 +295,10 @@ rewards :: Service -> Reward.RewardAddress -> ExceptT Error IO Word64
 rewards service@(Service backend _ _ _) account = case backend of
   Koios -> do
     rows <- post service ["account_info"] [] (object ["_stake_addresses" .= [text]]) >>= parse C.list
-    case rows of [] -> pure 0; [row] -> parse reward row; _ -> invalid
+    case rows of
+      [] -> pure 0
+      [row] -> parse reward row
+      _ -> invalid
   Kupmios -> do
     let (kind, key, hash) = case Reward.credential account of
           Credential.KeyCredential credential -> ("verificationKey", "keys", Credential.keyHashBytes credential)
@@ -347,7 +372,18 @@ confirmed (Service backend _ transport _) identifier remaining = do
         rows <- parse C.list value
         case rows of
           [] -> pure False
-          [row] -> parse (withObject "status" (\o -> do actual <- o .: "tx_hash"; unless (actual == hash) (fail "Transaction mismatch"); confirmations <- o .: "num_confirmations"; if confirmations == Null then pure False else (> 0) <$> C.natural confirmations)) row
+          [row] ->
+            parse
+              ( withObject
+                  "status"
+                  ( \o -> do
+                      actual <- o .: "tx_hash"
+                      unless (actual == hash) (fail "Transaction mismatch")
+                      confirmations <- o .: "num_confirmations"
+                      if confirmations == Null then pure False else (> 0) <$> C.natural confirmations
+                  )
+              )
+              row
           _ -> invalid
       Kupmios -> do
         rows <- parse C.list value

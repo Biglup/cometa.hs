@@ -198,7 +198,11 @@ ogmiosOutput utxo = do
   where
     reference = Utxo.input utxo
     output = Utxo.output utxo
-    language version = case version of Plutus.V1 -> "plutus:v1" :: Text; Plutus.V2 -> "plutus:v2"; Plutus.V3 -> "plutus:v3"; Plutus.V4 -> "plutus:v4"
+    language version = case version of
+      Plutus.V1 -> "plutus:v1" :: Text
+      Plutus.V2 -> "plutus:v2"
+      Plutus.V3 -> "plutus:v3"
+      Plutus.V4 -> "plutus:v4"
 
 evaluationPayload :: Tx.Transaction -> [Utxo.Utxo] -> Either Error Value
 evaluationPayload transaction additional = do

@@ -69,7 +69,10 @@ provider config transport =
       Provider.utxoWithAsset = \asset -> run $ do
         when (asset == Ada) (throwE (UnsupportedOperation "NFT lookup requires a native asset"))
         found <- filter ((> 0) . quantity asset) <$> outputs
-        case found of [] -> pure Nothing; [u] | quantity asset u == 1 -> pure (Just u); _ -> invalid,
+        case found of
+          [] -> pure Nothing
+          [u] | quantity asset u == 1 -> pure (Just u)
+          _ -> invalid,
       Provider.resolveInputs = \references -> run $ do
         values <- outputs
         let table = Map.fromList [(Utxo.input u, u) | u <- values]
@@ -94,7 +97,10 @@ invalid = throwE (InvalidProviderResponse "hydra.response")
 distinct :: (Ord a) => [a] -> [a]
 distinct = go Set.empty
   where
-    go _ [] = []; go seen (x : xs) | Set.member x seen = go seen xs | otherwise = x : go (Set.insert x seen) xs
+    go _ [] = []
+    go seen (x : xs)
+      | Set.member x seen = go seen xs
+      | otherwise = x : go (Set.insert x seen) xs
 
 output :: (Key.Key, Value) -> ExceptT Error IO Utxo.Utxo
 output (key, row) = do

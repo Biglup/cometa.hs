@@ -79,7 +79,13 @@ scripted backend responses action = do
   pending <- newIORef responses
   let config = (Config.defaultConfig Config.Preprod Nothing) {Config.pollIntervalMillis = 1}
       send _ = do
-        result <- atomicModifyIORef' pending (\case [] -> ([], Nothing); y : ys -> (ys, Just y))
+        result <-
+          atomicModifyIORef'
+            pending
+            ( \case
+                [] -> ([], Nothing)
+                y : ys -> (ys, Just y)
+            )
         maybe (assertFailure "Unexpected request" >> pure (Left Http.ConnectionFailure)) (pure . Right) result
       transport = Http.Transport send (pure (Right ()))
       provider = case backend of
@@ -133,7 +139,9 @@ httpErrors :: Text -> Assertion
 httpErrors backend = forM_ [401, 403, 429, 500] $ \status ->
   scripted backend [reply status (String "credential-secret")] $ \p -> do
     result <- Provider.protocolParameters p
-    case result of Left (ProviderHttpError _ actual) -> actual @?= status; _ -> assertFailure "HTTP status was swallowed"
+    case result of
+      Left (ProviderHttpError _ actual) -> actual @?= status
+      _ -> assertFailure "HTTP status was swallowed"
 
 zeroTimeout :: Text -> Assertion
 zeroTimeout backend = do
@@ -181,7 +189,9 @@ koiosDuplicates = do
     first : _ -> do
       address <- field "address" first >>= must . C.parse (withText "address" (C.checked . Address.fromText))
       scripted "Koios" [reply 200 (toJSON [first, first])] $ \p -> Provider.utxosAt p address >>= rejected
-      let spent = case first of Object o -> Object (KM.insert "is_spent" (Bool True) o); _ -> first
+      let spent = case first of
+            Object o -> Object (KM.insert "is_spent" (Bool True) o)
+            _ -> first
       scripted "Koios" [reply 200 (toJSON [spent])] $ \p -> Provider.utxosAt p address >>= (@?= Right [])
 
 hydraOutputs :: Assertion
@@ -222,8 +232,12 @@ scopes = do
 
 credentials :: Assertion
 credentials = do
-  case Koios.mkApiKey "valid.jwt-token_123" of Left _ -> assertFailure "valid credential rejected"; Right _ -> pure ()
-  case Koios.mkApiKey "key\r\nOther: value" of Left _ -> pure (); Right _ -> assertFailure "header injection accepted"
+  case Koios.mkApiKey "valid.jwt-token_123" of
+    Left _ -> assertFailure "valid credential rejected"
+    Right _ -> pure ()
+  case Koios.mkApiKey "key\r\nOther: value" of
+    Left _ -> pure ()
+    Right _ -> assertFailure "header injection accepted"
 
 rejected :: Either e a -> Assertion
 rejected (Left _) = pure ()
