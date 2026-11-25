@@ -17,6 +17,7 @@ module Main (main) where
 
 -- IMPORTS --------------------------------------------------------------------
 
+import qualified AdditionalProviders
 import qualified BalancingScriptLanguages
 import qualified BlockfrostHttp
 import qualified BlockfrostJson
@@ -51,6 +52,7 @@ main =
       testGroup
         "Runtime extension points"
         [ testGroup "Blockfrost" [BlockfrostProtocol.tests, BlockfrostHttp.tests, BlockfrostJson.tests, BlockfrostProvider.tests],
+          AdditionalProviders.tests,
           EncodingNormalization.tests,
           TransactionInspection.tests,
           Runtime.tests,

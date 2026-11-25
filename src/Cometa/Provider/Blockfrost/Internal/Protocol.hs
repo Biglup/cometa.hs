@@ -17,7 +17,7 @@
 
 -- | Decode the documented Blockfrost protocol snapshot without rounding money
 -- or execution prices. Absent era fields remain unavailable.
-module Cometa.Provider.Blockfrost.Internal.Protocol (decodeProtocolParameters) where
+module Cometa.Provider.Blockfrost.Internal.Protocol (decodeProtocolParameters, fraction, bounded, integer) where
 
 -- IMPORTS --------------------------------------------------------------------
 
@@ -39,7 +39,7 @@ import qualified Data.ByteString as ByteString
 import Data.Char (digitToInt, isDigit, isHexDigit)
 import Data.Foldable (toList)
 import Data.Int (Int64)
-import Data.Ratio (denominator, numerator)
+import Data.Ratio (denominator, numerator, (%))
 import Data.Scientific (base10Exponent, floatingOrInteger)
 import qualified Data.Text as Text
 import Text.Read (readMaybe)
@@ -157,6 +157,13 @@ checkedBound number = result
 exact :: Value -> Parser Rational
 exact (Number value)
   | base10Exponent value >= -100 && base10Exponent value <= 100 = pure (toRational value)
+exact (String value)
+  | Text.length value <= 43 = case Text.splitOn "/" value of
+      [n, d] -> do
+        a <- integer (String n)
+        b <- integer (String d)
+        if a >= 0 && b > 0 then pure (a % b) else fail "invalid ratio"
+      _ -> fail "fraction required"
 exact _ = fail "fraction required"
 
 fraction :: Value -> Parser Fraction.NonNegativeRational

@@ -15,6 +15,8 @@ homepage: https://github.com/Biglup/cometa.hs
 bug-reports: https://github.com/Biglup/cometa.hs/issues
 build-type: Simple
 extra-source-files:
+  test/fixtures/providers/*.json
+  test/fixtures/providers/README.md
   README.md
   examples/README.md
   CODING_CONVENTIONS.md
@@ -136,6 +138,9 @@ library
   hs-source-dirs: src
   exposed-modules:
     Cometa.Provider.Blockfrost
+    Cometa.Provider.Hydra
+    Cometa.Provider.Koios
+    Cometa.Provider.Kupmios
     Cometa
     Cometa.Crypto.Blake2b
     Cometa.Credential
@@ -235,6 +240,11 @@ library
     Cometa.SlotConfig
     Cometa.CoinSelection
   other-modules:
+    Cometa.Provider.Internal.Config
+    Cometa.Provider.Internal.Protocol
+    Cometa.Provider.Internal.Codec
+    Cometa.Provider.Internal.Remote
+    Cometa.Provider.Internal.Hydra
     Cometa.Provider.Blockfrost.Internal.Config
     Cometa.Provider.Blockfrost.Internal.Http
     Cometa.Provider.Blockfrost.Internal.Connection
@@ -475,8 +485,17 @@ test-suite cometa-runtime-test
     BlockfrostProtocol
     BlockfrostJson
     BlockfrostProvider
+    AdditionalProviders
     Cometa.Provider.Blockfrost
+    Cometa.Provider.Hydra
+    Cometa.Provider.Koios
+    Cometa.Provider.Kupmios
     BlockfrostHttp
+    Cometa.Provider.Internal.Config
+    Cometa.Provider.Internal.Protocol
+    Cometa.Provider.Internal.Codec
+    Cometa.Provider.Internal.Remote
+    Cometa.Provider.Internal.Hydra
     Cometa.Provider.Blockfrost.Internal.Config
     Cometa.Provider.Blockfrost.Internal.Http
     Cometa.Provider.Blockfrost.Internal.Connection
