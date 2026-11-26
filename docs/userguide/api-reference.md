@@ -1,9 +1,9 @@
 # API reference
 
-The [Haddock reference on Hackage](https://hackage.haskell.org/package/cometa-0.1.0.0/candidate/docs/index.html)
+The [Haddock reference on Hackage](https://hackage.haskell.org/package/cometa-0.2.0.0/docs/index.html)
 is the primary API documentation. It includes the Blockfrost, Koios, Kupmios and Hydra providers and describes
-arguments, units, bounds and errors for each operation. Version 0.1.0.0 is currently
-a package candidate; it has not been published in the main package index.
+arguments, units, bounds and errors for each operation. The linked reference
+matches the published 0.2.0.0 package.
 
 ## Build locally
 

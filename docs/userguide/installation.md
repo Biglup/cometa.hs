@@ -1,9 +1,10 @@
 # Installation
 
-Cometa.hs has not been released on Hackage. Build the checked-out source with
-GHC and Cabal. Consult the repository's `cabal.project` and package description
-for its current compiler and dependency bounds; a platform is supported only
-when the corresponding CI build has passed.
+[Cometa 0.2.0.0](https://hackage.haskell.org/package/cometa-0.2.0.0) is available
+on Hackage. It depends on the exact native companion version
+[cardano-c-clib 0.1.1.0](https://hackage.haskell.org/package/cardano-c-clib-0.1.1.0),
+which builds the bundled cardano-c v2.0.0-rc.7 sources. You need GHC, Cabal and
+a C toolchain. Consult the package description for compiler and dependency bounds.
 
 ## Build a checkout
 
@@ -23,10 +24,9 @@ The preparation command creates `.native/cardano-c-clib`, which the repository's
 Cabal project includes automatically. No separate cardano-c installation or
 include/library search flags are needed for this configuration.
 
-The intended Hackage distribution uses a native source package dependency so
-Cabal can build it automatically. Both packages are currently available as Hackage candidates; they are not yet
-in the main package index. The checkout instructions above build the current
-source.
+The Hackage distribution uses the same native source dependency. Cabal downloads
+and builds it automatically; no checkout preparation command is needed when
+using the published packages.
 
 ## Use an installed cardano-c library
 
@@ -55,11 +55,17 @@ check that the runtime search path resolves the library used during compilation.
 
 ## Use in an application
 
-Until a release is available, add the checked-out Cometa.hs directory to your
-application's Cabal project alongside its prepared `.native/cardano-c-clib`
-directory, and declare `cometa` in the application's `build-depends`. Use explicit
-source revisions for reproducible builds. See
-the [API reference](api-reference.md) for declarations and local Haddock generation.
+Add `cometa ==0.2.0.0` to your component's `build-depends`, then run:
+
+```sh
+cabal update
+cabal build
+```
+
+To use a checkout instead, add the Cometa.hs directory and its prepared
+`.native/cardano-c-clib` directory to your application's Cabal project. Pin source
+revisions for reproducible builds. See the [API reference](api-reference.md) for
+declarations and local Haddock generation.
 
 ## Blockfrost
 

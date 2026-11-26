@@ -2,7 +2,7 @@
 
 <img src="assets/cometa_hs.png" alt="Cometa.hs" width="320" />
 
-[API documentation](https://hackage.haskell.org/package/cometa-0.1.0.0/candidate/docs/index.html) · [Examples](examples/README.md) · [User guide](https://cometahs.readthedocs.io/en/latest/)
+[API documentation](https://hackage.haskell.org/package/cometa-0.2.0.0/docs/index.html) · [Examples](examples/README.md) · [User guide](https://cometahs.readthedocs.io/en/latest/)
 
 </div>
 
@@ -20,18 +20,20 @@ return `IO (Either Error a)`. Private keys stay inside explicit resource scopes.
 
 ## Build
 
-Version 0.1.0.0 is available as a [Hackage candidate](https://hackage.haskell.org/package/cometa-0.1.0.0/candidate).
+Version 0.2.0.0 is available on [Hackage](https://hackage.haskell.org/package/cometa-0.2.0.0).
+Add `cometa ==0.2.0.0` to your application's `build-depends`; Cabal builds the
+native companion automatically. You need GHC, Cabal and a C toolchain.
 
-The development version is 0.2.0.0 and uses cardano-c v2.0.0-rc.7 through
+This version uses cardano-c v2.0.0-rc.7 through
 cardano-c-clib 0.1.1.0. Protocol parameter 55 now uses
 `parameterRefInputsCostPerMultiAssetByte` and `updateRefInputsCostPerMultiAssetByte`.
 Use `Builder.defaultConfig` and set `Builder.poolState` to the latest registered
 pool parameters when estimating protocol-12 owner witnesses; prefer pending
 parameters over active ones. Unknown pools retain conservative estimates.
 
-It is not yet in the main package index. To build this checkout, use GHC 9.6.7
-or 9.10.3, Cabal and a C toolchain. Prepare the bundled native sources from the
-revision in [`native/cardano-c.ref`](native/cardano-c.ref):
+To build this checkout, use GHC 9.6.7 or 9.10.3, Cabal, Python 3 and a C toolchain.
+Prepare the bundled native sources from the revision in
+[`native/cardano-c.ref`](native/cardano-c.ref):
 
 ```sh
 python3 tools/package-native.py /path/to/pinned/cardano-c
@@ -370,7 +372,7 @@ inspectTransaction cbor = runExceptT $ do
 
 The API also exposes typed addresses, BIP39/BIP32 derivation, encrypted software
 key handlers, CIP-8 message signatures, CBOR codecs, transaction balancing and
-provider callbacks. Browse the [API reference](https://hackage.haskell.org/package/cometa-0.1.0.0/candidate/docs/index.html)
+provider callbacks. Browse the [API reference](https://hackage.haskell.org/package/cometa-0.2.0.0/docs/index.html)
 for their contracts and the runnable examples below for complete applications.
 
 ## Providers
