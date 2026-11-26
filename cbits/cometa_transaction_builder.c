@@ -81,6 +81,30 @@ array(cardano_cbor_reader_t* reader, int64_t expected)
     return result;                                                                                      \
   }
 
+/**
+ * \brief Decode the array framing used by Haskell-owned pool values.
+ * \param reader Borrowed reader positioned at the parameter array.
+ * \param output Receives an owned reference, including on trailing-framing failure.
+ * \return Decoding status.
+ */
+static cardano_error_t
+pool_parameters_from_array(cardano_cbor_reader_t* reader, cardano_pool_params_t** output)
+{
+  int64_t         count  = 0;
+  cardano_error_t result = cardano_cbor_reader_read_start_array(reader, &count);
+  if (result != CARDANO_SUCCESS)
+  {
+    return result;
+  }
+  if (count != 9 && count != 10)
+  {
+    return CARDANO_ERROR_DECODING;
+  }
+  result = cardano_pool_params_from_cbor(reader, output);
+  return result == CARDANO_SUCCESS ? cardano_cbor_reader_read_end_array(reader) : result;
+}
+
+READ_OBJECT(read_pool_parameters, cardano_pool_params_t, pool_parameters_from_array)
 READ_OBJECT(read_balance_input, cardano_transaction_input_t, cardano_transaction_input_from_cbor)
 READ_OBJECT(read_balance_transaction, cardano_transaction_t, cardano_transaction_from_cbor)
 READ_OBJECT(read_output, cardano_transaction_output_t, cardano_transaction_output_from_cbor)
@@ -532,6 +556,56 @@ cleanup:
   return result;
 }
 
+/**
+ * \brief Decode an owned pool snapshot, including partial results on failure.
+ * \param reader Borrowed configuration reader.
+ * \param pools Receives a zero-initialized owned array.
+ * \param size Receives the array length; callers unref every entry and free the array.
+ * \return Decoding or allocation status.
+ */
+static cardano_error_t
+read_pool_state(cardano_cbor_reader_t* reader, cardano_pool_params_t*** pools, size_t* size)
+{
+  int64_t         count  = 0;
+  cardano_error_t result = cardano_cbor_reader_read_start_array(reader, &count);
+  if (result != CARDANO_SUCCESS)
+  {
+    return result;
+  }
+  if (count < 0 || (uint64_t)count > SIZE_MAX / sizeof(cardano_pool_params_t*))
+  {
+    return CARDANO_ERROR_DECODING;
+  }
+  if (count > 0)
+  {
+    *pools = calloc((size_t)count, sizeof(cardano_pool_params_t*));
+    if (*pools == NULL)
+    {
+      return CARDANO_ERROR_MEMORY_ALLOCATION_FAILED;
+    }
+  }
+  *size = (size_t)count;
+  for (size_t i = 0; result == CARDANO_SUCCESS && i < *size; ++i)
+  {
+    result = read_pool_parameters(reader, &(*pools)[i]);
+  }
+  return result == CARDANO_SUCCESS ? cardano_cbor_reader_read_end_array(reader) : result;
+}
+
+/**
+ * \brief Read the protocol version and release the retained version reference.
+ * \param parameters Borrowed protocol parameters.
+ * \return Major version, or zero when unspecified.
+ */
+static uint64_t
+protocol_major(cardano_protocol_parameters_t* parameters)
+{
+  cardano_protocol_version_t* version = cardano_protocol_parameters_get_protocol_version(parameters);
+  uint64_t                    major   = cardano_protocol_version_get_major(version);
+  cardano_protocol_version_unref(&version);
+  return major;
+}
+
 /* DEFINITIONS ***************************************************************/
 
 unsigned int
@@ -541,6 +615,8 @@ cometa_transaction_builder_build(cometa_runtime_t* selector_runtime, cometa_runt
   {
     return CARDANO_ERROR_POINTER_IS_NULL;
   }
+  cardano_pool_params_t** pools                    = NULL;
+  size_t                  pool_count               = 0U;
   *key_count                                       = 0U;
   *output                                          = NULL;
   *diagnostic                                      = NULL;
@@ -564,7 +640,7 @@ cometa_transaction_builder_build(cometa_runtime_t* selector_runtime, cometa_runt
   int64_t                        count    = 0;
   deferred_context_t*            contexts = NULL;
   cardano_network_id_t           network;
-  cardano_error_t                result = reader == NULL ? CARDANO_ERROR_MEMORY_ALLOCATION_FAILED : array(reader, 10);
+  cardano_error_t                result = reader == NULL ? CARDANO_ERROR_MEMORY_ALLOCATION_FAILED : array(reader, 11);
   if (result != CARDANO_SUCCESS)
   {
     goto cleanup;
@@ -580,6 +656,7 @@ cometa_transaction_builder_build(cometa_runtime_t* selector_runtime, cometa_runt
   TRY(cardano_cbor_reader_read_uint(reader, &slots.zero_time));
   TRY(cardano_cbor_reader_read_uint(reader, &slots.zero_slot));
   TRY(cardano_cbor_reader_read_uint(reader, &slots.slot_length));
+  TRY(read_pool_state(reader, &pools, &pool_count));
   TRY(cardano_cbor_reader_read_end_array(reader));
   TRY(complete(reader));
   if (slots.slot_length == 0U || padding > SIZE_MAX)
@@ -593,6 +670,7 @@ cometa_transaction_builder_build(cometa_runtime_t* selector_runtime, cometa_runt
     result = CARDANO_ERROR_MEMORY_ALLOCATION_FAILED;
     goto cleanup;
   }
+  TRY(cardano_tx_builder_set_pool_state(builder, pools, pool_count));
   TRY(cardano_address_get_network_id(change, &network));
   cardano_tx_builder_set_network_id(builder, network);
   cardano_tx_builder_set_change_address(builder, change);
@@ -658,7 +736,7 @@ cometa_transaction_builder_build(cometa_runtime_t* selector_runtime, cometa_runt
   TRY(cardano_cbor_reader_read_end_array(instructions));
   TRY(complete(instructions));
   TRY(cardano_tx_builder_build(builder, &transaction));
-  TRY(cardano_transaction_get_unique_signers(transaction, resolved, &unique_signers));
+  TRY(cardano_transaction_get_unique_signers_with_pool_state(transaction, resolved, protocol_major(parameters), pools, pool_count, &unique_signers));
   if ((uint64_t)cardano_blake2b_hash_set_get_length(unique_signers) > UINT64_MAX - padding)
   {
     result = CARDANO_ERROR_INTEGER_OVERFLOW;
@@ -692,6 +770,11 @@ cleanup:
   cardano_transaction_unref(&transaction);
   cardano_coin_selector_unref(&selector);
   cardano_tx_evaluator_unref(&evaluator);
+  for (size_t i = 0; i < pool_count; ++i)
+  {
+    cardano_pool_params_unref(&pools[i]);
+  }
+  free(pools);
   cardano_protocol_parameters_unref(&parameters);
   cardano_address_unref(&change);
   cardano_address_unref(&collateral_change);
@@ -832,6 +915,8 @@ cometa_transaction_balance(cometa_runtime_t* selector_runtime, cometa_runtime_t*
   {
     return CARDANO_ERROR_POINTER_IS_NULL;
   }
+  cardano_pool_params_t** pools                       = NULL;
+  size_t                  pool_count                  = 0U;
   *output                                             = NULL;
   *diagnostic                                         = NULL;
   *key_count                                          = 0U;
@@ -859,7 +944,7 @@ cometa_transaction_balance(cometa_runtime_t* selector_runtime, cometa_runtime_t*
   deferred_context_t*               contexts          = NULL;
   uint64_t                          fee = 0U, padding = 0U, ignored = 0U;
   int64_t                           count  = 0;
-  cardano_error_t                   result = reader == NULL ? CARDANO_ERROR_MEMORY_ALLOCATION_FAILED : array(reader, 10);
+  cardano_error_t                   result = reader == NULL ? CARDANO_ERROR_MEMORY_ALLOCATION_FAILED : array(reader, 11);
   if (result != CARDANO_SUCCESS)
   {
     goto cleanup;
@@ -876,6 +961,7 @@ cometa_transaction_balance(cometa_runtime_t* selector_runtime, cometa_runtime_t*
   {
     TRY(cardano_cbor_reader_read_uint(reader, &ignored));
   }
+  TRY(read_pool_state(reader, &pools, &pool_count));
   TRY(cardano_cbor_reader_read_end_array(reader));
   TRY(complete(reader));
   if (padding > SIZE_MAX)
@@ -939,7 +1025,7 @@ cometa_transaction_balance(cometa_runtime_t* selector_runtime, cometa_runtime_t*
   {
     TRY(cardano_transaction_body_set_fee(body, fee));
   }
-  TRY(cardano_balance_transaction(transaction, (size_t)padding, parameters, references, selected, input_map, available, selector, change, collateral, collateral_change != NULL ? collateral_change : change, evaluator, deferred));
+  TRY(cardano_balance_transaction_with_pool_state(transaction, (size_t)padding, parameters, references, selected, input_map, available, selector, change, collateral, collateral_change != NULL ? collateral_change : change, evaluator, deferred, pools, pool_count));
   TRY(cardano_utxo_list_new(&resolved));
   cardano_utxo_list_t* sources[] = { available, collateral, selected, references };
   for (size_t i = 0U; i < 4U; ++i)
@@ -959,7 +1045,7 @@ cometa_transaction_balance(cometa_runtime_t* selector_runtime, cometa_runtime_t*
       }
     }
   }
-  TRY(cardano_transaction_get_unique_signers(transaction, resolved, &signers));
+  TRY(cardano_transaction_get_unique_signers_with_pool_state(transaction, resolved, protocol_major(parameters), pools, pool_count, &signers));
   if (padding > UINT64_MAX - cardano_blake2b_hash_set_get_length(signers))
   {
     result = CARDANO_ERROR_INTEGER_OVERFLOW;
@@ -987,6 +1073,11 @@ cleanup:
   cardano_cbor_reader_unref(&payload);
   cardano_cbor_writer_unref(&writer);
   cardano_buffer_unref(&parameter_bytes);
+  for (size_t i = 0; i < pool_count; ++i)
+  {
+    cardano_pool_params_unref(&pools[i]);
+  }
+  free(pools);
   cardano_protocol_parameters_unref(&parameters);
   cardano_address_unref(&change);
   cardano_address_unref(&collateral_change);

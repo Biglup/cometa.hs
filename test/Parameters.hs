@@ -143,7 +143,7 @@ individualChanges full =
     U.empty {U.updatePerasTargetCommitteeSize = P.parameterPerasTargetCommitteeSize full},
     U.empty {U.updatePerasBootstrapRound = P.parameterPerasBootstrapRound full},
     U.empty {U.updatePerasQuorumThresholdSafetyMargin = P.parameterPerasQuorumThresholdSafetyMargin full},
-    U.empty {U.updateRefInputsCostPerMultiAssetPolicy = P.parameterRefInputsCostPerMultiAssetPolicy full},
+    U.empty {U.updateRefInputsCostPerMultiAssetByte = P.parameterRefInputsCostPerMultiAssetByte full},
     U.empty {U.updateRefInputsCostPerDatumByte = P.parameterRefInputsCostPerDatumByte full}
   ]
 
@@ -186,7 +186,7 @@ checkAvailability = do
             P.parameterPerasTargetCommitteeSize = Nothing,
             P.parameterPerasBootstrapRound = Nothing,
             P.parameterPerasQuorumThresholdSafetyMargin = Nothing,
-            P.parameterRefInputsCostPerMultiAssetPolicy = Nothing,
+            P.parameterRefInputsCostPerMultiAssetByte = Nothing,
             P.parameterRefInputsCostPerDatumByte = Nothing
           }
       change = U.fromParameters conway

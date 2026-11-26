@@ -93,6 +93,6 @@ parameters = do
         P.parameterPerasTargetCommitteeSize = Nothing,
         P.parameterPerasBootstrapRound = Nothing,
         P.parameterPerasQuorumThresholdSafetyMargin = Nothing,
-        P.parameterRefInputsCostPerMultiAssetPolicy = Nothing,
+        P.parameterRefInputsCostPerMultiAssetByte = Nothing,
         P.parameterRefInputsCostPerDatumByte = Nothing
       }

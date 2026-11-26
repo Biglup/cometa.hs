@@ -1,6 +1,6 @@
 cabal-version: 3.0
 name: cometa
-version: 0.1.0.0
+version: 0.2.0.0
 synopsis: Idiomatic Haskell bindings to cardano-c
 description:
   Haskell-owned Cardano values with transaction construction, signing, script
@@ -104,7 +104,7 @@ library core
     if os(linux) || os(osx)
       extra-libraries: m, pthread
   else
-    build-depends: cardano-c-clib ==0.1.0.0
+    build-depends: cardano-c-clib ==0.1.1.0
   c-sources:
     cbits/cometa_provider.c
     cbits/cometa_cbor.c

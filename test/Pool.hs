@@ -53,7 +53,8 @@ tests :: TestTree
 tests =
   testGroup
     "Pools"
-    [ testCase "public fields reconstruct pinned native registration variants" checkPinned,
+    [ testCase "owner witness comparison ignores only BLS changes" checkOwnerWitnesses,
+      testCase "public fields reconstruct pinned native registration variants" checkPinned,
       testCase "all relay alternatives and optional IP/port combinations" checkRelays,
       testCase "byte, UTF-8, hash, URL and DNS boundaries" checkValidation,
       testCase "malformed CBOR, duplicate owners and trailing data" checkInvalid,
@@ -246,3 +247,14 @@ nativeBls = "825860000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1
 
 foreign import ccall safe "cometa_test_pool_agreement"
   cAgreement :: CUInt -> Ptr Word8 -> CSize -> IO CInt
+
+checkOwnerWitnesses :: IO ()
+checkOwnerWitnesses = do
+  latest <- expectRight sample
+  bls <- expectRight sampleBls
+  equivalentMargin <- expectRight (Unit.mkUnitInterval 2 10)
+  Pool.requiresOwnerWitnesses latest Nothing @?= True
+  Pool.requiresOwnerWitnesses latest (Just latest) @?= False
+  Pool.requiresOwnerWitnesses (latest {Pool.blsKey = Just bls}) (Just latest) @?= False
+  Pool.requiresOwnerWitnesses (latest {Pool.margin = equivalentMargin}) (Just latest) @?= False
+  Pool.requiresOwnerWitnesses (latest {Pool.cost = Pool.cost latest + 1}) (Just latest) @?= True

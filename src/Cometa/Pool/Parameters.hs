@@ -22,6 +22,7 @@ module Cometa.Pool.Parameters
     VrfKeyHash,
     vrfKeyHashFromBytes,
     vrfKeyHashBytes,
+    requiresOwnerWitnesses,
     encodeCbor,
     encodeCborWith,
     decodeCbor,
@@ -59,3 +60,12 @@ encodeCborWith requested = Internal.encode (Internal.parametersValueEncodingWith
 -- A null BLS placeholder is accepted and omitted on re-encoding.
 decodeCbor :: ByteString -> Either Error PoolParameters
 decodeCbor = Internal.decodeComplete Internal.parametersValueDecoder
+
+-- | Whether a registration needs owner witnesses from protocol version 12.
+-- Supply the latest registered parameters, preferring pending over active ones.
+-- Unknown pools require owners. BLS-only changes, owner ordering and equivalent
+-- margins do not affect this comparison. The operator remains required separately.
+requiresOwnerWitnesses :: PoolParameters -> Maybe PoolParameters -> Bool
+requiresOwnerWitnesses _ Nothing = True
+requiresOwnerWitnesses proposed (Just latest) =
+  proposed {blsKey = Nothing} /= latest {blsKey = Nothing}

@@ -38,6 +38,7 @@ import qualified Cometa.Internal.TransactionCbor as Cbor
 import qualified Cometa.Protocol.CostModels as Models
 import Cometa.Protocol.Parameters (Parameters)
 import qualified Cometa.Protocol.Parameters as Parameters
+import qualified Cometa.Protocol.Version as Version
 import qualified Cometa.Script as Script
 import qualified Cometa.Script.Plutus as Plutus
 import qualified Cometa.SubTransaction as Sub
@@ -65,7 +66,8 @@ import Data.Word (Word8)
 -- | Select only languages used by required outer scripts. Nested scripts may
 -- provide a needed outer script, but nested purposes do not add outer language
 -- views. Relevant reference scripts come only from spending/reference inputs of
--- the outer body and nested bodies, never arbitrary wallet/collateral snapshots.
+-- the outer body and nested bodies. From protocol 12, newly created outputs
+-- and collateral return also provide scripts; arbitrary wallet snapshots do not.
 -- Missing/conflicting resolutions, scripts and cost models fail explicitly.
 usedCostModels :: Parameters -> [Utxo] -> Transaction -> IO (Either Error Models.CostModels)
 usedCostModels parameters resolved transaction = runExceptT $ do
@@ -82,7 +84,11 @@ usedCostModels parameters resolved transaction = runExceptT $ do
   spending <- except (traverse (resolve table) (Fields.fieldInputs fields))
   policies <- except (mintPolicies (Body.toCbor (Tx.body transaction)))
   let needed = Set.fromList (mapMaybe (paymentScript . Utxo.output) spending <> policies <> fieldScripts fields)
-      provided = witnessScripts <> mapMaybe (Output.referenceScript . Utxo.output) sources
+      created =
+        if Version.major (Parameters.parameterProtocolVersion parameters) >= 12
+          then concatMap Fields.fieldOutputs allFields <> maybe [] pure (Body.bodyCollateralReturn body)
+          else []
+      provided = witnessScripts <> mapMaybe (Output.referenceScript . Utxo.output) sources <> mapMaybe Output.referenceScript created
   hashed <- traverse hashScript provided
   languages <- except (traverse (languageFor (Map.fromList hashed)) (Set.toList needed))
   models <- except (traverse lookupModel (Set.toList (Set.fromList (catMaybes languages))))
