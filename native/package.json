@@ -1,6 +1,6 @@
 {
   "name": "cardano-c-clib",
-  "version": "0.1.0.0",
+  "version": "0.1.1.0",
   "source_roots": ["include", "src", "external"],
   "source_extensions": [".c", ".h", ".inl"],
   "notice_prefixes": ["LICENSE", "COPYING", "NOTICE", "VERSION", "README"],

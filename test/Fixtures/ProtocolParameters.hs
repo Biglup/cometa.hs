@@ -100,6 +100,6 @@ parameters = do
         P.parameterPerasTargetCommitteeSize = Just 152,
         P.parameterPerasBootstrapRound = Just (Just maxBound),
         P.parameterPerasQuorumThresholdSafetyMargin = Just u,
-        P.parameterRefInputsCostPerMultiAssetPolicy = Just 155,
+        P.parameterRefInputsCostPerMultiAssetByte = Just 155,
         P.parameterRefInputsCostPerDatumByte = Just 156
       }

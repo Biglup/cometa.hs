@@ -38,6 +38,8 @@ import qualified Cometa.Metadata as Metadata
 import qualified Cometa.NetworkId as Network
 import qualified Cometa.PlutusData as Data
 import qualified Cometa.PolicyId as Policy
+import qualified Cometa.Pool.Parameters as Pool
+import qualified Cometa.Pool.Relay as Relay
 import qualified Cometa.Protocol.CostModels as Models
 import qualified Cometa.Protocol.ExUnitPrices as Prices
 import Cometa.Protocol.ExUnits (ExUnits (..))
@@ -49,6 +51,7 @@ import qualified Cometa.Script.Native as Native
 import qualified Cometa.Script.Plutus as Plutus
 import qualified Cometa.SlotConfig as Slot
 import qualified Cometa.Transaction as Tx
+import qualified Cometa.Transaction.Balancing as Balancing
 import qualified Cometa.Transaction.Body as Body
 import qualified Cometa.Transaction.Builder as Builder
 import qualified Cometa.Transaction.Datum as Datum
@@ -60,6 +63,7 @@ import qualified Cometa.Transaction.Redeemer as Redeemer
 import qualified Cometa.Transaction.Utxo as Utxo
 import qualified Cometa.Transaction.Witnesses as Witnesses
 import qualified Cometa.TransactionId as Id
+import qualified Cometa.UnitInterval as Unit
 import qualified Cometa.Value as Value
 import Control.Concurrent (forkFinally, killThread, newEmptyMVar, putMVar, takeMVar)
 import Control.Exception (SomeException, displayException, finally, throwIO, try)
@@ -69,6 +73,7 @@ import Data.Either (isLeft)
 import Data.IORef (modifyIORef', newIORef, readIORef)
 import Data.List (isInfixOf)
 import qualified Data.Map.Strict as Map
+import qualified Data.Set as Set
 import qualified Fixtures.ProtocolParameters as Fixture
 import Hedgehog (Property, forAll, property, (===))
 import qualified Hedgehog.Gen as Gen
@@ -85,7 +90,8 @@ tests :: TestTree
 tests =
   testGroup
     "Transaction building"
-    [ testCase "payment order, multiplicity and independent balance oracle" payment,
+    [ testCase "pool-state snapshots refine witness fees and reject duplicates" poolWitnesses,
+      testCase "payment order, multiplicity and independent balance oracle" payment,
       testCase "many mandatory inputs sharing one key keep one witness reserve" sharedKey,
       testCase "injected selection crosses actual balancing callbacks repeatedly" callbacks,
       testCase "native script minting, metadata, certificates and withdrawal" fields,
@@ -405,3 +411,44 @@ uniqueDatums = do
   -- Conflicting declarations for one input still fail before deduplication.
   Builder.build config (Plan.spendWith first Nothing (Just imported) <> Plan.spendWith first Nothing (Just canonical) <> requirements)
     >>= (@?= Left (InvalidTransactionPlan "Conflicting requirements for one spending input"))
+
+poolWitnesses :: IO ()
+poolWitnesses = do
+  (base, output, _) <- fixture
+  operator <- must (Credential.keyHashFromBytes (B.replicate 28 1))
+  owner <- must (Credential.keyHashFromBytes (B.replicate 28 2))
+  vrf <- must (Pool.vrfKeyHashFromBytes (B.replicate 32 3))
+  margin <- must (Unit.mkUnitInterval 1 20)
+  let latest =
+        Pool.PoolParameters
+          operator
+          vrf
+          Nothing
+          0
+          0
+          margin
+          (Reward.fromCredential Network.testnet (Credential.KeyCredential owner))
+          (Set.singleton owner)
+          ([] :: [Relay.Relay])
+          Nothing
+      params = (Builder.parameters base) {P.parameterProtocolVersion = Version.ProtocolVersion 12 0, P.parameterMinFeeA = 44, P.parameterMinFeeB = 155381, P.parameterPoolDeposit = 0}
+      config = base {Builder.parameters = params, Builder.minimumFee = 0}
+      plan = Plan.payTo output <> Plan.certificate (Certificate.PoolRegistration latest)
+  conservative <- Builder.build config plan >>= must
+  known <- Builder.build (config {Builder.poolState = [latest]}) plan >>= must
+  assertBool "known unchanged registration omits one owner witness" (Body.fee (Body.toBody (Tx.body known)) < Body.fee (Body.toBody (Tx.body conservative)))
+  let originalBody = Body.toBody (Tx.body conservative)
+      draftFields = (Body.bodyFields originalBody) {Fields.fieldOutputs = [output]}
+  draftBody <- must (Body.fromBody (originalBody {Body.bodyFields = draftFields, Body.bodyFee = 0}))
+  let draft = Tx.fromBody draftBody
+  conservativeBalance <- Balancing.balance config [] draft >>= must
+  rebalanced <- Balancing.balance (config {Builder.poolState = [latest]}) [] draft >>= must
+  assertBool
+    "standalone balancing uses the supplied pool state"
+    (Body.fee (Body.toBody (Tx.body rebalanced)) < Body.fee (Body.toBody (Tx.body conservativeBalance)))
+  duplicate <- Builder.build (config {Builder.poolState = [latest, latest]}) plan
+  assertBool "duplicate operators are rejected" (isLeft duplicate)
+  let old = config {Builder.parameters = params {P.parameterProtocolVersion = Version.ProtocolVersion 11 0}}
+  before <- Builder.build old plan >>= must
+  supplied <- Builder.build (old {Builder.poolState = [latest]}) plan >>= must
+  Body.fee (Body.toBody (Tx.body supplied)) @?= Body.fee (Body.toBody (Tx.body before))

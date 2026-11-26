@@ -177,8 +177,8 @@ data Update = Update
     updatePerasBootstrapRound :: !(Maybe (Maybe Word32)),
     -- | Peras quorum safety margin fraction.
     updatePerasQuorumThresholdSafetyMargin :: !(Maybe UnitInterval),
-    -- | Reference input charge in lovelace per multi-asset policy.
-    updateRefInputsCostPerMultiAssetPolicy :: !(Maybe Word64),
+    -- | Reference input charge in lovelace per multi-asset byte.
+    updateRefInputsCostPerMultiAssetByte :: !(Maybe Word64),
     -- | Reference input charge in lovelace per datum byte.
     updateRefInputsCostPerDatumByte :: !(Maybe Word64)
   }
@@ -254,7 +254,7 @@ empty =
       updatePerasTargetCommitteeSize = Nothing,
       updatePerasBootstrapRound = Nothing,
       updatePerasQuorumThresholdSafetyMargin = Nothing,
-      updateRefInputsCostPerMultiAssetPolicy = Nothing,
+      updateRefInputsCostPerMultiAssetByte = Nothing,
       updateRefInputsCostPerDatumByte = Nothing
     }
 
@@ -316,7 +316,7 @@ apply change current =
       parameterPerasTargetCommitteeSize = updatePerasTargetCommitteeSize change <|> parameterPerasTargetCommitteeSize current,
       parameterPerasBootstrapRound = updatePerasBootstrapRound change <|> parameterPerasBootstrapRound current,
       parameterPerasQuorumThresholdSafetyMargin = updatePerasQuorumThresholdSafetyMargin change <|> parameterPerasQuorumThresholdSafetyMargin current,
-      parameterRefInputsCostPerMultiAssetPolicy = updateRefInputsCostPerMultiAssetPolicy change <|> parameterRefInputsCostPerMultiAssetPolicy current,
+      parameterRefInputsCostPerMultiAssetByte = updateRefInputsCostPerMultiAssetByte change <|> parameterRefInputsCostPerMultiAssetByte current,
       parameterRefInputsCostPerDatumByte = updateRefInputsCostPerDatumByte change <|> parameterRefInputsCostPerDatumByte current
     }
 
@@ -379,7 +379,7 @@ fromParameters current =
       updatePerasTargetCommitteeSize = parameterPerasTargetCommitteeSize current,
       updatePerasBootstrapRound = parameterPerasBootstrapRound current,
       updatePerasQuorumThresholdSafetyMargin = parameterPerasQuorumThresholdSafetyMargin current,
-      updateRefInputsCostPerMultiAssetPolicy = parameterRefInputsCostPerMultiAssetPolicy current,
+      updateRefInputsCostPerMultiAssetByte = parameterRefInputsCostPerMultiAssetByte current,
       updateRefInputsCostPerDatumByte = parameterRefInputsCostPerDatumByte current
     }
 
@@ -447,7 +447,7 @@ encodeCbor change = Write.toStrictByteString (Encode.encodeMapLen (fromIntegral 
           field 52 Encode.encodeWord16 (updatePerasTargetCommitteeSize change),
           field 53 (encodeNullable Encode.encodeWord32) (updatePerasBootstrapRound change),
           field 54 Values.encodeUnitInterval (updatePerasQuorumThresholdSafetyMargin change),
-          field 55 Encode.encodeWord64 (updateRefInputsCostPerMultiAssetPolicy change),
+          field 55 Encode.encodeWord64 (updateRefInputsCostPerMultiAssetByte change),
           field 56 Encode.encodeWord64 (updateRefInputsCostPerDatumByte change)
         ]
 
@@ -572,7 +572,7 @@ decodeUpdate = do
             52 -> (\value -> change {updatePerasTargetCommitteeSize = Just value}) <$> Decode.decodeWord16
             53 -> (\value -> change {updatePerasBootstrapRound = Just value}) <$> decodeNullable Decode.decodeWord32
             54 -> (\value -> change {updatePerasQuorumThresholdSafetyMargin = Just value}) <$> Values.decodeUnitInterval
-            55 -> (\value -> change {updateRefInputsCostPerMultiAssetPolicy = Just value}) <$> Decode.decodeWord64
+            55 -> (\value -> change {updateRefInputsCostPerMultiAssetByte = Just value}) <$> Decode.decodeWord64
             56 -> (\value -> change {updateRefInputsCostPerDatumByte = Just value}) <$> Decode.decodeWord64
             _ -> fail "Unknown protocol parameter key"
           go (subtract 1 <$> count) (Set.insert key seen) next

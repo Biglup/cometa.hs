@@ -90,7 +90,7 @@ decodeSnapshot bytes = do
     <*> pure (Update.updatePerasTargetCommitteeSize change)
     <*> pure (Update.updatePerasBootstrapRound change)
     <*> pure (Update.updatePerasQuorumThresholdSafetyMargin change)
-    <*> pure (Update.updateRefInputsCostPerMultiAssetPolicy change)
+    <*> pure (Update.updateRefInputsCostPerMultiAssetByte change)
     <*> pure (Update.updateRefInputsCostPerDatumByte change)
   where
     required = maybe (Left (InvalidParameterSnapshot "Missing required protocol snapshot field")) Right

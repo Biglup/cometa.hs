@@ -163,8 +163,8 @@ data Parameters = Parameters
     parameterPerasBootstrapRound :: !(Maybe (Maybe Word32)),
     -- | Peras quorum safety margin fraction.
     parameterPerasQuorumThresholdSafetyMargin :: !(Maybe UnitInterval),
-    -- | Reference input charge in lovelace per multi-asset policy.
-    parameterRefInputsCostPerMultiAssetPolicy :: !(Maybe Word64),
+    -- | Reference input charge in lovelace per multi-asset byte.
+    parameterRefInputsCostPerMultiAssetByte :: !(Maybe Word64),
     -- | Reference input charge in lovelace per datum byte.
     parameterRefInputsCostPerDatumByte :: !(Maybe Word64)
   }

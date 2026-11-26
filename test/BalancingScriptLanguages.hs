@@ -242,6 +242,17 @@ sources = do
   check fixture [Utxo.utxo spend spentWithScript] spendTx [1]
   -- A script in an unrelated resolved snapshot cannot satisfy a required hash.
   Languages.usedCostModels (parameters fixture) [spent, ref] spendTx >>= (@?= Left (InvalidBuildingRequest "A required body script is missing"))
+  -- CIP-172 adds created outputs only from protocol 12.
+  createdTx <- transaction (Fields.fields [spend] [supplied]) [] []
+  let dijkstra = fixture {parameters = (parameters fixture) {Parameters.parameterProtocolVersion = Version.ProtocolVersion 12 0}}
+      earlier = (parameters fixture) {Parameters.parameterProtocolVersion = Version.ProtocolVersion 11 0}
+  check dijkstra [spent] createdTx [1]
+  Languages.usedCostModels earlier [spent] createdTx >>= (@?= Left (InvalidBuildingRequest "A required body script is missing"))
+  collateralBody <- must (Body.fromBody ((Body.body [spend] [] 0) {Body.bodyCollateralReturn = Just supplied}))
+  check dijkstra [spent] (Tx.fromBody collateralBody) [1]
+  createdSubBody <- must (SubBody.fromBody (SubBody.body [] [supplied]))
+  createdSubTx <- transaction (Fields.fields [spend] []) [] [Sub.fromBody createdSubBody]
+  check dijkstra [spent] createdSubTx [1]
   subBody <- must (SubBody.fromBody (SubBody.body [] []))
   subWitnesses <- must (Witnesses.mkWitnesses [] [] [wanted fixture] [] [])
   let nested = Sub.assemble subBody (Witnesses.fromWitnesses subWitnesses) Nothing

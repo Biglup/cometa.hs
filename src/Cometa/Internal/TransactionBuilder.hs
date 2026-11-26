@@ -54,6 +54,7 @@ import qualified Cometa.Internal.TransactionCbor as C
 import qualified Cometa.Internal.TransactionPlan as Plan
 import qualified Cometa.Internal.TransactionValue as ValueCbor
 import qualified Cometa.PlutusData as Data
+import qualified Cometa.Pool.Parameters as Pool
 import qualified Cometa.Protocol.CostModels as Models
 import qualified Cometa.Protocol.ExUnitPrices as Prices
 import qualified Cometa.Protocol.ExUnits as Ex
@@ -119,7 +120,11 @@ data Config = Config
     -- | Lower bound on the fee in lovelace; zero permits ordinary calculation.
     minimumFee :: Word64,
     -- | Additional key witnesses included in fee size estimation.
-    extraSigners :: Word64
+    extraSigners :: Word64,
+    -- | Latest registered pools for owner-witness estimation from protocol 12.
+    -- Prefer pending parameters over active ones and include each pool once.
+    -- Unknown pools retain conservative estimates. Pool deposits are unaffected.
+    poolState :: [Pool.PoolParameters]
   }
 
 -- DEFINITIONS ----------------------------------------------------------------
@@ -127,7 +132,7 @@ data Config = Config
 -- | No eligible wallet/collateral outputs, no injected callbacks, and zero fee
 -- floor or additional witnesses. Supply wallet snapshots before building.
 defaultConfig :: Parameters -> SlotConfig -> Address -> Config
-defaultConfig params slots change = Config params slots change [] [] Nothing Nothing Nothing 0 0
+defaultConfig params slots change = Config params slots change [] [] Nothing Nothing Nothing 0 0 []
 
 -- | Validate requirements, run balancing and copy the completed unsigned
 -- transaction. Expected failures return once here, including original callback
@@ -182,6 +187,9 @@ buildNative config plan =
 
 validate :: Config -> Plan -> Either Error ()
 validate config plan = do
+  let poolIds = map Pool.operator (poolState config)
+  unless (length poolIds == Set.size (Set.fromList poolIds)) $
+    Left (InvalidBuildingRequest "Pool state contains duplicate pool operators")
   Plan.validatePlan plan
   Plan.validateTopLevel plan
   mapM_
@@ -343,7 +351,7 @@ validateBuilt config plan keyCount transaction = do
 encodeConfig :: Plan -> Config -> ByteString
 encodeConfig plan config =
   C.encode
-    ( E.encodeListLen 10
+    ( E.encodeListLen 11
         <> mconcat
           [ E.encodeBytes (Parameters.encodeSnapshot (parameters config)),
             E.encodeBytes (Address.toBytes (changeAddress config)),
@@ -354,7 +362,9 @@ encodeConfig plan config =
             E.encodeWord64 (extraSigners config),
             E.encodeWord64 (Slot.zeroTime (slotConfig config)),
             E.encodeWord64 (Slot.zeroSlot (slotConfig config)),
-            E.encodeWord64 (Slot.slotLength (slotConfig config))
+            E.encodeWord64 (Slot.slotLength (slotConfig config)),
+            E.encodeListLen (fromIntegral (length (poolState config)))
+              <> foldMap (E.encodeBytes . Pool.encodeCbor) (poolState config)
           ]
     )
   where

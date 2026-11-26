@@ -1,5 +1,14 @@
 # PBKDF2-HMAC-SHA512 purity audit
 
+Rechecked 2026-11-26 for the cardano-c v2.0.0-rc.7 update. The reachable BIP39,
+PBKDF2, SHA256/SHA512, HMAC, bounded-copy, endian, error and wipe sources are
+unchanged from the previously bundled native revision
+`c5edc7c8f16b3980b6e97ef7fda80fef94adf980`. The native package manifest and its
+libsodium feature flags are unchanged. The existing purity boundaries and their
+restrictions therefore remain applicable; the public and runtime suites pass
+with GHC 9.6.7 on Linux x86-64.
+
+
 Reviewed 2026-11-05 against native revision
 `7a65f2c7309bbba9e86f6aa73214b003fab88aee` and the existing pinned static native
 build. This is a separate, narrow exception alongside BIP39; it does not authorize

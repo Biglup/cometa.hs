@@ -21,6 +21,14 @@ return `IO (Either Error a)`. Private keys stay inside explicit resource scopes.
 ## Build
 
 Version 0.1.0.0 is available as a [Hackage candidate](https://hackage.haskell.org/package/cometa-0.1.0.0/candidate).
+
+The development version is 0.2.0.0 and uses cardano-c v2.0.0-rc.7 through
+cardano-c-clib 0.1.1.0. Protocol parameter 55 now uses
+`parameterRefInputsCostPerMultiAssetByte` and `updateRefInputsCostPerMultiAssetByte`.
+Use `Builder.defaultConfig` and set `Builder.poolState` to the latest registered
+pool parameters when estimating protocol-12 owner witnesses; prefer pending
+parameters over active ones. Unknown pools retain conservative estimates.
+
 It is not yet in the main package index. To build this checkout, use GHC 9.6.7
 or 9.10.3, Cabal and a C toolchain. Prepare the bundled native sources from the
 revision in [`native/cardano-c.ref`](native/cardano-c.ref):
